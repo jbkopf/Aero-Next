@@ -24,4 +24,8 @@
     <ProjectReference Include="..\..\src\AeroNext.Core\AeroNext.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Content Include="..\..\data\**\*.json" LinkBase="data" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>
