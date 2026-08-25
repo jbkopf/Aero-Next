@@ -45,6 +45,17 @@ against real-world intuition (e.g. NYC–London ≫ Gander–Dakar).
 Tests: symmetry/asymmetry as designed, monotonic decrease with distance,
 stable under reordering city list (determinism rule #3).
 
+**Open question carried to M4:** inverse-square distance decay makes the
+*single biggest* markets short-haul regional pairs (e.g. CDG–LHR, GIG–GRU
+outrank JFK–LHR outright), which cuts against "the largest demand pools are
+intercontinental" in the map design pillars. Decision: don't fake this with
+a region-crossing bonus now — the pillar is being read as a claim about
+*aggregate, hub-routed* demand, not any single O-D pair. M4 must check that
+an intercontinental hub's total captured connecting traffic across many
+spokes exceeds what a best-effort regional-only network can reach. If that
+check fails, revisit this model's tuning then, with evidence instead of a
+guess now.
+
 ---
 
 ## M3 — Single airline, nonstop routes
@@ -72,6 +83,11 @@ gravity demand, not from a hardcoded hub multiplier.
 **This is a go/no-go gate.** If hub-and-spoke doesn't emerge here, the
 demand/itinerary model needs rework before any milestone below is worth
 building on top of it.
+
+**Also settles the M2 open question:** confirm an intercontinental hub's
+total captured connecting traffic across its spokes exceeds a best-effort
+regional-only network's demand. If it doesn't, the gravity model's distance
+decay needs retuning (see M2) before this gate can be called passed.
 
 ---
 
