@@ -61,17 +61,34 @@ check fails, revisit this model's tuning then, with evidence instead of a
 guess now.
 
 Done. `GreatCircle` + `GravityDemandModel` in `AeroNext.Core.World`, backed
-by 24 tests. The open question above is carried forward, not resolved here.
+by 9 tests. The open question above is carried forward, not resolved here.
+(Scale constant was later revised in M3 for an unrelated reason — see M3 —
+the relative short-haul-dominance question this section describes is
+unaffected.)
 
 ---
 
-## M3 — Single airline, nonstop routes
+## M3 — Single airline, nonstop routes ✅
 
 One airline, a fleet, and a set of nonstop routes with frequency. Assign
 nonstop demand to capacity, compute load factor.
 
 **Done when:** a scripted single-airline run over a few quarters prints
 load factors per route.
+
+Done, with a scope trim: this milestone prints one quarter's load factors,
+not several. Nothing in the model varies quarter-to-quarter yet — that
+starts at M5 (turn loop) and M12 (historical events) — so a repeating loop
+right now would just print identical numbers N times. Revisit "over a few
+quarters" once there's something to actually change between them.
+
+**Also required a mid-milestone fix to M2:** the gravity model's original
+scale constant (5.0e8) made demand numbers uniformly dwarf any realistic
+seats-per-quarter, so every route was capacity-constrained at 100% load
+factor regardless of frequency — the demand-vs-capacity assignment logic
+this milestone exists to demonstrate was never actually exercised. Rescaled
+to 7.5e6, which is a pure units/order-of-magnitude fix, not a change to the
+relative-ordering question already deferred to M4.
 
 ---
 

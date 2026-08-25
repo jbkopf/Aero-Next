@@ -7,8 +7,10 @@ namespace AeroNext.Core.World;
 /// off with the square of distance.
 ///
 /// Scale and exponent are placeholders tuned by inspection against known
-/// market sizes (e.g. JFK-LHR should dwarf a chokepoint pair like YQX-TER).
-/// Expect to retune once M4 evaluates whether hub-and-spoke emerges.
+/// market sizes (e.g. JFK-LHR should dwarf a chokepoint pair like YQX-TER)
+/// and, as of M3, against plausible seats-per-quarter for a single airline's
+/// route so load factor isn't trivially pinned at 100% everywhere. Expect to
+/// retune again once M4 evaluates whether hub-and-spoke emerges.
 ///
 /// Uses double internally rather than integer math — this is population
 /// modeling, not money, so the determinism rule against float/double
@@ -17,7 +19,7 @@ namespace AeroNext.Core.World;
 /// </summary>
 public sealed class GravityDemandModel
 {
-    private const double DefaultScale = 5.0e8;
+    private const double DefaultScale = 7.5e6;
     private const double DefaultExponent = 2.0;
     private const double MinDistanceKm = 100.0;
 
