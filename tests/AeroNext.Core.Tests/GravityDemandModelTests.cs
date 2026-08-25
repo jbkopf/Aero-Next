@@ -8,6 +8,9 @@ public class GravityDemandModelTests
     private static City MakeCity(string id, double lat, double lon, int weight, bool isGateway = false, int? gateCapacity = null) =>
         new(id, id.ToUpperInvariant(), Region.Asia, lat, lon, weight, isGateway, gateCapacity);
 
+    private static City MakeCity(string id, double lat, double lon, int weight, Region region) =>
+        new(id, id.ToUpperInvariant(), region, lat, lon, weight, false, null);
+
     [Fact]
     public void ForPair_IsSymmetric()
     {
@@ -47,6 +50,33 @@ public class GravityDemandModelTests
         var bigDemand = model.ForPair(origin, bigDest).PassengersPerQuarter;
 
         Assert.True(bigDemand > smallDemand);
+    }
+
+    [Fact]
+    public void ForPair_AppliesCrossRegionMultiplier_OnlyAcrossRegionBoundary()
+    {
+        var model = new GravityDemandModel(crossRegionMultiplier: 6.0);
+        var a1 = MakeCity("a1", 0, 0, 50, Region.NorthAmerica);
+        var a2 = MakeCity("a2", 1, 1, 50, Region.NorthAmerica); // same region as a1
+        var b = MakeCity("b", 1, 1, 50, Region.Europe); // same distance/weight as a2, different region
+
+        var withinRegion = model.ForPair(a1, a2).PassengersPerQuarter;
+        var crossRegion = model.ForPair(a1, b).PassengersPerQuarter;
+
+        // Allow ±1 for independent rounding of each result.
+        Assert.InRange(crossRegion, withinRegion * 6 - 1, withinRegion * 6 + 1);
+    }
+
+    [Fact]
+    public void ForPair_CrossRegionMultiplier_DoesNotAffectSameRegionPairs()
+    {
+        var a = MakeCity("a", 0, 0, 50, Region.NorthAmerica);
+        var b = MakeCity("b", 10, 10, 50, Region.NorthAmerica);
+
+        var low = new GravityDemandModel(crossRegionMultiplier: 1.0).ForPair(a, b).PassengersPerQuarter;
+        var high = new GravityDemandModel(crossRegionMultiplier: 20.0).ForPair(a, b).PassengersPerQuarter;
+
+        Assert.Equal(low, high);
     }
 
     [Fact]

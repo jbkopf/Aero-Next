@@ -4,13 +4,24 @@ namespace AeroNext.Core.World;
 /// Base O&amp;D demand between city pairs: how many people want to travel A-B
 /// this quarter, before any airline, route, or itinerary exists. Standard
 /// gravity formula: demand scales with the product of city weights and falls
-/// off with the square of distance.
+/// off with the square of distance, then a flat multiplier applies to any
+/// pair that crosses a region boundary.
 ///
-/// Scale and exponent are placeholders tuned by inspection against known
-/// market sizes (e.g. JFK-LHR should dwarf a chokepoint pair like YQX-TER)
-/// and, as of M3, against plausible seats-per-quarter for a single airline's
-/// route so load factor isn't trivially pinned at 100% everywhere. Expect to
-/// retune again once M4 evaluates whether hub-and-spoke emerges.
+/// The cross-region multiplier is an authored game-balance rule, not a
+/// hidden hub bonus — it applies identically to every intercontinental
+/// pair whether or not any airline actually connects it. It exists because
+/// M4 measured, with a same-size route budget, that no distance-decay
+/// exponent in a physically sensible range (tested 1.0-2.0) lets an
+/// intercontinental network out-earn a regional-only one; the gap narrowed
+/// but never flipped. That's the map design pillar "a home region cannot
+/// fund a win" failing to emerge from pure population/distance gravity, so
+/// it's authored explicitly instead. See docs/SIM_CORE_ROADMAP.md M4.
+///
+/// Scale, exponent, and the multiplier are placeholders tuned by inspection
+/// against known market sizes (e.g. JFK-LHR should dwarf a chokepoint pair
+/// like YQX-TER) and, as of M3, against plausible seats-per-quarter for a
+/// single airline's route so load factor isn't trivially pinned at 100%
+/// everywhere.
 ///
 /// Uses double internally rather than integer math — this is population
 /// modeling, not money, so the determinism rule against float/double
@@ -21,21 +32,33 @@ public sealed class GravityDemandModel
 {
     private const double DefaultScale = 7.5e6;
     private const double DefaultExponent = 2.0;
+    private const double DefaultCrossRegionMultiplier = 6.0;
     private const double MinDistanceKm = 100.0;
 
     private readonly double _scale;
     private readonly double _exponent;
+    private readonly double _crossRegionMultiplier;
 
-    public GravityDemandModel(double scale = DefaultScale, double exponent = DefaultExponent)
+    public GravityDemandModel(
+        double scale = DefaultScale,
+        double exponent = DefaultExponent,
+        double crossRegionMultiplier = DefaultCrossRegionMultiplier)
     {
         _scale = scale;
         _exponent = exponent;
+        _crossRegionMultiplier = crossRegionMultiplier;
     }
 
     public PairDemand ForPair(City a, City b)
     {
         var distanceKm = Math.Max(MinDistanceKm, GreatCircle.DistanceKm(a, b));
         var raw = _scale * (a.DemandWeight * (double)b.DemandWeight) / Math.Pow(distanceKm, _exponent);
+
+        if (a.Region != b.Region)
+        {
+            raw *= _crossRegionMultiplier;
+        }
+
         var passengers = (long)Math.Round(raw, MidpointRounding.AwayFromZero);
 
         return new PairDemand(a, b, distanceKm, passengers);

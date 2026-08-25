@@ -92,7 +92,7 @@ relative-ordering question already deferred to M4.
 
 ---
 
-## M4 — Connecting itineraries (the key question)
+## M4 — Connecting itineraries (the key question) ✅ (conditional)
 
 Passengers may route through a player's hub across two legs when no nonstop
 exists or the connection is competitive. This is the milestone that answers
@@ -112,6 +112,46 @@ building on top of it.
 total captured connecting traffic across its spokes exceeds a best-effort
 regional-only network's demand. If it doesn't, the gravity model's distance
 decay needs retuning (see M2) before this gate can be called passed.
+
+**Result: mechanism passed cleanly; the economics needed an explicit fix.**
+
+`NetworkPlanner` in `AeroNext.Core.Airlines` builds nonstop itineraries where
+a direct route exists and one-stop itineraries through the shortest-detour
+hub otherwise, with nonstop demand claiming its own leg's capacity before
+one-stop connections get whatever's left. Tested with a same-size (5-route,
+same-aircraft) budget spent two ways: a JFK hub reaching all four other
+regions, vs. the strongest same-size network obtainable within North America
+alone (JFK-ORD-LAX-MIA-YYZ-SFO — the densest triangle in the dataset,
+deliberately the hardest opponent, not an average one).
+
+- **Mechanism check passed as specified:** one-stop search captured 7,866
+  pax/qtr the hub's nonstop-only reading structurally couldn't reach
+  (35,427 → 43,293), entirely from itinerary search over existing demand —
+  no hub-specific bonus.
+- **Economics check initially failed:** at every distance-decay exponent
+  tested (1.0-2.0, the physically sensible range), the regional network's
+  raw addressable demand beat the hub's — 7.2x at exponent 2.0, still 2.1x
+  at exponent 1.0 (an unrealistically flat decay). Exponent alone cannot
+  make this pillar emerge from pure population/distance gravity for this
+  city dataset; going flatter to force the result would be reverse-
+  engineering the curve, i.e. exactly the "faking it" this gate exists to
+  catch.
+- **Fix (user-directed):** added an explicit, authored cross-region demand
+  multiplier to `GravityDemandModel` (default 6.0) — applied uniformly to
+  any pair crossing a region boundary, whether or not a hub serves it, so
+  it's a general economic rule, not a hidden hub bonus. Represents that
+  intercontinental travel has no substitute (can't drive or rail across an
+  ocean) while short/medium-haul competes with those alternatives.
+- **Result with the multiplier:** hub reaches 91% of the strongest regional
+  network's captured demand (up from ~46% unmultiplied) in single-airline
+  isolation. Pushing the multiplier further to force full dominance in
+  isolation would need ~35-40x, which stops being a defensible economic
+  constant. **Full closure of the gap is expected from M6** (multiple
+  airlines competing for the same regional pool dilutes any one airline's
+  share of it — no single carrier monopolizes the NYC-LA-Chicago triangle
+  the way this isolated single-airline test necessarily does). M6 should
+  re-run this same hub-vs-regional comparison under competition and confirm
+  the gap fully closes before this gate is called unconditionally passed.
 
 ---
 
@@ -135,6 +175,13 @@ by fare stance / service level / frequency (posture-based, not raw numbers
 **Done when:** a scripted 2-airline scenario shows demand splitting
 plausibly and one airline's frequency increase visibly eroding the other's
 load factor.
+
+**Also finishes the M4 conditional pass:** re-run M4's hub-vs-regional
+comparison with 2-4 airlines competing for the NYC-LA-Chicago triangle.
+Confirm competition dilutes any single regional-only airline's captured
+share enough that the hub network (already at 91% in isolation) comes out
+ahead once demand is actually split. If it doesn't, M4's cross-region
+multiplier needs raising, with this result as the evidence.
 
 ---
 
