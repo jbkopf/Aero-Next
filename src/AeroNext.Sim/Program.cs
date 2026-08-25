@@ -133,45 +133,63 @@ Console.WriteLine($"Hub reaches {hubPlan.TotalCarried * 100.0 / regionalPlan.Tot
 Console.WriteLine("Full closure expects M6's multi-airline competition: no single carrier monopolizes NYC-LA-Chicago in the real game.");
 
 // --- M5: turn loop and simultaneous resolution skeleton ---
+// --- M7: action economy — 3-action budget, raised by hiring executives ---
 // Briefing -> Decisions -> Resolution. Each quarter's orders are collected
 // as a batch and handed to QuarterEngine all at once — even with a single
-// airline, this is the "collect all orders, then resolve" shape M6+'s
+// airline, this is the "collect all orders, then resolve" shape M9+'s
 // multi-airline simultaneity builds on, not something to retrofit later.
-var quarterlyOrders = new List<IReadOnlyList<Order>>
+var quarterlyOrders = new List<IReadOnlyList<QuarterOrder>>
 {
-    new[] // Q1: found the hub
+    new QuarterOrder[] // Q1: found the hub (2 of 3 actions — entering a new pair costs 1)
     {
-        new Order(byId["jfk"], byId["ord"], narrowbody, WeeklyRoundTrips: 3),
-        new Order(byId["jfk"], byId["lhr"], narrowbody, WeeklyRoundTrips: 3),
+        new RouteOrder(byId["jfk"], byId["ord"], narrowbody, WeeklyRoundTrips: 3),
+        new RouteOrder(byId["jfk"], byId["lhr"], narrowbody, WeeklyRoundTrips: 3),
     },
-    new[] // Q2: extend to Asia — opens ORD-HND and LHR-HND one-stop connections
+    new QuarterOrder[] // Q2: extend to Asia, and hire an executive (free — raises next quarter's cap)
     {
-        new Order(byId["jfk"], byId["hnd"], narrowbody, WeeklyRoundTrips: 3),
+        new RouteOrder(byId["jfk"], byId["hnd"], narrowbody, WeeklyRoundTrips: 3),
+        new HireExecutiveOrder(),
     },
-    Array.Empty<Order>(), // Q3: quiet quarter, nothing ordered
-    new[] // Q4: double down on the domestic feeder
+    Array.Empty<QuarterOrder>(), // Q3: quiet quarter, nothing ordered
+    new QuarterOrder[] // Q4: cap is now 4 — 4 new routes fit, a 5th gets rejected over budget
     {
-        new Order(byId["jfk"], byId["ord"], narrowbody, WeeklyRoundTrips: 7),
+        new RouteOrder(byId["jfk"], byId["gru"], narrowbody, WeeklyRoundTrips: 3),
+        new RouteOrder(byId["jfk"], byId["cai"], narrowbody, WeeklyRoundTrips: 3),
+        new RouteOrder(byId["jfk"], byId["mia"], narrowbody, WeeklyRoundTrips: 3),
+        new RouteOrder(byId["jfk"], byId["lax"], narrowbody, WeeklyRoundTrips: 3),
+        new RouteOrder(byId["jfk"], byId["sfo"], narrowbody, WeeklyRoundTrips: 3), // over budget
+    },
+    new QuarterOrder[] // Q5: frequency bump on an existing pair is free — doesn't touch the budget
+    {
+        new RouteOrder(byId["jfk"], byId["ord"], narrowbody, WeeklyRoundTrips: 7),
     },
 };
 
+static string DescribeOrder(QuarterOrder order) => order switch
+{
+    RouteOrder ro => $"{ro.Origin.Id}-{ro.Destination.Id}@{ro.WeeklyRoundTrips}/wk",
+    HireExecutiveOrder => "hire executive",
+    _ => order.GetType().Name,
+};
+
 Console.WriteLine();
-Console.WriteLine("--- M5: scripted quarter loop ---");
+Console.WriteLine("--- M5/M7: scripted quarter loop with action budget ---");
 
 QuarterResult? previousQuarter = null;
 IReadOnlyList<Route> routes = Array.Empty<Route>();
+var actionCap = QuarterEngine.BaseActionCap;
 
 for (var q = 0; q < quarterlyOrders.Count; q++)
 {
     var orders = quarterlyOrders[q];
-    var quarter = QuarterEngine.RunQuarter(q + 1, routes, orders, cities, demandModel);
+    var quarter = QuarterEngine.RunQuarter(q + 1, routes, actionCap, orders, cities, demandModel);
     var briefing = BriefingGenerator.Generate(previousQuarter, quarter);
 
     Console.WriteLine();
-    Console.WriteLine($"=== Quarter {quarter.QuarterNumber} ===");
+    Console.WriteLine($"=== Quarter {quarter.QuarterNumber} (cap: {actionCap}) ===");
     Console.WriteLine(orders.Count == 0
         ? "Orders: none"
-        : $"Orders: {string.Join(", ", orders.Select(o => $"{o.Origin.Id}-{o.Destination.Id}@{o.WeeklyRoundTrips}/wk"))}");
+        : $"Orders: {string.Join(", ", orders.Select(DescribeOrder))}");
 
     if (briefing.Count == 0)
     {
@@ -191,6 +209,7 @@ for (var q = 0; q < quarterlyOrders.Count; q++)
 
     previousQuarter = quarter;
     routes = quarter.Routes;
+    actionCap = quarter.ActionCap;
 }
 
 // --- M6: multiple airlines, shared demand pool ---

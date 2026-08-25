@@ -256,7 +256,7 @@ unconditionally closed.
 
 ---
 
-## M7 — Action economy
+## M7 — Action economy ✅
 
 3-action-per-quarter budget. Classify actions as contested / market /
 private per CLAUDE.md. Enforce the budget; private actions (refinancing,
@@ -264,6 +264,34 @@ retiring aircraft, hiring executives) cost nothing.
 
 **Done when:** an over-budget scripted order set is rejected/truncated
 deterministically, and executive hires raise the cap for future quarters.
+
+Done. `QuarterOrder` is now the base for two order types: `RouteOrder`
+(market action — 1 action for a pair not already served, 0 for adding
+frequency to one that is, per CLAUDE.md) and `HireExecutiveOrder` (private
+action, always free, raises `QuarterResult.ActionCap` starting *next*
+quarter only — hiring never rescues the same quarter's own budget).
+`QuarterEngine.RunQuarter` now takes the incoming action cap and scans
+orders in submission order, tracking cumulative spend.
+
+**Rejection rule, chosen deliberately over hard truncation:** an order that
+would exceed the remaining cap is skipped, but scanning continues — a free
+order later in the list (frequency change on an already-served pair, or any
+executive hire) still applies even after an earlier, costlier order was
+rejected. A strict "reject everything after the first failure" reading of
+"truncated" would block actions that cost nothing for no reason; this is
+covered directly by
+`QuarterEngineTests.RunQuarter_FreeOrderAfterRejection_StillApplies`.
+
+The scripted quarter loop in `AeroNext.Sim` demonstrates the full arc: 2 of
+3 actions spent, then a route entry plus a free executive hire, a quiet
+quarter showing the raised cap (4), a quarter where the raised cap lets 4
+new routes in but rejects a 5th, and a free frequency bump.
+
+Scope left for later, deliberately not built here: the three-axis fare
+stance / service level / marketing posture system (`Airline.Quality` in
+M6 remains its placeholder) and the contested action types (M9 landing
+rights, M10 aircraft orders) — those cost actions too, but the mechanics
+for *how* they resolve don't exist yet.
 
 ---
 

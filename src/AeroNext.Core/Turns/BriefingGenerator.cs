@@ -15,6 +15,22 @@ public static class BriefingGenerator
     public static IReadOnlyList<BriefingItem> Generate(QuarterResult? previous, QuarterResult current)
     {
         var items = new List<BriefingItem>();
+
+        foreach (var order in current.RejectedOrders)
+        {
+            items.Add(new BriefingItem(
+                ExceptionKind.OrderRejectedOverBudget,
+                $"Order rejected, over budget: {Describe(order)}"));
+        }
+
+        var capIncrease = current.AppliedOrders.OfType<HireExecutiveOrder>().Sum(h => h.CapIncrease);
+        if (capIncrease > 0)
+        {
+            items.Add(new BriefingItem(
+                ExceptionKind.ActionCapIncreased,
+                $"Action cap raised to {current.ActionCap} for next quarter (+{capIncrease})"));
+        }
+
         var previousRouteKeys = previous?.Routes.Select(QuarterEngine.RouteKey).ToHashSet()
             ?? new HashSet<(string, string)>();
 
@@ -61,4 +77,11 @@ public static class BriefingGenerator
 
         return items.Take(MaxItems).ToList();
     }
+
+    private static string Describe(QuarterOrder order) => order switch
+    {
+        RouteOrder ro => $"{ro.Origin.Id}-{ro.Destination.Id}",
+        HireExecutiveOrder => "hire executive",
+        _ => order.GetType().Name,
+    };
 }

@@ -10,13 +10,15 @@ public class QuarterEngineTests
     private static City MakeCity(string id, double lat, double lon, int weight) =>
         new(id, id.ToUpperInvariant(), Region.Asia, lat, lon, weight, false, null);
 
+    private static readonly AircraftType Aircraft = new("t", "Test", Seats: 100);
+
     [Fact]
     public void RunQuarter_WithNoOrdersAndNoRoutes_ProducesEmptyNetwork()
     {
         var demandModel = new GravityDemandModel();
         var cities = new[] { MakeCity("a", 0, 0, 50), MakeCity("b", 1, 1, 50) };
 
-        var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), Array.Empty<Order>(), cities, demandModel);
+        var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, Array.Empty<QuarterOrder>(), cities, demandModel);
 
         Assert.Empty(result.Routes);
         Assert.Equal(0, result.Plan.TotalCarried);
@@ -28,10 +30,9 @@ public class QuarterEngineTests
         var demandModel = new GravityDemandModel();
         var a = MakeCity("a", 0, 0, 50);
         var b = MakeCity("b", 1, 1, 50);
-        var aircraft = new AircraftType("t", "Test", Seats: 100);
-        var order = new Order(a, b, aircraft, WeeklyRoundTrips: 3);
+        var order = new RouteOrder(a, b, Aircraft, WeeklyRoundTrips: 3);
 
-        var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), new[] { order }, new[] { a, b }, demandModel);
+        var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, new[] { a, b }, demandModel);
 
         Assert.Single(result.Routes);
         Assert.Equal(("a", "b"), (result.Routes[0].Origin.Id, result.Routes[0].Destination.Id));
@@ -43,33 +44,33 @@ public class QuarterEngineTests
         var demandModel = new GravityDemandModel();
         var a = MakeCity("a", 0, 0, 50);
         var b = MakeCity("b", 1, 1, 50);
-        var aircraft = new AircraftType("t", "Test", Seats: 100);
-        var existing = new[] { new Route(a, b, aircraft, WeeklyRoundTrips: 1) };
-        var order = new Order(a, b, aircraft, WeeklyRoundTrips: 7);
+        var existing = new[] { new Route(a, b, Aircraft, WeeklyRoundTrips: 1) };
+        var order = new RouteOrder(a, b, Aircraft, WeeklyRoundTrips: 7);
 
-        var result = QuarterEngine.RunQuarter(2, existing, new[] { order }, new[] { a, b }, demandModel);
+        var result = QuarterEngine.RunQuarter(2, existing, QuarterEngine.BaseActionCap, new[] { order }, new[] { a, b }, demandModel);
 
         Assert.Single(result.Routes);
         Assert.Equal(7, result.Routes[0].WeeklyRoundTrips);
     }
 
     [Fact]
-    public void RunQuarter_MultipleOrdersInOneBatch_AllApply()
+    public void RunQuarter_MultipleOrdersInOneBatch_AllApply_WhenWithinBudget()
     {
         var demandModel = new GravityDemandModel();
         var a = MakeCity("a", 0, 0, 50);
         var b = MakeCity("b", 1, 1, 50);
         var c = MakeCity("c", 2, 2, 50);
-        var aircraft = new AircraftType("t", "Test", Seats: 100);
         var orders = new[]
         {
-            new Order(a, b, aircraft, WeeklyRoundTrips: 3),
-            new Order(a, c, aircraft, WeeklyRoundTrips: 2),
+            new RouteOrder(a, b, Aircraft, WeeklyRoundTrips: 3),
+            new RouteOrder(a, c, Aircraft, WeeklyRoundTrips: 2),
         };
 
-        var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), orders, new[] { a, b, c }, demandModel);
+        var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, orders, new[] { a, b, c }, demandModel);
 
         Assert.Equal(2, result.Routes.Count);
+        Assert.Equal(2, result.AppliedOrders.Count);
+        Assert.Empty(result.RejectedOrders);
     }
 
     [Fact]
@@ -78,12 +79,110 @@ public class QuarterEngineTests
         var demandModel = new GravityDemandModel();
         var a = MakeCity("a", 0, 0, 50);
         var b = MakeCity("b", 1, 1, 50);
-        var aircraft = new AircraftType("t", "Test", Seats: 100);
-        var routes = new[] { new Route(a, b, aircraft, WeeklyRoundTrips: 3) };
+        var routes = new[] { new Route(a, b, Aircraft, WeeklyRoundTrips: 3) };
 
-        var first = QuarterEngine.RunQuarter(1, routes, Array.Empty<Order>(), new[] { a, b }, demandModel);
-        var second = QuarterEngine.RunQuarter(1, routes, Array.Empty<Order>(), new[] { a, b }, demandModel);
+        var first = QuarterEngine.RunQuarter(1, routes, QuarterEngine.BaseActionCap, Array.Empty<QuarterOrder>(), new[] { a, b }, demandModel);
+        var second = QuarterEngine.RunQuarter(1, routes, QuarterEngine.BaseActionCap, Array.Empty<QuarterOrder>(), new[] { a, b }, demandModel);
 
         Assert.Equal(first.Plan.TotalCarried, second.Plan.TotalCarried);
+    }
+
+    [Fact]
+    public void Cost_NewPair_CostsOneAction()
+    {
+        var a = MakeCity("a", 0, 0, 50);
+        var b = MakeCity("b", 1, 1, 50);
+        var order = new RouteOrder(a, b, Aircraft, WeeklyRoundTrips: 3);
+
+        Assert.Equal(1, QuarterEngine.Cost(order, Array.Empty<Route>()));
+    }
+
+    [Fact]
+    public void Cost_ExistingPair_IsFree()
+    {
+        var a = MakeCity("a", 0, 0, 50);
+        var b = MakeCity("b", 1, 1, 50);
+        var existing = new[] { new Route(a, b, Aircraft, WeeklyRoundTrips: 1) };
+        var order = new RouteOrder(a, b, Aircraft, WeeklyRoundTrips: 7);
+
+        Assert.Equal(0, QuarterEngine.Cost(order, existing));
+    }
+
+    [Fact]
+    public void Cost_HireExecutive_IsAlwaysFree()
+    {
+        Assert.Equal(0, QuarterEngine.Cost(new HireExecutiveOrder(), Array.Empty<Route>()));
+    }
+
+    [Fact]
+    public void RunQuarter_OverBudgetOrder_IsRejected_NotApplied()
+    {
+        var demandModel = new GravityDemandModel();
+        var cities = Enumerable.Range(0, 5).Select(i => MakeCity($"c{i}", i, i, 50)).ToList();
+        var hub = cities[0];
+        // 4 new-pair orders against a cap of 3 — the 4th shouldn't fit.
+        var orders = cities.Skip(1).Select(spoke => (QuarterOrder)new RouteOrder(hub, spoke, Aircraft, 3)).ToArray();
+
+        var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, orders, cities, demandModel);
+
+        Assert.Equal(3, result.AppliedOrders.Count);
+        Assert.Single(result.RejectedOrders);
+        Assert.Equal(3, result.Routes.Count);
+    }
+
+    [Fact]
+    public void RunQuarter_FreeOrderAfterRejection_StillApplies()
+    {
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 50);
+        var b = MakeCity("b", 1, 1, 50);
+        var c = MakeCity("c", 2, 2, 50);
+        var d = MakeCity("d", 3, 3, 50);
+        var existing = new[] { new Route(a, b, Aircraft, WeeklyRoundTrips: 1) };
+
+        // Cap is 1: first two cost-1 orders eat the whole budget between them
+        // (the second is rejected), but the free frequency change on a-b
+        // should still go through even though it's listed after a rejection.
+        var orders = new QuarterOrder[]
+        {
+            new RouteOrder(a, c, Aircraft, WeeklyRoundTrips: 3), // costs 1, fits
+            new RouteOrder(a, d, Aircraft, WeeklyRoundTrips: 3), // costs 1, rejected (cap exhausted)
+            new RouteOrder(a, b, Aircraft, WeeklyRoundTrips: 9), // existing pair, costs 0, should still apply
+        };
+
+        var result = QuarterEngine.RunQuarter(1, existing, currentActionCap: 1, orders, new[] { a, b, c, d }, demandModel);
+
+        Assert.Contains(result.Routes, r => r.Origin.Id == "a" && r.Destination.Id == "b" && r.WeeklyRoundTrips == 9);
+        Assert.DoesNotContain(result.Routes, r => r.Origin.Id == "a" && r.Destination.Id == "d");
+    }
+
+    [Fact]
+    public void RunQuarter_ExecutiveHire_RaisesActionCap_ForResultOnly()
+    {
+        var demandModel = new GravityDemandModel();
+        var cities = new[] { MakeCity("a", 0, 0, 50), MakeCity("b", 1, 1, 50) };
+        var orders = new QuarterOrder[] { new HireExecutiveOrder(CapIncrease: 2) };
+
+        var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, orders, cities, demandModel);
+
+        Assert.Equal(QuarterEngine.BaseActionCap + 2, result.ActionCap);
+    }
+
+    [Fact]
+    public void RunQuarter_ExecutiveHire_DoesNotIncreaseSameQuartersBudget()
+    {
+        var demandModel = new GravityDemandModel();
+        var cities = Enumerable.Range(0, 5).Select(i => MakeCity($"c{i}", i, i, 50)).ToList();
+        var hub = cities[0];
+
+        // Hire (free) plus 4 new-pair orders in the same quarter, cap 3.
+        // The hire shouldn't unlock a 4th route order in this same quarter —
+        // the cap only rises starting next quarter.
+        var orders = new List<QuarterOrder> { new HireExecutiveOrder() };
+        orders.AddRange(cities.Skip(1).Select(spoke => (QuarterOrder)new RouteOrder(hub, spoke, Aircraft, 3)));
+
+        var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, orders, cities, demandModel);
+
+        Assert.Equal(3, result.Routes.Count); // still only 3 new routes, not 4
     }
 }

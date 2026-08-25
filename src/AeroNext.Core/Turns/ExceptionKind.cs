@@ -5,4 +5,6 @@ public enum ExceptionKind
     RouteEntered,
     LoadFactorDropped,
     LoadFactorSurged,
+    OrderRejectedOverBudget,
+    ActionCapIncreased,
 }
