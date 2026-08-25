@@ -19,7 +19,7 @@ Done.
 
 ---
 
-## M1 — World data: cities
+## M1 — World data: cities ✅
 
 Static city dataset: id, name, coordinates, region, population/GDP proxy,
 gateway flag, gate capacity. Loaded from JSON in the repo (source: OurAirports
@@ -32,9 +32,13 @@ region, since M4 needs these to mean something.
 **Done when:** `AeroNext.Sim` loads the file and prints a city table.
 Tests: schema validation, no duplicate ids, deterministic load order.
 
+Done. 30 cities across the 5 regions (4 home + Africa as a bridge region),
+including all 6 named chokepoints, in `data/cities.json`, loaded and
+validated by `CityCatalog`.
+
 ---
 
-## M2 — Gravity demand model
+## M2 — Gravity demand model ✅
 
 Pairwise base demand between cities from population/wealth and distance
 (standard gravity formula). No routing or airlines yet — just "how many
@@ -55,6 +59,9 @@ an intercontinental hub's total captured connecting traffic across many
 spokes exceeds what a best-effort regional-only network can reach. If that
 check fails, revisit this model's tuning then, with evidence instead of a
 guess now.
+
+Done. `GreatCircle` + `GravityDemandModel` in `AeroNext.Core.World`, backed
+by 24 tests. The open question above is carried forward, not resolved here.
 
 ---
 
