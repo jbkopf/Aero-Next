@@ -98,6 +98,12 @@ rule players stop contesting and the whole mechanism dies.
 ## Multiplayer
 
 - **4 players**, matching the original. Local split-screen is the primary target.
+- **Always exactly 4 airlines in play.** Any seat not filled by a human is
+  filled by a computer player. A 1-human game is a human against 3 AI
+  airlines, never a 1-airline world — the sim never runs with fewer than 4
+  competing networks. This means AI-controlled airlines aren't an
+  eventual-polish feature; the sim core has to support them from early on,
+  since there's no scenario where the game runs without them.
 - Each player's planning view is **their own network** — panels, exception
   queue, action slots. Not a map. Panels survive quarter-screen; a world map
   does not.

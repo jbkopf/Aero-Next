@@ -244,11 +244,15 @@ contested.
   change needed.
 
 **Conclusion:** "a home region cannot fund a win" holds once enough rivals
-contest the same regional prize — plausible in an actual 4-player game,
-where 2-3 of 4 players independently reaching for the same best-looking
-regional network is a realistic outcome, not a corner case. It does *not*
-hold against a single regional-only opponent in isolation (M4's finding
-stands on its own). M4's go/no-go gate is now unconditionally closed.
+contest the same regional prize. This is no longer a hypothetical: CLAUDE.md
+now specifies the game is *always* exactly 4 airlines (AI fills any seat a
+human doesn't), so a game where 3 of the 4 airlines independently reach for
+the same best-looking regional triangle isn't a corner case to hope for —
+it's a normal, expected outcome the sim will actually encounter. It does
+*not* hold against a single regional-only opponent in isolation (M4's
+finding stands on its own, and matters for a 2-airline early game or a
+region with only one serious contestant). M4's go/no-go gate is now
+unconditionally closed.
 
 ---
 
@@ -263,7 +267,35 @@ deterministically, and executive hires raise the cap for future quarters.
 
 ---
 
-## M8 — Contested resolution: landing rights
+## M8 — Baseline AI opponent
+
+**New requirement, not in the original plan:** CLAUDE.md now states the game
+is always exactly 4 airlines — any seat a human doesn't fill is played by a
+computer opponent, never fewer than 4 competing networks. That means AI
+isn't a later-polish feature; the sim can't run a representative game
+without it, and M12's 240-quarter campaign specifically can't be hand-
+scripted for 4 airlines across 240 quarters. This has to land before M12,
+and makes most sense right after M7, once there's an action budget for AI
+decisions to actually respect.
+
+Scope for a *baseline* AI: a simple heuristic that picks legal, budget-
+respecting orders each quarter — e.g. greedily enter the highest-demand
+city-pair it can afford, add frequency to its best-performing route
+otherwise. Not trying to be a good player yet, just a legal, deterministic
+one (same seed ⇒ same AI decisions, per the determinism rules).
+
+**Expect light follow-up work at M9 and M10:** each adds a new action type
+(landing-rights bids, aircraft orders) the baseline AI doesn't know about
+yet. Extending it to use a new action type belongs with the milestone that
+adds that type, not bundled here speculatively.
+
+**Done when:** a 4-airline scripted quarter (1 human-scripted + 3 AI) runs
+through `QuarterEngine` and `CompetitiveMarket` without any hand-authored
+orders for the AI airlines, and produces a legal, budget-respecting result.
+
+---
+
+## M9 — Contested resolution: landing rights
 
 Silent-commitment bidding at gateway cities. Resolve on
 money × relations × reputation × political alignment. Multiple suitors raise
@@ -275,7 +307,7 @@ winner and two improved-but-failed bids, reproducibly under a fixed seed.
 
 ---
 
-## M9 — Contested resolution: aircraft orders and alliances
+## M10 — Contested resolution: aircraft orders and alliances
 
 Aircraft orders are public and contest delivery-line position, not the
 airframe; leasing is the expensive instant-metal path. Alliance courting:
@@ -286,7 +318,7 @@ quarter produce different delivery quarters, deterministically.
 
 ---
 
-## M10 — Fleet and range economics
+## M11 — Fleet and range economics
 
 Aircraft specs (range, capacity, cost, era availability). Range determines
 which routes/chokepoints are viable. This is what makes chokepoints
@@ -297,7 +329,7 @@ scripted run becomes bypassable once a longer-range aircraft is available.
 
 ---
 
-## M11 — Financial model and scoring
+## M12 — Financial model and scoring
 
 Full quarterly P&L: revenue from itineraries, operating cost, debt service.
 Refinancing as a private action. This is explicitly "the scoring function,
@@ -309,22 +341,25 @@ a bankruptcy/failure state triggers correctly.
 
 ---
 
-## M12 — Historical arc and timeline events
+## M13 — Historical arc and timeline events
 
 1955–2015 event data (new aircraft types entering service, historical demand
-shifts) driving M10's range unlocks and M2's demand changes over time.
+shifts) driving M11's range unlocks and M2's demand changes over time.
 Data-driven (JSON), not hardcoded per-quarter branches.
 
-**Done when:** a full ~240-quarter scripted campaign runs end-to-end and
-prints a summary; chokepoint relevance visibly shifts across the run.
+**Done when:** a full ~240-quarter campaign — always 4 airlines, at most 1
+human-scripted and the rest played by M8's baseline AI — runs end-to-end
+and prints a summary; chokepoint relevance visibly shifts across the run.
 
 ---
 
-## M13 — Determinism regression harness
+## M14 — Determinism regression harness
 
-Formalize what M0–M12 assumed informally: same seed + same orders ⇒ byte-
-identical resolution output, across repeated runs. This is the safety net
-that makes online play and simultaneous multiplayer possible later.
+Formalize what M0–M13 assumed informally: same seed + same orders ⇒ byte-
+identical resolution output, across repeated runs — including AI decisions,
+which is why M8 required AI to be deterministic from the start rather than
+retrofitted later. This is the safety net that makes online play and
+simultaneous multiplayer possible.
 
 **Done when:** a test runs the same scripted campaign twice and diffs the
 full output; any unordered-collection or ambient-state regression fails CI.
@@ -333,7 +368,7 @@ full output; any unordered-collection or ambient-state regression fails CI.
 
 ## Kept in mind, not scheduled
 
-Not part of this roadmap, but constraints below already shape M0–M13 so
+Not part of this roadmap, but constraints below already shape M0–M14 so
 these aren't blocked later:
 
 - **Godot client** — Core has zero Godot references (enforced since M0).
@@ -341,10 +376,11 @@ these aren't blocked later:
   representable as plain data the client can pull, not something only the
   console printer knows how to produce.
 - **Online play / game server** — the M5 simultaneous-resolution skeleton
-  and M13 determinism harness exist specifically so a server can replay or
+  and M14 determinism harness exist specifically so a server can replay or
   validate client-submitted orders later without redesigning resolution.
-- **Split-screen local multiplayer** — M6/M7's per-airline order collection
-  should stay orthogonal to *how many local players* submit orders; the sim
-  core shouldn't need to know or care.
+- **Split-screen local multiplayer** — M5/M6's per-airline order collection
+  should stay orthogonal to *how many local players* submit orders (the
+  rest are AI, per CLAUDE.md's always-4-airlines rule); the sim core
+  shouldn't need to know or care how many of the 4 seats are human.
 - **Turn timer** — a client/UI concern layered on top of the M5 turn loop,
   not a sim-core concept.
