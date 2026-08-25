@@ -155,7 +155,7 @@ deliberately the hardest opponent, not an average one).
 
 ---
 
-## M5 — Turn loop and simultaneous resolution skeleton
+## M5 — Turn loop and simultaneous resolution skeleton ✅
 
 Quarter loop: Briefing → Decisions → Resolution, per CLAUDE.md. Even with one
 airline, structure resolution as "collect all orders, then resolve" —
@@ -163,6 +163,23 @@ architectural from day one, not retrofitted later.
 
 **Done when:** `AeroNext.Sim` runs N quarters against a scripted order list
 and prints a briefing-style exception summary each quarter.
+
+Done. `Order`, `QuarterEngine`, and `BriefingGenerator` in
+`AeroNext.Core.Turns`. `QuarterEngine.RunQuarter` collects every order for
+the quarter into a dictionary keyed by route pair before building the
+network once — no order is applied against a partially-updated state, which
+is the property M6+ needs when multiple airlines' orders can conflict.
+`BriefingGenerator` reports new routes and load-factor swings ≥15 points
+between quarters, capped at 5 items, sorted deterministically by route id
+regardless of order-list or dictionary iteration order.
+
+**Scope note:** the exception taxonomy is intentionally narrow — only
+"route entered" and "load factor moved" exist, because those are the only
+kinds of change a single, uncontested airline can produce yet. CLAUDE.md's
+other examples (competitor entered a market, aircraft nearing retirement,
+negotiation resolved) need M6, M9/M10, and M8 respectively before they're
+meaningful; extending the taxonomy now would be inventing exceptions with
+nothing behind them.
 
 ---
 

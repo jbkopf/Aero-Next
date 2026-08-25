@@ -1,4 +1,5 @@
 using AeroNext.Core.Airlines;
+using AeroNext.Core.Turns;
 using AeroNext.Core.World;
 
 // Headless sim entry point. Per CLAUDE.md's current phase: load cities, run
@@ -129,3 +130,64 @@ Console.WriteLine();
 Console.WriteLine($"Hub reaches {hubPlan.TotalCarried * 100.0 / regionalPlan.TotalCarried:F0}% of the strongest regional network's " +
     "captured demand, in single-airline isolation.");
 Console.WriteLine("Full closure expects M6's multi-airline competition: no single carrier monopolizes NYC-LA-Chicago in the real game.");
+
+// --- M5: turn loop and simultaneous resolution skeleton ---
+// Briefing -> Decisions -> Resolution. Each quarter's orders are collected
+// as a batch and handed to QuarterEngine all at once — even with a single
+// airline, this is the "collect all orders, then resolve" shape M6+'s
+// multi-airline simultaneity builds on, not something to retrofit later.
+var quarterlyOrders = new List<IReadOnlyList<Order>>
+{
+    new[] // Q1: found the hub
+    {
+        new Order(byId["jfk"], byId["ord"], narrowbody, WeeklyRoundTrips: 3),
+        new Order(byId["jfk"], byId["lhr"], narrowbody, WeeklyRoundTrips: 3),
+    },
+    new[] // Q2: extend to Asia — opens ORD-HND and LHR-HND one-stop connections
+    {
+        new Order(byId["jfk"], byId["hnd"], narrowbody, WeeklyRoundTrips: 3),
+    },
+    Array.Empty<Order>(), // Q3: quiet quarter, nothing ordered
+    new[] // Q4: double down on the domestic feeder
+    {
+        new Order(byId["jfk"], byId["ord"], narrowbody, WeeklyRoundTrips: 7),
+    },
+};
+
+Console.WriteLine();
+Console.WriteLine("--- M5: scripted quarter loop ---");
+
+QuarterResult? previousQuarter = null;
+IReadOnlyList<Route> routes = Array.Empty<Route>();
+
+for (var q = 0; q < quarterlyOrders.Count; q++)
+{
+    var orders = quarterlyOrders[q];
+    var quarter = QuarterEngine.RunQuarter(q + 1, routes, orders, cities, demandModel);
+    var briefing = BriefingGenerator.Generate(previousQuarter, quarter);
+
+    Console.WriteLine();
+    Console.WriteLine($"=== Quarter {quarter.QuarterNumber} ===");
+    Console.WriteLine(orders.Count == 0
+        ? "Orders: none"
+        : $"Orders: {string.Join(", ", orders.Select(o => $"{o.Origin.Id}-{o.Destination.Id}@{o.WeeklyRoundTrips}/wk"))}");
+
+    if (briefing.Count == 0)
+    {
+        Console.WriteLine("Briefing: no exceptions. Nothing spent, nothing changed — skip ahead?");
+    }
+    else
+    {
+        Console.WriteLine("Briefing:");
+        foreach (var item in briefing)
+        {
+            Console.WriteLine($"  - [{item.Kind}] {item.Message}");
+        }
+    }
+
+    Console.WriteLine($"Resolution: {quarter.Routes.Count} routes, {quarter.Plan.TotalCarried:N0} pax/qtr carried " +
+        $"({quarter.Plan.NonstopCarried:N0} nonstop + {quarter.Plan.OneStopCarried:N0} one-stop)");
+
+    previousQuarter = quarter;
+    routes = quarter.Routes;
+}
