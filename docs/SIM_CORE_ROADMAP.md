@@ -92,7 +92,7 @@ relative-ordering question already deferred to M4.
 
 ---
 
-## M4 — Connecting itineraries (the key question) ✅ (conditional)
+## M4 — Connecting itineraries (the key question) ✅ (closed by M6)
 
 Passengers may route through a player's hub across two legs when no nonstop
 exists or the connection is competitive. This is the milestone that answers
@@ -183,7 +183,7 @@ nothing behind them.
 
 ---
 
-## M6 — Multiple airlines, shared demand pool
+## M6 — Multiple airlines, shared demand pool ✅
 
 2–4 airlines competing for the same city-pair demand. Market share split
 by fare stance / service level / frequency (posture-based, not raw numbers
@@ -199,6 +199,56 @@ Confirm competition dilutes any single regional-only airline's captured
 share enough that the hub network (already at 91% in isolation) comes out
 ahead once demand is actually split. If it doesn't, M4's cross-region
 multiplier needs raising, with this result as the evidence.
+
+**Done.** `CompetitiveMarket` in `AeroNext.Core.Competition` splits a pair's
+demand across every airline that reaches it, weighted by
+(bottleneck-leg capacity × `Airline.Quality`) and capped at each airline's
+own monopoly ceiling (what `NetworkPlanner` says it could carry alone).
+`Airline.Quality` is a single-knob placeholder standing in for CLAUDE.md's
+fare-stance/service-level/marketing postures — a real three-axis system
+belongs with M7, once players have a way to actually set those postures.
+
+An early implementation bug is worth recording: the first version weighted
+competitors by their monopoly *ceiling* (capacity capped at demand) instead
+of raw capacity. That silently breaks frequency competition the moment one
+airline's capacity alone already exceeds demand — the ceiling saturates and
+stops growing even as real capacity keeps growing, so boosting frequency
+stopped affecting anyone's share. A test written against the milestone's
+own "Done when" wording (frequency increase must erode a competitor) caught
+it immediately. Fixed to weight by raw bottleneck-leg capacity, ceiling
+used only as the cap.
+
+**Core mechanic confirmed:** on JFK-YQX (thin enough that raw capacity
+exceeds demand for a single operator), two evenly-matched airlines split
+480 pax/qtr demand ~50/50 (240/240). Boosting one airline from 1 to 3
+round trips/week — with the rival unchanged — shifted the split to 360/120:
+a competitor's load factor eroded by a rival's frequency decision alone.
+On a capacity-constrained route (any realistic fleet on JFK-ORD-sized
+demand), competition has no visible effect — both operators simply fill
+their own capacity regardless of rivals. That's not a gap; it's the same
+capacity- vs demand-constrained distinction M3 established, now confirmed
+to hold across competitors too.
+
+**M4's conditional pass, resolved with real numbers, not further tuning:**
+re-ran the same 5-route hub vs. regional-triangle networks from M4, now
+contested.
+- **2 regional competitors** (both flying the identical JFK-ORD/LAX/MIA +
+  ORD-YYZ + LAX-SFO network): hub carries 40,602 vs 40,787 each — a
+  near-miss, 99.5% of a regional competitor's total. JFK-ORD and JFK-LAX
+  demand so vastly exceeds even *two* competitors' combined capacity that
+  those two legs stay capacity-pinned regardless of rivalry; only the
+  triangle's thinner legs see real dilution.
+- **3 regional competitors:** hub carries 38,645 vs 36,603 each — a clear,
+  genuine win, entirely from competitive dilution once a third airline also
+  piles into the same obviously-best regional strategy. No multiplier
+  change needed.
+
+**Conclusion:** "a home region cannot fund a win" holds once enough rivals
+contest the same regional prize — plausible in an actual 4-player game,
+where 2-3 of 4 players independently reaching for the same best-looking
+regional network is a realistic outcome, not a corner case. It does *not*
+hold against a single regional-only opponent in isolation (M4's finding
+stands on its own). M4's go/no-go gate is now unconditionally closed.
 
 ---
 

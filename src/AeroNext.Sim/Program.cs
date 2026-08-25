@@ -1,4 +1,5 @@
 using AeroNext.Core.Airlines;
+using AeroNext.Core.Competition;
 using AeroNext.Core.Turns;
 using AeroNext.Core.World;
 
@@ -190,4 +191,55 @@ for (var q = 0; q < quarterlyOrders.Count; q++)
 
     previousQuarter = quarter;
     routes = quarter.Routes;
+}
+
+// --- M6: multiple airlines, shared demand pool ---
+// A thin route where raw capacity comfortably exceeds demand for a single
+// operator — the "demand-constrained" regime where competition actually has
+// something to redistribute (a busy route like JFK-ORD is capacity-
+// constrained for any realistic small fleet, so nobody's share would move).
+var baselineA = new Airline("Trans-Aero", new[] { new Route(byId["jfk"], byId["yqx"], regional, WeeklyRoundTrips: 1) });
+var boostedA = new Airline("Trans-Aero", new[] { new Route(byId["jfk"], byId["yqx"], regional, WeeklyRoundTrips: 3) });
+var rivalB = new Airline("Northern Cross", new[] { new Route(byId["jfk"], byId["yqx"], regional, WeeklyRoundTrips: 1) });
+
+var beforeBoost = CompetitiveMarket.Resolve(new[] { baselineA, rivalB }, cities, demandModel);
+var afterBoost = CompetitiveMarket.Resolve(new[] { boostedA, rivalB }, cities, demandModel);
+
+Console.WriteLine();
+Console.WriteLine("--- M6: shared demand pool, JFK-YQX (Gander refueling stop) ---");
+Console.WriteLine($"Before: Trans-Aero 1 rt/wk vs Northern Cross 1 rt/wk");
+Console.WriteLine($"  Trans-Aero carried:    {beforeBoost.TotalCarried(baselineA),6:N0}");
+Console.WriteLine($"  Northern Cross carried: {beforeBoost.TotalCarried(rivalB),6:N0}");
+Console.WriteLine($"After: Trans-Aero boosts to 3 rt/wk, Northern Cross unchanged");
+Console.WriteLine($"  Trans-Aero carried:    {afterBoost.TotalCarried(boostedA),6:N0}");
+Console.WriteLine($"  Northern Cross carried: {afterBoost.TotalCarried(rivalB),6:N0}" +
+    $"  (was {beforeBoost.TotalCarried(rivalB):N0} — eroded by Trans-Aero's added frequency, not by anything Northern Cross did)");
+
+// Finishes M4's conditional pass: does the hub beat regional once the
+// regional triangle is actually contested by multiple airlines, instead of
+// tested in single-airline isolation?
+var hubAirline = new Airline("Trans-Aero", hubRoutes);
+var regional1 = new Airline("Liberty Air", regionalRoutes);
+var regional2 = new Airline("Continental Domestic", regionalRoutes);
+var regional3 = new Airline("Eagle National", regionalRoutes);
+
+foreach (var regionalCompetitors in new[]
+{
+    new[] { regional1, regional2 },
+    new[] { regional1, regional2, regional3 },
+})
+{
+    var contestants = new[] { hubAirline }.Concat(regionalCompetitors).ToArray();
+    var contested = CompetitiveMarket.Resolve(contestants, cities, demandModel);
+
+    Console.WriteLine();
+    Console.WriteLine($"--- M6: hub vs. {regionalCompetitors.Length} airlines contesting the same regional triangle ---");
+    Console.WriteLine($"Hub (Trans-Aero) total carried:  {contested.TotalCarried(hubAirline),9:N0}  (was {hubPlan.TotalCarried:N0} in isolation)");
+    foreach (var competitor in regionalCompetitors)
+    {
+        Console.WriteLine($"{competitor.Name,-33} carried: {contested.TotalCarried(competitor),9:N0}  (was {regionalPlan.TotalCarried:N0} in isolation)");
+    }
+    Console.WriteLine(contested.TotalCarried(hubAirline) > contested.TotalCarried(regional1)
+        ? "Verdict: hub beats each regional competitor once the triangle is this contested."
+        : "Verdict: hub still trails even under this much contest.");
 }
