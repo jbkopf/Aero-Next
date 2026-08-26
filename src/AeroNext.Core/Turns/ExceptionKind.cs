@@ -6,5 +6,6 @@ public enum ExceptionKind
     LoadFactorDropped,
     LoadFactorSurged,
     OrderRejectedOverBudget,
+    OrderRejectedOutOfRange,
     ActionCapIncreased,
 }

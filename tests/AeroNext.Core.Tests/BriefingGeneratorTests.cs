@@ -1,3 +1,4 @@
+using AeroNext.Core;
 using AeroNext.Core.Airlines;
 using AeroNext.Core.Turns;
 using AeroNext.Core.World;
@@ -124,6 +125,27 @@ public class BriefingGeneratorTests
         var briefing = BriefingGenerator.Generate(null, quarter);
 
         Assert.Contains(briefing, i => i.Kind == ExceptionKind.OrderRejectedOverBudget);
+    }
+
+    [Fact]
+    public void Generate_RejectedNonRouteOrder_IsReportedAsOverBudget_NotOutOfRange()
+    {
+        // A contested order (no aircraft, no range concept) rejected purely
+        // for budget must never be mistaken for an out-of-range rejection.
+        var gateway = new City("gw", "Gateway", Region.Asia, 0, 0, 50, true, 1);
+        var orders = new QuarterOrder[]
+        {
+            new NegotiationOrder(gateway, Money.FromDollars(1)),
+            new NegotiationOrder(gateway, Money.FromDollars(1)),
+            new NegotiationOrder(gateway, Money.FromDollars(1)),
+            new NegotiationOrder(gateway, Money.FromDollars(1)), // 4th exceeds the base cap of 3
+        };
+
+        var quarter = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, orders, new[] { gateway }, DemandModel);
+        var briefing = BriefingGenerator.Generate(null, quarter);
+
+        Assert.Contains(briefing, i => i.Kind == ExceptionKind.OrderRejectedOverBudget);
+        Assert.DoesNotContain(briefing, i => i.Kind == ExceptionKind.OrderRejectedOutOfRange);
     }
 
     [Fact]

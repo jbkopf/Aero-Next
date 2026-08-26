@@ -6,14 +6,14 @@ namespace AeroNext.Core.Ai;
 
 /// <summary>
 /// A simple heuristic opponent: greedily enters the single highest-demand
-/// city pair it doesn't already serve, if it can afford a market action;
-/// bids on the single highest-demand gateway it doesn't yet touch, if it
-/// can also afford a contested action (per CLAUDE.md — negotiations are
-/// "blind" even for a skilled human, so not checking the target's
-/// remaining gate capacity before bidding isn't a missing smarts, it's
-/// true to the mechanic); and always bumps frequency on its own
-/// best-performing existing route (free, per CLAUDE.md — adding frequency
-/// to a served pair costs nothing).
+/// city pair its aircraft can actually reach and doesn't already serve, if
+/// it can afford a market action; bids on the single highest-demand
+/// gateway it doesn't yet touch, if it can also afford a contested action
+/// (per CLAUDE.md — negotiations are "blind" even for a skilled human, so
+/// not checking the target's remaining gate capacity before bidding isn't
+/// a missing smarts, it's true to the mechanic); and always bumps
+/// frequency on its own best-performing existing route (free, per
+/// CLAUDE.md — adding frequency to a served pair costs nothing).
 ///
 /// Not trying to play well — CLAUDE.md's game is always exactly 4 airlines,
 /// so this exists because the sim can never run a representative quarter
@@ -21,9 +21,14 @@ namespace AeroNext.Core.Ai;
 /// because this is meant to be a strong opponent. Deliberately narrow:
 /// no hub-awareness (picks the single best pair/gateway in the whole world,
 /// not the best one connected to its existing network), no executive
-/// hiring, no awareness of aircraft orders (M10 doesn't exist yet). Purely
-/// a function of current state — no randomness, so it's deterministic by
-/// construction without needing a seeded RNG.
+/// hiring, no aircraft ordering or alliance courting of its own — M9/M10
+/// added those mechanics but neither has consequences that would change
+/// this AI's route decisions, so extending it there would be cosmetic (see
+/// the M9/M10 roadmap notes). Range-awareness (M11) is different: an
+/// out-of-range order is rejected today, for real, so skipping candidates
+/// beyond the aircraft's reach isn't speculative. Purely a function of
+/// current state — no randomness, so it's deterministic by construction
+/// without needing a seeded RNG.
 /// </summary>
 public static class BaselineAi
 {
@@ -50,7 +55,7 @@ public static class BaselineAi
 
         if (spent + 1 <= actionCap)
         {
-            var bestUnserved = FindBestUnservedPair(currentRoutes, allCities, demandModel);
+            var bestUnserved = FindBestUnservedPair(currentRoutes, allCities, demandModel, aircraft);
             if (bestUnserved is not null)
             {
                 orders.Add(new RouteOrder(bestUnserved.Origin, bestUnserved.Destination, aircraft, NewRouteWeeklyRoundTrips));
@@ -72,7 +77,7 @@ public static class BaselineAi
     }
 
     private static PairDemand? FindBestUnservedPair(
-        IReadOnlyList<Route> currentRoutes, IReadOnlyList<City> allCities, GravityDemandModel demandModel)
+        IReadOnlyList<Route> currentRoutes, IReadOnlyList<City> allCities, GravityDemandModel demandModel, AircraftType aircraft)
     {
         var served = currentRoutes
             .SelectMany(r => new[] { (r.Origin.Id, r.Destination.Id), (r.Destination.Id, r.Origin.Id) })
@@ -80,6 +85,7 @@ public static class BaselineAi
 
         return demandModel.AllPairs(allCities)
             .Where(p => !served.Contains((p.Origin.Id, p.Destination.Id)))
+            .Where(p => p.DistanceKm <= aircraft.RangeKm)
             .OrderByDescending(p => p.PassengersPerQuarter)
             .ThenBy(p => p.Origin.Id, StringComparer.Ordinal)
             .ThenBy(p => p.Destination.Id, StringComparer.Ordinal)

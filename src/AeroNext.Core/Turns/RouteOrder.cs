@@ -11,4 +11,8 @@ namespace AeroNext.Core.Turns;
 /// does. Costs 1 action if the pair isn't already served, 0 if it is — see
 /// <see cref="QuarterEngine"/>.
 /// </summary>
-public sealed record RouteOrder(City Origin, City Destination, AircraftType Aircraft, int WeeklyRoundTrips) : QuarterOrder;
+public sealed record RouteOrder(City Origin, City Destination, AircraftType Aircraft, int WeeklyRoundTrips) : QuarterOrder
+{
+    /// <summary>Whether Aircraft can physically fly Origin-Destination nonstop — M11's range constraint, mirroring Route.IsWithinRange.</summary>
+    public bool IsWithinRange => GreatCircle.DistanceKm(Origin, Destination) <= Aircraft.RangeKm;
+}

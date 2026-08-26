@@ -7,10 +7,15 @@ namespace AeroNext.Core.Fleet;
 /// Aircraft orders are public (CLAUDE.md's information gradient) and
 /// resolve on delivery-line position, not an auction — no money, no
 /// secrecy, no randomness, just FIFO by order quarter. Each aircraft type
-/// has its own production line, shipping up to productionRatePerQuarter
-/// units total (across every airline's orders for that type) per quarter.
-/// An order submitted this quarter can't ship this same quarter — "order
-/// late and you take delivery years later" implies a floor of at least one
+/// has its own production line, shipping up to that type's own
+/// AircraftType.ProductionRatePerQuarter units (across every airline's
+/// orders for that type) per quarter — small/medium-range types are
+/// produced at much higher rates than large long-haul types in practice,
+/// so M11's real aircraft set that generously (only the top long-haul tier
+/// is meant to be genuinely scarce; a short-haul type bottlenecking all 4
+/// players from day one would be a design bug, not a feature). An order
+/// submitted this quarter can't ship this same quarter — "order late and
+/// you take delivery years later" implies a floor of at least one
 /// quarter's wait, not instant turnaround. Ties for the same queue
 /// position (orders placed the same quarter) break deterministically by
 /// airline name.
@@ -21,8 +26,6 @@ namespace AeroNext.Core.Fleet;
 /// </summary>
 public static class AircraftOrderResolver
 {
-    public const int DefaultProductionRatePerQuarter = 1;
-
     public static AircraftOrderBoard Submit(AircraftOrderBoard board, Airline airline, AircraftOrder order, int currentQuarter)
     {
         var pending = new PendingAircraftOrder(airline, order.Type, order.Quantity, currentQuarter);
@@ -33,8 +36,7 @@ public static class AircraftOrderResolver
     public static AircraftDelivery ResolveLease(Airline airline, LeaseAircraftOrder order, int currentQuarter) =>
         new(airline, order.Type, order.Quantity, currentQuarter);
 
-    public static (AircraftOrderBoard Board, IReadOnlyList<AircraftDelivery> Deliveries) ResolveQuarter(
-        AircraftOrderBoard board, int currentQuarter, int productionRatePerQuarter = DefaultProductionRatePerQuarter)
+    public static (AircraftOrderBoard Board, IReadOnlyList<AircraftDelivery> Deliveries) ResolveQuarter(AircraftOrderBoard board, int currentQuarter)
     {
         var deliveries = new List<AircraftDelivery>();
         var remainingQueue = new List<PendingAircraftOrder>();
@@ -48,7 +50,7 @@ public static class AircraftOrderResolver
                 .ToList();
             var notYetEligible = typeGroup.Where(p => p.OrderedQuarter >= currentQuarter);
 
-            var capacityLeft = productionRatePerQuarter;
+            var capacityLeft = typeGroup.First().Type.ProductionRatePerQuarter;
 
             foreach (var pending in eligible)
             {

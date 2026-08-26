@@ -447,7 +447,7 @@ cosmetic, not a real integration.
 
 ---
 
-## M11 — Fleet and range economics
+## M11 — Fleet and range economics ✅
 
 Aircraft specs (range, capacity, cost, era availability). Range determines
 which routes/chokepoints are viable. This is what makes chokepoints
@@ -455,6 +455,85 @@ which routes/chokepoints are viable. This is what makes chokepoints
 
 **Done when:** a chokepoint route that was mandatory in an early-era
 scripted run becomes bypassable once a longer-range aircraft is available.
+
+Done. `AircraftType` (`AeroNext.Core.Airlines`) gained `RangeKm`, `Cost`
+(`Money` — CLAUDE.md's determinism-critical currency type, unused since M0,
+finally in play), and `ProductionRatePerQuarter`, all with generous
+defaults so a synthetic "Test" aircraft in an existing unit test never has
+to think about range or scarcity — only M11's real, named aircraft state
+them explicitly. `Route.IsWithinRange` and the identical
+`RouteOrder.IsWithinRange` (mirrored rather than shared, since one wraps a
+committed route and the other a still-pending order) check great-circle
+distance against `Aircraft.RangeKm`.
+
+**Range is enforced at two independent points, deliberately not just one:**
+`QuarterEngine.RunQuarter` rejects an out-of-range `RouteOrder` before the
+budget check even runs — the action is never charged, and
+`BriefingGenerator` reports it as `OrderRejectedOutOfRange`, distinct from
+`OrderRejectedOverBudget`, so the player sees *why* (CLAUDE.md's legibility
+pillar — a route that mysteriously never carries anyone is worse than an
+explicit rejection). `NetworkPlanner` independently excludes any
+out-of-range route from nonstop and hub-leg consideration, since a route
+can reach `Plan()` without going through `QuarterEngine` at all (every demo
+section before this one constructs `Route` objects directly); an
+out-of-range route still appears in `RouteUsage` with 0 seats used, rather
+than silently vanishing from the report.
+
+**Production rate is per aircraft type, per explicit user direction** given
+mid-milestone: small/medium-range aircraft are historically produced at far
+higher rates than large long-haul aircraft, and a flat global rate (M10's
+placeholder default of 1/quarter for everything) would wrongly bottleneck
+*any* type — including short-haul workhorses — the moment more than one of
+the always-4 airlines wanted one early in the campaign. `AircraftOrderResolver`
+now reads each type's own `ProductionRatePerQuarter` per production-line
+group instead of taking a flat parameter (a real retrofit to M10's
+resolver, not just an unused new field). The Boeing 747's rate is pinned at
+exactly 1 specifically to preserve M10's already-documented "Alpha wins
+quarter 2, Beta wins quarter 3" demo outcome; every other named aircraft
+(707, DC-3) got a rate of 6-8, comfortably above the always-4-airlines
+count.
+
+**Every pre-existing recorded number from M4, M6, and M9 is byte-identical
+after this milestone** — verified by re-running the console app and diffing
+against the exact figures already quoted in this document (91%, 43,293,
+47,716, 40,602/40,787, 38,645/36,603, the Gander bidding outcome). This
+mattered enough to check explicitly: `NetworkPlanner` becoming range-aware
+could easily have invalidated already-committed findings if the existing
+demo aircraft's ranges were set too tight (JFK-HND, the longest route any
+demo flies, is ~10,800 km). Boeing 707 and 747 both got deliberately
+generous ranges (12,000 km / 13,000 km) to guarantee this; the actual
+chokepoint-bypass story instead uses a new, dedicated aircraft type
+(Lockheed Constellation, 4,200 km range) introduced specifically for this
+milestone's demo, so the new mechanic didn't need to risk retuning
+anything already shipped.
+
+**Chokepoint-bypass demo, using real data:** JFK-LHR direct is 5,540 km.
+Via Gander it's 1,767 + 3,773 km. A Constellation (4,200 km range) can fly
+each Gander leg but not the direct route — JFK-LHR resolves as `OneStop`.
+A Boeing 707 (12,000 km range) flies it `Nonstop`, bypassing Gander
+entirely — the exact "chokepoints obsolete as range improves" story from
+CLAUDE.md's map design section.
+
+**`BaselineAi` extended, but not the way M10's note anticipated.** That
+note expected "fleet ownership" to give aircraft-ordering and alliance
+mechanics real teeth this milestone — on reflection, that's a distinct,
+larger mechanic (tracking which specific units an airline owns and
+constraining route creation against it) that M11 as actually scoped
+(specs + range viability) doesn't include, and CLAUDE.md's M11 bullet never
+asked for it either. Correcting that forward-reference here rather than
+quietly dropping it. What M11 *does* give real, immediate teeth to is
+range: `BaselineAi.DecideOrders` now skips candidate pairs beyond the given
+aircraft's reach, since an out-of-range order is rejected today, for real —
+unlike the M9/M10 mechanics, this isn't speculative integration.
+
+**Deliberately not added:** era availability (the fourth spec CLAUDE.md
+lists). It would sit completely unused until M13's historical arc actually
+enforces it — unlike `Cost` and `ProductionRatePerQuarter`, which are used
+immediately even without a treasury (M12). Adding inert data ahead of its
+first real use doesn't match how every other foundational piece in this
+project has landed (`Money`, `SimRng`, `City.GateCapacity` were all built
+early but had a specific, identified future consumer already on the
+roadmap); era availability's consumer is M13, so it lands there.
 
 ---
 

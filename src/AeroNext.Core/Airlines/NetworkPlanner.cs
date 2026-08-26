@@ -21,7 +21,11 @@ public static class NetworkPlanner
         var directRouteByPair = new Dictionary<(string, string), Route>();
         var neighbors = new Dictionary<string, List<(City Neighbor, Route Route)>>(StringComparer.Ordinal);
 
-        foreach (var route in routes)
+        // A route the aircraft can't physically fly isn't usable as a leg at
+        // all — not nonstop, not as part of a one-stop connection. It's
+        // still passed to Allocate() below so it shows up in RouteUsage
+        // with 0 seats used, instead of silently disappearing from output.
+        foreach (var route in routes.Where(r => r.IsWithinRange))
         {
             directRouteByPair[Key(route.Origin.Id, route.Destination.Id)] = route;
             directRouteByPair[Key(route.Destination.Id, route.Origin.Id)] = route;

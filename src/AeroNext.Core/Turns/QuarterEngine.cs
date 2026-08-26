@@ -20,6 +20,14 @@ namespace AeroNext.Core.Turns;
 /// goes through even after an earlier, costlier order was rejected. Only
 /// orders that don't fit get skipped, not everything after them — a hard
 /// truncate-the-rest rule would needlessly block actions that cost nothing.
+///
+/// A RouteOrder the aircraft can't physically fly (M11's range constraint)
+/// is rejected before the budget check even runs — the action never gets
+/// charged, since nothing was actually committed. Rejecting explicitly
+/// here, rather than silently letting NetworkPlanner treat it as a dead
+/// leg later, keeps the reason visible to the player (CLAUDE.md's
+/// legibility pillar) instead of a route that mysteriously never carries
+/// anyone.
 /// </summary>
 public static class QuarterEngine
 {
@@ -39,6 +47,12 @@ public static class QuarterEngine
 
         foreach (var order in orders)
         {
+            if (order is RouteOrder ro && !ro.IsWithinRange)
+            {
+                rejected.Add(order);
+                continue;
+            }
+
             var cost = Cost(order, currentRoutes);
 
             if (spent + cost > currentActionCap)

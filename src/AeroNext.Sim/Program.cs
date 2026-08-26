@@ -46,8 +46,14 @@ foreach (var pair in allPairs.OrderBy(p => p.PassengersPerQuarter).Take(5))
 }
 
 // --- M3: single airline, nonstop routes ---
-var narrowbody = new AircraftType("707", "Boeing 707", Seats: 140);
-var regional = new AircraftType("dc3", "Douglas DC-3", Seats: 28);
+// M11 range/cost/rate: chosen generously enough that every route already
+// flown by these two types in the M3-M8 demos below (including JFK-HND at
+// ~10,800 km) stays flyable — M11 adds the range constraint without
+// retroactively invalidating milestones that already recorded specific
+// numbers. Boeing 747's rate is pinned at 1 specifically to preserve M10's
+// documented "Alpha wins quarter 2, Beta wins quarter 3" outcome.
+var narrowbody = new AircraftType("707", "Boeing 707", Seats: 140, RangeKm: 12_000, Cost: Money.FromDollars(5_000_000), ProductionRatePerQuarter: 6);
+var regional = new AircraftType("dc3", "Douglas DC-3", Seats: 28, RangeKm: 2_400, Cost: Money.FromDollars(150_000), ProductionRatePerQuarter: 8);
 
 var airline = new Airline("Trans-Aero", new[]
 {
@@ -377,7 +383,7 @@ Console.WriteLine($"Gate slots granted: {landingBoard.SlotsGranted.GetValueOrDef
 // Aircraft orders are PUBLIC (no secrecy, no random delay like landing
 // rights) — delivery is purely a function of queue position and the
 // production line's fixed rate.
-var widebody = new AircraftType("747", "Boeing 747", Seats: 400);
+var widebody = new AircraftType("747", "Boeing 747", Seats: 400, RangeKm: 13_000, Cost: Money.FromDollars(20_000_000), ProductionRatePerQuarter: 1);
 var alpha = new Airline("Alpha Air", Array.Empty<Route>());
 var beta = new Airline("Beta Airways", Array.Empty<Route>());
 var gamma = new Airline("Gamma Skyways", Array.Empty<Route>());
@@ -430,3 +436,44 @@ foreach (var outcome in allianceOutcomes)
 var delta = new Airline("Delta Regional", Array.Empty<Route>(), Quality: 10.0); // huge quality edge, doesn't matter
 var (_, lateOutcome) = AllianceResolver.ResolveQuarter(allianceBoard, new[] { (delta, new AllianceCourtOrder(regionalX)) });
 Console.WriteLine($"  Later, {delta.Name} tries too: {(lateOutcome.Single().Won ? "wins" : "loses — already joined someone else, permanently")}");
+
+// --- M11: fleet and range economics ---
+// Real specs: an early piston airliner that historically needed Gander for
+// the Atlantic crossing, versus the jet-age 707 that made that stop
+// obsolete — the exact story CLAUDE.md's map design describes. DC-3's real
+// range (~2,400 km) is too short even for the Gander-LHR leg, so a
+// distinct early-era type is used here rather than stretching DC-3 into a
+// role it doesn't fit.
+var constellation = new AircraftType("l049", "Lockheed Constellation", Seats: 60, RangeKm: 4_200, Cost: Money.FromDollars(700_000), ProductionRatePerQuarter: 5);
+var lhr = byId["lhr"];
+
+Console.WriteLine();
+Console.WriteLine("--- M11: range determines chokepoint viability ---");
+Console.WriteLine($"JFK-LHR direct: {new Route(byId["jfk"], lhr, narrowbody, 1).DistanceKm:N0} km. " +
+    $"Via {gate.Id}: {new Route(byId["jfk"], gate, narrowbody, 1).DistanceKm:N0} + {new Route(gate, lhr, narrowbody, 1).DistanceKm:N0} km.");
+
+var earlyEraRoutes = new[]
+{
+    new Route(byId["jfk"], gate, constellation, WeeklyRoundTrips: 3), // JFK-Gander
+    new Route(gate, lhr, constellation, WeeklyRoundTrips: 3),          // Gander-LHR
+};
+var earlyEraPlan = NetworkPlanner.Plan(earlyEraRoutes, cities, demandModel);
+var earlyEraJfkLhr = earlyEraPlan.Itineraries.Single(i =>
+    (i.Itinerary.Origin.Id == "jfk" && i.Itinerary.Destination.Id == "lhr") ||
+    (i.Itinerary.Origin.Id == "lhr" && i.Itinerary.Destination.Id == "jfk"));
+Console.WriteLine($"Early era (Constellation, range {constellation.RangeKm:N0} km): JFK-LHR resolves as {earlyEraJfkLhr.Itinerary.Kind} " +
+    $"— {earlyEraJfkLhr.Itinerary.Legs.Count} leg(s), via {gate.Id}.");
+
+var jetEraRoutes = new[] { new Route(byId["jfk"], lhr, narrowbody, WeeklyRoundTrips: 3) };
+var jetEraPlan = NetworkPlanner.Plan(jetEraRoutes, cities, demandModel);
+var jetEraJfkLhr = jetEraPlan.Itineraries.Single(i => i.Itinerary.Origin.Id == "jfk" && i.Itinerary.Destination.Id == "lhr");
+Console.WriteLine($"Jet era (Boeing 707, range {narrowbody.RangeKm:N0} km): JFK-LHR resolves as {jetEraJfkLhr.Itinerary.Kind} " +
+    $"— {jetEraJfkLhr.Itinerary.Legs.Count} leg(s), {gate.Id} bypassed entirely.");
+
+// A range-blind order attempt gets rejected with a clear reason, not a silently dead route.
+var rejectedAttempt = QuarterEngine.RunQuarter(
+    1, Array.Empty<Route>(), QuarterEngine.BaseActionCap,
+    new QuarterOrder[] { new RouteOrder(byId["jfk"], lhr, constellation, WeeklyRoundTrips: 3) },
+    cities, demandModel);
+var rejectionBriefing = BriefingGenerator.Generate(null, rejectedAttempt);
+Console.WriteLine($"Ordering a Constellation direct on JFK-LHR: {rejectionBriefing.Single().Message}");

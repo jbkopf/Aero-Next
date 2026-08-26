@@ -18,9 +18,12 @@ public static class BriefingGenerator
 
         foreach (var order in current.RejectedOrders)
         {
-            items.Add(new BriefingItem(
-                ExceptionKind.OrderRejectedOverBudget,
-                $"Order rejected, over budget: {Describe(order)}"));
+            // Reason isn't stored on the order — re-derive it here rather
+            // than widen QuarterResult's shape for a display-only detail.
+            var outOfRange = order is RouteOrder ro && !ro.IsWithinRange;
+            items.Add(outOfRange
+                ? new BriefingItem(ExceptionKind.OrderRejectedOutOfRange, $"Order rejected, aircraft out of range: {Describe(order)}")
+                : new BriefingItem(ExceptionKind.OrderRejectedOverBudget, $"Order rejected, over budget: {Describe(order)}"));
         }
 
         var capIncrease = current.AppliedOrders.OfType<HireExecutiveOrder>().Sum(h => h.CapIncrease);

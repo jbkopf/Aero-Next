@@ -197,4 +197,33 @@ public class BaselineAiTests
 
         Assert.Empty(result.RejectedOrders);
     }
+
+    [Fact]
+    public void DecideOrders_SkipsCandidatePair_BeyondAircraftRange()
+    {
+        var a = MakeCity("a", 0, 0, 100);
+        var farButHighDemand = MakeCity("far", 40, 40, 100); // best demand, but out of reach
+        var near = MakeCity("near", 0.5, 0.5, 5); // lower demand, but reachable
+        var cities = new[] { a, farButHighDemand, near };
+        var shortRangeAircraft = new AircraftType("t", "Test", Seats: 140, RangeKm: 500);
+
+        var orders = BaselineAi.DecideOrders(Array.Empty<Route>(), QuarterEngine.BaseActionCap, cities, DemandModel, shortRangeAircraft);
+
+        var routeOrder = Assert.Single(orders.OfType<RouteOrder>());
+        Assert.Equal("near", routeOrder.Destination.Id);
+    }
+
+    [Fact]
+    public void DecideOrders_WithShortRangeAircraft_NeverProducesRejectedOrders()
+    {
+        var a = MakeCity("a", 0, 0, 100);
+        var far = MakeCity("far", 40, 40, 100);
+        var cities = new[] { a, far };
+        var shortRangeAircraft = new AircraftType("t", "Test", Seats: 140, RangeKm: 500);
+
+        var orders = BaselineAi.DecideOrders(Array.Empty<Route>(), QuarterEngine.BaseActionCap, cities, DemandModel, shortRangeAircraft);
+        var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, orders, cities, DemandModel);
+
+        Assert.Empty(result.RejectedOrders);
+    }
 }
