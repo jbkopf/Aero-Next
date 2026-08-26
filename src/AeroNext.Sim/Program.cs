@@ -600,3 +600,20 @@ for (var q = 1; q <= campaignQuarters; q++)
             $"{campaignMarket.TotalCarried(seat),10:N0} pax/qtr, cash {finance.CashBalance,16}, bankrupt={finance.IsBankrupt}");
     }
 }
+
+// ---------------------------------------------------------------------
+// M15 (Game Setup & Initial Conditions roadmap): home region model.
+// Confirms Africa is excluded as a home region and prints each home
+// region's eligible (non-gateway) starting cities, straight from the same
+// cities.json every other demo section already loads above.
+// ---------------------------------------------------------------------
+Console.WriteLine();
+Console.WriteLine("=== M15: Home regions and eligible starting cities ===");
+Console.WriteLine($"Home regions: {string.Join(", ", HomeRegions.All)} (Africa excluded: {!HomeRegions.IsHomeRegion(Region.Africa)})");
+
+foreach (var region in HomeRegions.All)
+{
+    var eligible = HomeRegions.EligibleStartingCities(region, cities);
+    var names = string.Join(", ", eligible.Select(c => $"{c.Name} ({c.Id})"));
+    Console.WriteLine($"  {region,-13} {eligible.Count} eligible: {names}");
+}

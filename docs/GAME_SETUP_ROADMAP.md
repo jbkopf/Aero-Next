@@ -1,0 +1,261 @@
+# Game Setup & Initial Conditions Roadmap
+
+**Status: M15 complete, M16–M19 not started.** Builds on the completed sim
+core (`docs/SIM_CORE_ROADMAP.md`, M0–M14, all done). Continues that roadmap's
+milestone numbering (M15+) rather than restarting at M0, since this is the
+next thing built on the same headless core, not a separate project.
+
+**Scope: AeroNext.Core and AeroNext.Sim only, same as the sim core roadmap.**
+No Godot, no UI, no networking. "Ask the player" here means: a pure function
+that takes structured input (player count, names, city choices) and returns
+validated starting state — `AeroNext.Sim` supplies that input from the
+command line or a scripted list, exactly how M5–M14 already simulate turns
+without a UI. The eventual Godot client's setup screen calls the same
+functions; it doesn't get its own logic.
+
+**Explicitly out of scope, deferred to a later AI-improvement phase:** making
+`BaselineAi` play differently per airline (personality, risk tolerance,
+randomized choices). That's the *other* half of the "why did all 4 AI
+airlines go bankrupt in the same quarter" finding from M13 — identical
+starting conditions was the half in scope here; identical decision-making
+is a separate, larger problem (retuning or replacing `BaselineAi` itself)
+intentionally not touched by this roadmap.
+
+Each milestone lands as its own small commit, with tests alongside the
+logic, per CLAUDE.md working preferences. A milestone is done when
+`dotnet test` covers it, a coverage check
+(`dotnet test --collect:"XPlat Code Coverage"`) has been read and every gap
+run to ground, and `AeroNext.Sim` can demonstrate it from the command line.
+
+---
+
+## M15 — Home region model ✅
+
+**The gap this closes:** `Region` already has 5 values (NorthAmerica,
+Europe, Asia, SouthAmerica, Africa), and M1's own note already called Africa
+"a bridge region" rather than a home region — but nothing in code encodes
+that distinction. CLAUDE.md specifies **exactly 4 home regions**, one per
+player, with the map partitioning itself unless prevented. That mapping
+needs to be a real, queryable thing before setup can assign one region per
+airline.
+
+Add a `HomeRegions` concept (`AeroNext.Core.World`) identifying the 4
+player-assignable regions (NorthAmerica, Europe, Asia, SouthAmerica) and
+excluding Africa, which stays a chokepoint/bridge region — reachable,
+containing real chokepoint cities (Cairo, Dakar), but never a player's home
+base. Also catalog, per home region, which of its cities are legal starting
+cities: **non-gateway cities only.** A region's gateway (JFK, LHR, HND/HKG,
+GRU) stays inside M9's contested-negotiation mechanic for everyone,
+including the local airline — handing a player their region's flagship hub
+for free would cut against "a home region cannot fund a win" by making the
+home region's best asset unconditionally free. Concretely, from the
+existing `cities.json`:
+
+- NorthAmerica: `ord`, `sfo`, `mia`, `yyz`, `mex`
+- Europe: `cdg`, `fra`, `fco`, `mad`, `lis`
+- Asia: `sin`, `pvg`, `bkk`, `icn`, `del`
+- SouthAmerica: `eze`, `gig`
+
+**Done when:** a query "eligible starting cities for region X" returns the
+non-gateway set above (or whatever the checked-in data actually contains —
+this must read `cities.json`, not hardcode the list twice), and a query
+"is this a home region" correctly excludes Africa. Tests: every home region
+has at least 2 eligible non-gateway cities (setup needs real choice, not a
+single forced pick); Africa is never returned as a home region or assigned
+to a player.
+
+Done. `HomeRegions` (`AeroNext.Core.World`) exposes `All` (the 4 home
+regions, in a fixed order — never enum declaration order or dictionary
+iteration, per determinism rule #3), `IsHomeRegion`, and
+`EligibleStartingCities`, which throws for Africa rather than silently
+returning an empty list — a caller asking for Africa's starting cities is
+a bug, not a valid empty case. Confirmed against the real dataset: every
+home region resolves to at least 2 non-gateway cities (NorthAmerica and
+Europe get 5 each, Asia 5, SouthAmerica 2 — the smallest, since `gru` is
+South America's only gateway and the dataset only has 3 South American
+cities total). 11 new tests, 100% line/branch coverage on
+`HomeRegions.cs`; overall project coverage unchanged at 99.75%/99.59%.
+Demonstrated in `AeroNext.Sim`.
+
+---
+
+## M16 — Regional economics and region-appropriate aircraft
+
+Two data additions, both needed before M18 can derive anything from a
+starting city.
+
+**Regional economic factor.** CLAUDE.md's M1 already treats city
+`demandWeight` as a population/GDP proxy; there's no separate per-region
+number today. Rather than invent a second, independently-tuned economic
+system, derive a region's economic factor from data already in
+`cities.json`: sum (or average) `demandWeight` across each home region's
+cities, normalize against the global mean. This keeps "starting cash
+depends on regional economic factors" honest and data-driven instead of a
+second hand-authored table that can drift out of sync with the demand model.
+
+**Region-appropriate starting aircraft.** This surfaces a real gap in
+`data/aircraft.json`: every aircraft in the file today is American
+(Douglas, Lockheed, Boeing), and at the 1955 campaign start
+(`Timeline.StartYear`) only two types even exist yet — DC-3 (1935) and
+Constellation (1943), both American. "Primarily European-built aircraft for
+European cities" can't be built honestly until a non-American 1955-era
+aircraft exists in the catalog.
+
+Add a `Manufacturer` and `ManufacturerRegion` (a `Region`) field to
+`AircraftType`. Add real, period-appropriate non-American types available
+by 1955:
+- **Europe:** Vickers Viscount (British, entered service 1953 — a real
+  1955-available short/medium-haul turboprop, comparable class to the
+  Constellation).
+- **Asia and South America:** no indigenous airliner manufacturer existed
+  in either region by 1955 — inventing one would be fabricating history,
+  not modeling it. Their starting aircraft stays an imported American type
+  (`ManufacturerRegion = NorthAmerica`), which is itself historically
+  accurate (period Asian and South American carriers really did fly
+  Douglas and Lockheed equipment). Document this asymmetry here rather than
+  papering over it with a fictional manufacturer.
+- **NorthAmerica:** unaffected — DC-3/Constellation already fit.
+
+This milestone adds exactly one non-American type — the minimum needed for
+an honest 1955 starting aircraft per home region, not a general catalog
+expansion. A full pass covering Soviet, Chinese, and regional-jet
+manufacturers (Embraer, Bombardier) belongs to future work — see "Kept in
+mind" at the bottom of this document, not this milestone.
+
+**Done when:** every home region has at least one `AvailableFromYear <=
+1955` aircraft type queryable as "appropriate" for it (own-manufacturer for
+Europe/NorthAmerica, best-available import for Asia/SouthAmerica). Tests:
+regional economic factor is computed from `cities.json` (not hardcoded) and
+is strictly positive for all 4 home regions; every home region resolves to
+at least one 1955-available aircraft type.
+
+---
+
+## M17 — Player setup flow: count, names, starting cities
+
+The actual "ask the player" sequence, as a pure function over structured
+input (no console I/O in `AeroNext.Core` — `AeroNext.Sim` supplies the
+answers, per this roadmap's scope note above).
+
+1. **Human player count, 0–4.** Validate the range; reject anything else.
+2. **For each human seat:** airline name (any non-empty string, unique
+   across all 4 airlines including AI-generated ones) and a starting city,
+   chosen from M15's per-region eligible set. **A city's region is claimed
+   exclusively** — once one player (human or AI) has picked a city in a
+   region, no other airline may pick a city in that region. This is the
+   direct implementation of "four home regions... one per player"; with
+   always exactly 4 airlines and exactly 4 home regions, the mapping is 1:1
+   by construction.
+3. **Remaining seats (4 minus human count) are AI-controlled.** Each gets an
+   auto-generated name and is assigned one of the still-unclaimed home
+   regions, sorted by region name (never dictionary iteration order, per
+   CLAUDE.md's determinism rules) so the assignment order itself is fixed.
+   **Within its assigned region, the AI's starting city is a specific,
+   deterministic pick** — the eligible city with the highest
+   `demandWeight`, ties broken by city id ascending — not merely "one of"
+   the eligible set. Every AI seat gets exactly one region, and every
+   region resolves to exactly one city, so **no two airlines — human or
+   AI — ever share a starting city**: uniqueness falls directly out of
+   region-exclusivity (step 2) plus this fixed per-region pick, rather
+   than needing a separate uniqueness check bolted on afterward. Same
+   seed/same human choices must always produce the same AI seats.
+
+**Done when:** all four combinations at the boundary are covered —
+0 humans (all 4 seats deterministically AI-assigned), 4 humans (no AI seats,
+all regions player-claimed), and the two asymmetric cases in between.
+Tests: player count outside 0–4 is rejected; two humans claiming the same
+region (directly or via the same city) is rejected; duplicate airline names
+are rejected; AI seat assignment is deterministic across repeated runs with
+identical human input; **all 4 assigned starting cities are pairwise
+distinct in every tested configuration**, including 0-human (an all-AI
+game must not silently collide two seats onto the same city).
+
+---
+
+## M18 — Deriving starting conditions from starting city
+
+The core of this roadmap: turn a validated (region, city) pair from M17
+into real starting state, using M16's data.
+
+- **Starting cash:** a base amount scaled by M16's regional economic
+  factor, so a stronger-demand home region starts richer — CLAUDE.md's
+  "population/wealth" framing applied at setup, not just to route revenue.
+- **Starting aircraft:** a small fixed quantity (exact count set during
+  implementation, tuned like M11's production rates were — enough for one
+  real route, not a fleet) of the region-appropriate type from M16,
+  respecting `AvailableFromYear` the same way `QuarterEngine` already
+  enforces it for orders placed mid-campaign.
+- **Guaranteed turn-1 route:** the requirement is "able to open at least
+  one route with the starting allotment in the first turn," not a new
+  reserved-slot object. Since only *gateway* cities are gated by M9's
+  contested capacity, and M15 already restricts starting cities to
+  non-gateway ones, this reduces to a data guarantee: every eligible
+  starting city must have at least one other city in the same home region
+  reachable within the starting aircraft's `RangeKm` and with positive
+  gravity demand between them (checked against the real `GravityDemandModel`
+  and `cities.json`, not assumed). If any eligible city fails this check,
+  it's either dropped from M15's eligible-city list or paired with a
+  longer-range starting aircraft — resolved with real data during this
+  milestone, not guessed here.
+
+**Done when:** for every (home region, eligible starting city) pair, the
+derived starting state — cash, aircraft, and at least one in-range
+same-region neighbor — is internally consistent, and a `RouteOrder` from
+the starting city to that neighbor, using the starting aircraft, is
+accepted (not rejected for range, era, or budget) by `QuarterEngine` on
+quarter 1. Tests: this exact check, run for every eligible city in the
+data, not just one hand-picked example.
+
+---
+
+## M19 — Integration demo and turn-1 validation
+
+Wire M15–M18 into one entry point `AeroNext.Sim` can run end-to-end, and
+prove the whole chain with real numbers instead of unit tests in isolation.
+
+**Done when:** `AeroNext.Sim` demonstrates at least three configurations —
+0 human players, 1 human + 3 AI, and 4 human players — each producing 4
+airlines with distinct home regions, distinct starting cities, region-scaled
+starting cash, region-appropriate starting aircraft, and a confirmed
+legal quarter-1 `RouteOrder` per airline, fed through the real
+`QuarterEngine`/`CompetitiveMarket`/`FinancialResolver` chain (not a
+separate mock path) to confirm turn 1 actually resolves cleanly for every
+seat, human or AI. This is also where `BaselineAi` gets its first
+non-identical inputs (different home regions, different starting fleets),
+which should be noted honestly: it will still make structurally identical
+*decisions* given similar inputs, since the AI logic itself is out of scope
+here — the difference this roadmap produces is in what each airline starts
+with, not how it decides.
+
+---
+
+## Kept in mind, not scheduled
+
+- **AI differentiation** — deferred by explicit decision (see scope note
+  above). Once this roadmap lands, the 4 airlines will no longer have
+  identical starting conditions, but will still run the identical
+  `BaselineAi` heuristic — a natural, well-scoped next roadmap.
+- **Gateway home-city exception** — M15 deliberately keeps every region's
+  gateway inside the ordinary M9 contested mechanic, including for the
+  local airline. Revisit only with real evidence this makes early gateway
+  negotiation uninteresting, not by default.
+- **Godot client setup screen** — reads M17's structured input/output
+  shapes directly; no separate setup logic should ever need to exist
+  client-side.
+- **Broaden the aircraft catalog well beyond M16's minimum.** M16 only adds
+  the single non-American type (Vickers Viscount) needed to make Europe's
+  1955 starting aircraft honest — it deliberately doesn't attempt full
+  historical coverage. A real future pass should expand `data/aircraft.json`
+  to most commercially significant airliners actually flown across the
+  campaign's 1955–2015 span: American (Douglas, Lockheed, Boeing, McDonnell
+  Douglas), European (Airbus, British Aerospace/BAC, in addition to the
+  Viscount), Soviet/Russian (Tupolev, Ilyushin — historically dominant
+  across the Eastern Bloc and a natural fit if a Soviet-aligned region or
+  political-alignment mechanic ever lands), Chinese (COMAC, in the later
+  campaign years), and smaller regional-jet manufacturers (Embraer,
+  Bombardier) whose short-hop, lower-capacity aircraft would give the
+  short/medium-haul end of the fleet — currently just the DC-3 and
+  Viscount — much more depth and era coverage. Not scheduled here because
+  M16's own "done when" (one honest 1955 aircraft per home region) doesn't
+  need it; noted so the eventual catalog expansion isn't forgotten or
+  mistaken for out of scope.
