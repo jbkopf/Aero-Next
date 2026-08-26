@@ -6,24 +6,30 @@ namespace AeroNext.Core.Ai;
 
 /// <summary>
 /// A simple heuristic opponent: greedily enters the single highest-demand
-/// city pair it doesn't already serve, if it can afford a market action,
-/// and always bumps frequency on its own best-performing existing route
-/// (free, per CLAUDE.md — adding frequency to a served pair costs nothing).
+/// city pair it doesn't already serve, if it can afford a market action;
+/// bids on the single highest-demand gateway it doesn't yet touch, if it
+/// can also afford a contested action (per CLAUDE.md — negotiations are
+/// "blind" even for a skilled human, so not checking the target's
+/// remaining gate capacity before bidding isn't a missing smarts, it's
+/// true to the mechanic); and always bumps frequency on its own
+/// best-performing existing route (free, per CLAUDE.md — adding frequency
+/// to a served pair costs nothing).
 ///
 /// Not trying to play well — CLAUDE.md's game is always exactly 4 airlines,
 /// so this exists because the sim can never run a representative quarter
 /// without something producing orders for whichever seats aren't human, not
 /// because this is meant to be a strong opponent. Deliberately narrow:
-/// no hub-awareness (picks the single best pair in the whole world, not the
-/// best pair connected to its existing network), no executive hiring, no
-/// awareness of contested actions (M9/M10 don't exist yet). Purely a
-/// function of current state — no randomness, so it's deterministic by
+/// no hub-awareness (picks the single best pair/gateway in the whole world,
+/// not the best one connected to its existing network), no executive
+/// hiring, no awareness of aircraft orders (M10 doesn't exist yet). Purely
+/// a function of current state — no randomness, so it's deterministic by
 /// construction without needing a seeded RNG.
 /// </summary>
 public static class BaselineAi
 {
     private const int NewRouteWeeklyRoundTrips = 3;
     private const int FrequencyIncrement = 2;
+    private static readonly Money NegotiationBidAmount = Money.FromDollars(2_000_000);
 
     public static IReadOnlyList<QuarterOrder> DecideOrders(
         IReadOnlyList<Route> currentRoutes,
@@ -33,21 +39,33 @@ public static class BaselineAi
         AircraftType aircraft)
     {
         var orders = new List<QuarterOrder>();
-
-        if (actionCap >= 1)
-        {
-            var bestUnserved = FindBestUnservedPair(currentRoutes, allCities, demandModel);
-            if (bestUnserved is not null)
-            {
-                orders.Add(new RouteOrder(bestUnserved.Origin, bestUnserved.Destination, aircraft, NewRouteWeeklyRoundTrips));
-            }
-        }
+        var spent = 0;
 
         var bestExisting = FindBestPerformingRoute(currentRoutes, demandModel);
         if (bestExisting is not null)
         {
             orders.Add(new RouteOrder(
                 bestExisting.Origin, bestExisting.Destination, bestExisting.Aircraft, bestExisting.WeeklyRoundTrips + FrequencyIncrement));
+        }
+
+        if (spent + 1 <= actionCap)
+        {
+            var bestUnserved = FindBestUnservedPair(currentRoutes, allCities, demandModel);
+            if (bestUnserved is not null)
+            {
+                orders.Add(new RouteOrder(bestUnserved.Origin, bestUnserved.Destination, aircraft, NewRouteWeeklyRoundTrips));
+                spent += 1;
+            }
+        }
+
+        if (spent + 1 <= actionCap)
+        {
+            var bestGateway = FindBestUnservedGateway(currentRoutes, allCities);
+            if (bestGateway is not null)
+            {
+                orders.Add(new NegotiationOrder(bestGateway, NegotiationBidAmount));
+                spent += 1;
+            }
         }
 
         return orders;
@@ -75,6 +93,19 @@ public static class BaselineAi
             .ThenBy(l => l.Route.Origin.Id, StringComparer.Ordinal)
             .ThenBy(l => l.Route.Destination.Id, StringComparer.Ordinal)
             .Select(l => l.Route)
+            .FirstOrDefault();
+    }
+
+    private static City? FindBestUnservedGateway(IReadOnlyList<Route> currentRoutes, IReadOnlyList<City> allCities)
+    {
+        var touchedCityIds = currentRoutes
+            .SelectMany(r => new[] { r.Origin.Id, r.Destination.Id })
+            .ToHashSet();
+
+        return allCities
+            .Where(c => c.IsGateway && !touchedCityIds.Contains(c.Id))
+            .OrderByDescending(c => c.DemandWeight)
+            .ThenBy(c => c.Id, StringComparer.Ordinal)
             .FirstOrDefault();
     }
 }

@@ -11,6 +11,9 @@ public class BaselineAiTests
     private static City MakeCity(string id, double lat, double lon, int weight) =>
         new(id, id.ToUpperInvariant(), Region.Asia, lat, lon, weight, false, null);
 
+    private static City MakeGateway(string id, double lat, double lon, int weight, int gateCapacity = 3) =>
+        new(id, id.ToUpperInvariant(), Region.Asia, lat, lon, weight, true, gateCapacity);
+
     private static readonly GravityDemandModel DemandModel = new();
     private static readonly AircraftType Aircraft = new("t", "Test", Seats: 140);
 
@@ -134,5 +137,64 @@ public class BaselineAiTests
         var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, orders, cities, DemandModel);
 
         Assert.Empty(result.RejectedOrders); // the AI never proposes more than it can afford
+    }
+
+    [Fact]
+    public void DecideOrders_IncludesNegotiation_ForBestUnservedGateway()
+    {
+        var a = MakeCity("a", 0, 0, 100);
+        var gateway = MakeGateway("gw", 30, 30, 80);
+        var cities = new[] { a, gateway };
+
+        var orders = BaselineAi.DecideOrders(Array.Empty<Route>(), QuarterEngine.BaseActionCap, cities, DemandModel, Aircraft);
+
+        var negotiation = Assert.Single(orders.OfType<NegotiationOrder>());
+        Assert.Equal("gw", negotiation.TargetCity.Id);
+        Assert.True(negotiation.Bid.Cents > 0);
+    }
+
+    [Fact]
+    public void DecideOrders_NeverTargetsAGatewayItAlreadyTouches()
+    {
+        var a = MakeCity("a", 0, 0, 100);
+        var gateway = MakeGateway("gw", 30, 30, 80);
+        var otherGateway = MakeGateway("gw2", 40, 40, 10);
+        var cities = new[] { a, gateway, otherGateway };
+        var existing = new[] { new Route(a, gateway, Aircraft, WeeklyRoundTrips: 3) }; // already touches "gw"
+
+        var orders = BaselineAi.DecideOrders(existing, QuarterEngine.BaseActionCap, cities, DemandModel, Aircraft);
+
+        var negotiation = Assert.Single(orders.OfType<NegotiationOrder>());
+        Assert.Equal("gw2", negotiation.TargetCity.Id);
+    }
+
+    [Fact]
+    public void DecideOrders_TightBudget_PrioritizesNewRouteOverNegotiation()
+    {
+        var a = MakeCity("a", 0, 0, 100);
+        var b = MakeCity("b", 1, 1, 90);
+        var gateway = MakeGateway("gw", 30, 30, 80);
+        var cities = new[] { a, b, gateway };
+
+        // Cap 1: only the frequency-free bump plus exactly one of the two
+        // cost-1 candidates can fit.
+        var orders = BaselineAi.DecideOrders(Array.Empty<Route>(), actionCap: 1, cities, DemandModel, Aircraft);
+
+        Assert.Single(orders.OfType<RouteOrder>());
+        Assert.Empty(orders.OfType<NegotiationOrder>());
+    }
+
+    [Fact]
+    public void DecideOrders_WithGateways_StillProducesLegalOrders_WhenRunThroughQuarterEngine()
+    {
+        var a = MakeCity("a", 0, 0, 100);
+        var b = MakeCity("b", 1, 1, 90);
+        var gateway = MakeGateway("gw", 30, 30, 80);
+        var cities = new[] { a, b, gateway };
+
+        var orders = BaselineAi.DecideOrders(Array.Empty<Route>(), QuarterEngine.BaseActionCap, cities, DemandModel, Aircraft);
+        var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, orders, cities, DemandModel);
+
+        Assert.Empty(result.RejectedOrders);
     }
 }

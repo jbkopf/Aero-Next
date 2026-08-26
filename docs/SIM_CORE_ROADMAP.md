@@ -350,7 +350,7 @@ milestones that add those mechanics.
 
 ---
 
-## M9 — Contested resolution: landing rights
+## M9 — Contested resolution: landing rights ✅
 
 Silent-commitment bidding at gateway cities. Resolve on
 money × relations × reputation × political alignment. Multiple suitors raise
@@ -359,6 +359,44 @@ attempt cheaper) — without this the mechanism dies per CLAUDE.md.
 
 **Done when:** a 3-suitor scripted negotiation at one gate produces one
 winner and two improved-but-failed bids, reproducibly under a fixed seed.
+
+Done. `NegotiationOrder` (a `QuarterOrder` in `AeroNext.Core.Turns`, always
+1 action — contested actions have no free variant) plus
+`LandingRightsBoard`/`LandingRightsResolver` in a new
+`AeroNext.Core.Negotiations` namespace. Two previously-unused foundations
+finally earned their keep: `Money` (built in M0) is the bid currency, and
+`City.GateCapacity` (built in M1) caps how many slots a city can ever grant.
+`SimRng` (also M0) got its first real production use, picking each
+negotiation's 2-4 quarter resolution delay — deterministic per seed, exactly
+as the determinism rules require.
+
+**Simplification, matching the M6 `Quality` precedent:** CLAUDE.md's
+"money × relations × reputation × political alignment" collapses to
+`Bid.Cents × Standing`, one number per (airline, city) that rises 0.2 per
+loss there. Modeling relations/reputation/political-alignment as three
+independently-tuned systems isn't something the design doc specifies enough
+to justify — it would be invented complexity, not a real requirement.
+
+**Resolution logic:** negotiations due the same quarter are grouped by
+target city; within a group, the top N by Score win the city's N remaining
+gate slots (N = `GateCapacity` minus slots already granted, so scarcity
+persists correctly across separate resolution rounds); everyone else's
+Standing rises. Bids submitted in different quarters aren't forced to
+coincide — if only one suitor's bid is due at a city that quarter, it wins
+by default (or auto-loses if the gates are already full), which is a
+faithful reading of "commit blind," not a gap: you don't know whether a
+rival's differently-timed bid will even be in the room when yours resolves.
+The `AeroNext.Sim` demo (real data: Gander, capacity 2) demonstrates this
+directly — the smallest of four bids won outright because it resolved alone
+in an earlier quarter, while a bigger, later bid auto-lost because both
+slots were already gone.
+
+**BaselineAi extended**, closing the M8 follow-up: it now also bids
+(a fixed placeholder amount) on the single highest-demand gateway it
+doesn't yet touch, budget-permitting, ranked behind route entry when
+budget is tight. It doesn't check remaining gate capacity before bidding —
+deliberately: per CLAUDE.md, negotiations are blind even for a skilled
+human, so that's the mechanic working as intended, not a missing smarts.
 
 ---
 

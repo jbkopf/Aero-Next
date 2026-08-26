@@ -61,16 +61,19 @@ public static class QuarterEngine
     /// <summary>
     /// 1 action for a pair not already in currentRoutes (entering a new
     /// city-pair); 0 for a pair already served (adding frequency is free,
-    /// per CLAUDE.md) and for private actions. Evaluated against the
-    /// quarter's starting routes for every order in the batch, not against
-    /// other orders being applied in the same batch — keeps cost
-    /// order-independent within a quarter, matching the "collect, then
-    /// resolve" simultaneity this engine is built around.
+    /// per CLAUDE.md) and for private actions. A negotiation order always
+    /// costs 1 — contested actions have no free variant, unlike market
+    /// actions. Evaluated against the quarter's starting routes for every
+    /// order in the batch, not against other orders being applied in the
+    /// same batch — keeps cost order-independent within a quarter, matching
+    /// the "collect, then resolve" simultaneity this engine is built
+    /// around.
     /// </summary>
     public static int Cost(QuarterOrder order, IReadOnlyList<Route> currentRoutes) => order switch
     {
         RouteOrder ro => currentRoutes.Any(r => r.Origin.Id == ro.Origin.Id && r.Destination.Id == ro.Destination.Id) ? 0 : 1,
         HireExecutiveOrder => 0,
+        NegotiationOrder => 1,
         _ => throw new NotSupportedException($"Unknown order type: {order.GetType().Name}"),
     };
 

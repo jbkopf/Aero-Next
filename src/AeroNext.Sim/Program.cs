@@ -1,6 +1,8 @@
+using AeroNext.Core;
 using AeroNext.Core.Ai;
 using AeroNext.Core.Airlines;
 using AeroNext.Core.Competition;
+using AeroNext.Core.Negotiations;
 using AeroNext.Core.Turns;
 using AeroNext.Core.World;
 
@@ -170,6 +172,7 @@ static string DescribeOrder(QuarterOrder order) => order switch
 {
     RouteOrder ro => $"{ro.Origin.Id}-{ro.Destination.Id}@{ro.WeeklyRoundTrips}/wk",
     HireExecutiveOrder => "hire executive",
+    NegotiationOrder no => $"bid {no.Bid} @ {no.TargetCity.Id}",
     _ => order.GetType().Name,
 };
 
@@ -312,3 +315,55 @@ for (var q = 0; q < humanScript.Count; q++)
         Console.WriteLine($"  {seat.Name,-20} {leagueRoutes[seat.Name].Count} routes, {standings.TotalCarried(seat),8:N0} pax/qtr");
     }
 }
+
+// --- M9: contested resolution — landing rights ---
+// Silent-commitment bidding at a real gateway (Gander — a chokepoint with a
+// capacity of 2). Submission and resolution timing use a fixed seed so this
+// is reproducible; the actual resolve quarters aren't forced to coincide —
+// "commit blind and learn late" means suitors don't know whether their bid
+// will even face competition when it lands.
+var gate = byId["yqx"];
+var suitorNames = new[] { "Trans-Aero", "Northern Cross", "Liberty Air", "Continental Domestic" };
+var suitorBids = new[]
+{
+    Money.FromDollars(3_000_000),
+    Money.FromDollars(2_500_000),
+    Money.FromDollars(2_000_000),
+    Money.FromDollars(1_500_000),
+};
+var negotiationRng = new SimRng(seed: 7);
+
+var landingBoard = LandingRightsBoard.Empty;
+Console.WriteLine();
+Console.WriteLine($"--- M9: landing rights at {gate.Id} (Gander) — gate capacity {gate.GateCapacity} ---");
+Console.WriteLine("Quarter 1: all four suitors submit silently.");
+
+for (var i = 0; i < suitorNames.Length; i++)
+{
+    var suitor = new Airline(suitorNames[i], Array.Empty<Route>());
+    landingBoard = LandingRightsResolver.Submit(landingBoard, suitor, new NegotiationOrder(gate, suitorBids[i]), currentQuarter: 1, negotiationRng);
+}
+
+foreach (var pending in landingBoard.Pending.OrderBy(p => p.Airline.Name, StringComparer.Ordinal))
+{
+    Console.WriteLine($"  {pending.Airline.Name,-20} bid {pending.Bid} — resolves quarter {pending.ResolvesQuarter} (silent until then)");
+}
+
+for (var q = 2; q <= 6; q++)
+{
+    var (nextBoard, outcomes) = LandingRightsResolver.ResolveQuarter(landingBoard, q);
+    landingBoard = nextBoard;
+
+    if (outcomes.Count == 0)
+    {
+        continue;
+    }
+
+    Console.WriteLine($"Quarter {q}: {outcomes.Count} bid(s) resolve at {gate.Id}.");
+    foreach (var outcome in outcomes)
+    {
+        Console.WriteLine($"  {outcome.Airline.Name,-20} {(outcome.Won ? "WON the slot" : "lost")} — standing now {outcome.StandingAfter:F2}");
+    }
+}
+
+Console.WriteLine($"Gate slots granted: {landingBoard.SlotsGranted.GetValueOrDefault(gate.Id)} of {gate.GateCapacity}.");
