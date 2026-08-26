@@ -2,6 +2,8 @@ using AeroNext.Core;
 using AeroNext.Core.Ai;
 using AeroNext.Core.Airlines;
 using AeroNext.Core.Competition;
+using AeroNext.Core.Alliances;
+using AeroNext.Core.Fleet;
 using AeroNext.Core.Negotiations;
 using AeroNext.Core.Turns;
 using AeroNext.Core.World;
@@ -173,6 +175,9 @@ static string DescribeOrder(QuarterOrder order) => order switch
     RouteOrder ro => $"{ro.Origin.Id}-{ro.Destination.Id}@{ro.WeeklyRoundTrips}/wk",
     HireExecutiveOrder => "hire executive",
     NegotiationOrder no => $"bid {no.Bid} @ {no.TargetCity.Id}",
+    AircraftOrder ao => $"order {ao.Quantity}x {ao.Type.Name}",
+    LeaseAircraftOrder lo => $"lease {lo.Quantity}x {lo.Type.Name}",
+    AllianceCourtOrder co => $"court {co.Target.Name}",
     _ => order.GetType().Name,
 };
 
@@ -367,3 +372,61 @@ for (var q = 2; q <= 6; q++)
 }
 
 Console.WriteLine($"Gate slots granted: {landingBoard.SlotsGranted.GetValueOrDefault(gate.Id)} of {gate.GateCapacity}.");
+
+// --- M10: contested resolution — aircraft orders and alliances ---
+// Aircraft orders are PUBLIC (no secrecy, no random delay like landing
+// rights) — delivery is purely a function of queue position and the
+// production line's fixed rate.
+var widebody = new AircraftType("747", "Boeing 747", Seats: 400);
+var alpha = new Airline("Alpha Air", Array.Empty<Route>());
+var beta = new Airline("Beta Airways", Array.Empty<Route>());
+var gamma = new Airline("Gamma Skyways", Array.Empty<Route>());
+
+var fleetBoard = AircraftOrderBoard.Empty;
+Console.WriteLine();
+Console.WriteLine("--- M10: aircraft order queue — Alpha and Beta both order a 747 in quarter 1 ---");
+fleetBoard = AircraftOrderResolver.Submit(fleetBoard, alpha, new AircraftOrder(widebody, Quantity: 1), currentQuarter: 1);
+fleetBoard = AircraftOrderResolver.Submit(fleetBoard, beta, new AircraftOrder(widebody, Quantity: 1), currentQuarter: 1);
+fleetBoard = AircraftOrderResolver.Submit(fleetBoard, gamma, new AircraftOrder(narrowbody, Quantity: 2), currentQuarter: 1); // different type: independent queue
+
+for (var q = 2; q <= 4; q++)
+{
+    var (nextFleetBoard, deliveries) = AircraftOrderResolver.ResolveQuarter(fleetBoard, q);
+    fleetBoard = nextFleetBoard;
+
+    Console.WriteLine($"Quarter {q}:");
+    if (deliveries.Count == 0)
+    {
+        Console.WriteLine("  (no deliveries this quarter)");
+    }
+    foreach (var delivery in deliveries)
+    {
+        Console.WriteLine($"  {delivery.Airline.Name,-15} receives {delivery.Quantity}x {delivery.Type.Name}");
+    }
+}
+
+var leaseDelivery = AircraftOrderResolver.ResolveLease(beta, new LeaseAircraftOrder(widebody, Quantity: 1), currentQuarter: 2);
+Console.WriteLine($"Beta Airways leases instead of waiting: {leaseDelivery.Quantity}x {leaseDelivery.Type.Name} delivered quarter {leaseDelivery.DeliveredQuarter} — instant, at a premium.");
+
+// Alliance courting — simultaneous, same-quarter, no queue, no money.
+var regionalX = new RegionalCarrier("regional-x", "Regional Air X");
+var courtOrders = new[]
+{
+    (alpha, new AllianceCourtOrder(regionalX)),
+    (beta, new AllianceCourtOrder(regionalX)),
+    (gamma, new AllianceCourtOrder(regionalX)),
+};
+
+var (allianceBoard, allianceOutcomes) = AllianceResolver.ResolveQuarter(AllianceBoard.Empty, courtOrders);
+
+Console.WriteLine();
+Console.WriteLine($"--- M10: alliance courting — 3 airlines court {regionalX.Name} ---");
+foreach (var outcome in allianceOutcomes)
+{
+    Console.WriteLine($"  {outcome.Airline.Name,-15} {(outcome.Won ? "WINS the alliance" : "loses")}");
+}
+
+// A late suitor tries to court the same carrier next quarter — too late, it already joined.
+var delta = new Airline("Delta Regional", Array.Empty<Route>(), Quality: 10.0); // huge quality edge, doesn't matter
+var (_, lateOutcome) = AllianceResolver.ResolveQuarter(allianceBoard, new[] { (delta, new AllianceCourtOrder(regionalX)) });
+Console.WriteLine($"  Later, {delta.Name} tries too: {(lateOutcome.Single().Won ? "wins" : "loses — already joined someone else, permanently")}");

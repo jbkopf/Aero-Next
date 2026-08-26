@@ -400,7 +400,7 @@ human, so that's the mechanic working as intended, not a missing smarts.
 
 ---
 
-## M10 — Contested resolution: aircraft orders and alliances
+## M10 — Contested resolution: aircraft orders and alliances ✅
 
 Aircraft orders are public and contest delivery-line position, not the
 airframe; leasing is the expensive instant-metal path. Alliance courting:
@@ -408,6 +408,42 @@ a regional carrier joins exactly one alliance.
 
 **Done when:** two airlines ordering the same aircraft type in the same
 quarter produce different delivery quarters, deterministically.
+
+Done, as two deliberately different-shaped mechanics — a third and fourth
+flavor of contested resolution alongside M6's demand splitting and M9's
+silent/randomly-delayed negotiation, all sharing the "several airlines
+target the same scarce object" framing but resolving nothing alike:
+
+- **Aircraft orders** (`AeroNext.Core.Fleet`): a FIFO production queue per
+  aircraft type, no bid, no secrecy, no randomness — CLAUDE.md's
+  information gradient explicitly marks these public, unlike landing
+  rights. `AircraftOrderResolver.Submit`/`ResolveQuarter` mirror M9's
+  submit/resolve shape, but delivery is purely queue position: oldest
+  order ships first, ties (same-quarter orders) break alphabetically by
+  airline name, and an order can never deliver the same quarter it's
+  placed — "order late and you take delivery years later" implies at
+  least one quarter's wait always. Each aircraft type gets its own
+  independent queue. `LeaseAircraftOrder` bypasses the queue entirely for
+  instant same-quarter delivery — the cost premium isn't modeled yet since
+  there's no financial model until M12, but the *mechanism's* defining
+  property (instant vs. queued) is real and tested.
+- **Alliance courting** (`AeroNext.Core.Alliances`): simultaneous,
+  same-quarter, winner-take-all — no queue, no bid. Score is
+  `Airline.Quality` (M6's posture placeholder, reused here since CLAUDE.md
+  doesn't describe courting as a cash commitment the way landing rights
+  are). Once a regional carrier joins, the decision is permanent — no
+  partial payoff for losers, unlike landing rights, because there's
+  nothing left to retry once a carrier picks an alliance.
+
+**Scope decision, stated explicitly:** `BaselineAi` is *not* extended for
+either mechanic this milestone, unlike M8's own note anticipating "light
+follow-up work at M9 and M10." Ordering aircraft or courting an alliance
+has no observable consequence yet — nothing in the sim enforces fleet
+ownership against route capacity, so an AI that "orders" a 747 right now
+would just be flavor with no teeth. That constraint arrives with M11's
+fleet economics, which is the milestone where extending `BaselineAi` to
+actually respect it will mean something. Extending it now would be
+cosmetic, not a real integration.
 
 ---
 
