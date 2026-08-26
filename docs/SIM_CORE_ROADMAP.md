@@ -7,8 +7,10 @@ so it doesn't foreclose them (see "Kept in mind" at the bottom).
 
 Each milestone should land as its own small commit or short commit series,
 with tests alongside the logic it adds (per CLAUDE.md working preferences).
-A milestone is done when `dotnet test` covers it and `AeroNext.Sim` can
-demonstrate it from the command line.
+A milestone is done when `dotnet test` covers it, a coverage check
+(`dotnet test --collect:"XPlat Code Coverage"`) has been read and every gap
+it surfaces run to ground (fixed, or confirmed dead/unreachable), and
+`AeroNext.Sim` can demonstrate it from the command line.
 
 ---
 

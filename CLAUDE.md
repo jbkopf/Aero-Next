@@ -208,3 +208,10 @@ Everything else is downstream of getting this right.
 - Write tests alongside sim logic — the headless core is the whole point.
 - Flag any change that would couple the sim core to Godot.
 - Flag any violation of the determinism rules above.
+- **A milestone isn't complete without a coverage check.** Run
+  `dotnet test --collect:"XPlat Code Coverage"` and read the report before
+  calling a milestone done — not just "tests pass." Chase every gap it
+  surfaces to a real answer: fix it with a test, or determine it's dead/
+  unreachable code and remove it (or, rarely, document why it's
+  deliberately kept unreachable). Don't chase 100% for its own sake once a
+  gap is understood and confirmed to not be a real issue.
