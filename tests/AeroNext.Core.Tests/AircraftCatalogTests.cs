@@ -1,5 +1,6 @@
 using AeroNext.Core;
 using AeroNext.Core.Airlines;
+using AeroNext.Core.World;
 using Xunit;
 
 namespace AeroNext.Core.Tests;
@@ -27,16 +28,68 @@ public class AircraftCatalogTests
     }
 
     [Fact]
-    public void LoadFile_LaterAircraft_HaveGreaterRange()
+    public void LoadFile_MainlineLongHaulLineage_RangeIncreasesOverTime()
     {
+        // dc3 and viscount (M16) are short/medium-haul regional types,
+        // deliberately excluded here: a regional aircraft introduced later
+        // than an existing long-haul flagship legitimately has less range,
+        // since it serves a different route class — not a fleet regression.
+        // The invariant that actually matters (per CLAUDE.md's "chokepoints
+        // obsolete as range improves") is the long-haul lineage specifically.
         var fleet = AircraftCatalog.LoadFile(DataPath);
-        var byYear = fleet.OrderBy(a => a.AvailableFromYear).ToList();
+        var longHaulLineage = fleet
+            .Where(a => a.Id is "l049" or "707" or "747" or "777")
+            .OrderBy(a => a.AvailableFromYear)
+            .ToList();
 
-        for (var i = 1; i < byYear.Count; i++)
+        Assert.True(longHaulLineage.Count >= 2, "Expected the long-haul lineage aircraft to still be present in the dataset.");
+
+        for (var i = 1; i < longHaulLineage.Count; i++)
         {
-            Assert.True(byYear[i].RangeKm >= byYear[i - 1].RangeKm,
-                $"{byYear[i].Id} (range {byYear[i].RangeKm}) should be no shorter-range than earlier {byYear[i - 1].Id} (range {byYear[i - 1].RangeKm}).");
+            Assert.True(longHaulLineage[i].RangeKm >= longHaulLineage[i - 1].RangeKm,
+                $"{longHaulLineage[i].Id} (range {longHaulLineage[i].RangeKm}) should be no shorter-range than earlier {longHaulLineage[i - 1].Id} (range {longHaulLineage[i - 1].RangeKm}).");
         }
+    }
+
+    [Fact]
+    public void LoadFile_NorthAmericaAndEurope_HaveOwnManufacturedTypes()
+    {
+        // M16: real coverage check, not just "the field exists." Asia and
+        // South America are deliberately NOT asserted here — by design,
+        // neither had an indigenous airliner manufacturer this early in the
+        // campaign, so RegionalFleet's own-manufacturer preference has
+        // nothing to prefer for them yet and correctly falls back to
+        // imports (covered by RegionalFleetTests, not here).
+        var fleet = AircraftCatalog.LoadFile(DataPath);
+
+        Assert.Contains(fleet, a => a.ManufacturerRegion == Region.NorthAmerica);
+        Assert.Contains(fleet, a => a.ManufacturerRegion == Region.Europe);
+    }
+
+    [Fact]
+    public void Load_ParsesManufacturerFields_WhenPresent()
+    {
+        const string json = """
+        [{ "id": "t", "name": "Test", "seats": 100, "rangeKm": 1000, "costDollars": 1, "productionRatePerQuarter": 4, "availableFromYear": 1960, "manufacturer": "Vickers", "manufacturerRegion": "Europe" }]
+        """;
+
+        var fleet = AircraftCatalog.Load(json);
+
+        Assert.Equal("Vickers", fleet.Single().Manufacturer);
+        Assert.Equal(Region.Europe, fleet.Single().ManufacturerRegion);
+    }
+
+    [Fact]
+    public void Load_ManufacturerFields_AreOptional()
+    {
+        const string json = """
+        [{ "id": "t", "name": "Test", "seats": 100, "rangeKm": 1000, "costDollars": 1, "productionRatePerQuarter": 4, "availableFromYear": 1960 }]
+        """;
+
+        var fleet = AircraftCatalog.Load(json);
+
+        Assert.Equal("", fleet.Single().Manufacturer);
+        Assert.Null(fleet.Single().ManufacturerRegion);
     }
 
     [Fact]

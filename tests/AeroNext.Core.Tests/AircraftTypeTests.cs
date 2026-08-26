@@ -1,5 +1,6 @@
 using AeroNext.Core;
 using AeroNext.Core.Airlines;
+using AeroNext.Core.World;
 using Xunit;
 
 namespace AeroNext.Core.Tests;
@@ -27,5 +28,16 @@ public class AircraftTypeTests
         Assert.Equal(20_000, type.RangeKm);
         Assert.Equal(Money.Zero, type.Cost);
         Assert.Equal(4, type.ProductionRatePerQuarter);
+        Assert.Equal("", type.Manufacturer);
+        Assert.Null(type.ManufacturerRegion);
+    }
+
+    [Fact]
+    public void Constructor_StoresManufacturerInfo()
+    {
+        var type = new AircraftType("viscount", "Vickers Viscount", Seats: 48, Manufacturer: "Vickers", ManufacturerRegion: Region.Europe);
+
+        Assert.Equal("Vickers", type.Manufacturer);
+        Assert.Equal(Region.Europe, type.ManufacturerRegion);
     }
 }

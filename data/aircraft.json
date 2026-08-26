@@ -1,7 +1,8 @@
 [
-  { "id": "dc3",  "name": "Douglas DC-3",         "seats": 28,  "rangeKm": 2400,  "costDollars": 150000,    "productionRatePerQuarter": 8, "availableFromYear": 1935 },
-  { "id": "l049", "name": "Lockheed Constellation","seats": 60, "rangeKm": 4200,  "costDollars": 700000,    "productionRatePerQuarter": 5, "availableFromYear": 1943 },
-  { "id": "707",  "name": "Boeing 707",           "seats": 140, "rangeKm": 9800,  "costDollars": 5000000,   "productionRatePerQuarter": 6, "availableFromYear": 1958 },
-  { "id": "747",  "name": "Boeing 747",           "seats": 400, "rangeKm": 13000, "costDollars": 20000000,  "productionRatePerQuarter": 1, "availableFromYear": 1970 },
-  { "id": "777",  "name": "Boeing 777",           "seats": 300, "rangeKm": 17000, "costDollars": 30000000,  "productionRatePerQuarter": 2, "availableFromYear": 1995 }
+  { "id": "dc3",      "name": "Douglas DC-3",          "seats": 28,  "rangeKm": 2400,  "costDollars": 150000,    "productionRatePerQuarter": 8, "availableFromYear": 1935, "manufacturer": "Douglas",  "manufacturerRegion": "NorthAmerica" },
+  { "id": "l049",     "name": "Lockheed Constellation","seats": 60,  "rangeKm": 4200,  "costDollars": 700000,    "productionRatePerQuarter": 5, "availableFromYear": 1943, "manufacturer": "Lockheed", "manufacturerRegion": "NorthAmerica" },
+  { "id": "viscount",  "name": "Vickers Viscount",      "seats": 48,  "rangeKm": 2700,  "costDollars": 900000,    "productionRatePerQuarter": 6, "availableFromYear": 1953, "manufacturer": "Vickers",  "manufacturerRegion": "Europe" },
+  { "id": "707",      "name": "Boeing 707",            "seats": 140, "rangeKm": 9800,  "costDollars": 5000000,   "productionRatePerQuarter": 6, "availableFromYear": 1958, "manufacturer": "Boeing",   "manufacturerRegion": "NorthAmerica" },
+  { "id": "747",      "name": "Boeing 747",            "seats": 400, "rangeKm": 13000, "costDollars": 20000000,  "productionRatePerQuarter": 1, "availableFromYear": 1970, "manufacturer": "Boeing",   "manufacturerRegion": "NorthAmerica" },
+  { "id": "777",      "name": "Boeing 777",            "seats": 300, "rangeKm": 17000, "costDollars": 30000000,  "productionRatePerQuarter": 2, "availableFromYear": 1995, "manufacturer": "Boeing",   "manufacturerRegion": "NorthAmerica" }
 ]

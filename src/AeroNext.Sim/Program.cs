@@ -6,6 +6,7 @@ using AeroNext.Core.Competition;
 using AeroNext.Core.Finance;
 using AeroNext.Core.Fleet;
 using AeroNext.Core.Negotiations;
+using AeroNext.Core.Setup;
 using AeroNext.Core.Turns;
 using AeroNext.Core.World;
 
@@ -616,4 +617,19 @@ foreach (var region in HomeRegions.All)
     var eligible = HomeRegions.EligibleStartingCities(region, cities);
     var names = string.Join(", ", eligible.Select(c => $"{c.Name} ({c.Id})"));
     Console.WriteLine($"  {region,-13} {eligible.Count} eligible: {names}");
+}
+
+// ---------------------------------------------------------------------
+// M16 (Game Setup & Initial Conditions roadmap): regional economics and
+// region-appropriate starting aircraft, at the 1955 campaign start.
+// ---------------------------------------------------------------------
+Console.WriteLine();
+Console.WriteLine("=== M16: Regional economics and region-appropriate aircraft (1955) ===");
+
+foreach (var region in HomeRegions.All)
+{
+    var factor = RegionalEconomics.Factor(region, cities);
+    var appropriate = RegionalFleet.AppropriateAircraft(region, fleetCatalog, Timeline.StartYear);
+    var options = string.Join(", ", appropriate.Select(a => $"{a.Name} ({a.Manufacturer})"));
+    Console.WriteLine($"  {region,-13} economic factor {factor,5:F3}  starting aircraft: {options}");
 }

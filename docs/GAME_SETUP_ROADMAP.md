@@ -1,6 +1,6 @@
 # Game Setup & Initial Conditions Roadmap
 
-**Status: M15 complete, M16–M19 not started.** Builds on the completed sim
+**Status: M15–M16 complete, M17–M19 not started.** Builds on the completed sim
 core (`docs/SIM_CORE_ROADMAP.md`, M0–M14, all done). Continues that roadmap's
 milestone numbering (M15+) rather than restarting at M0, since this is the
 next thing built on the same headless core, not a separate project.
@@ -79,7 +79,7 @@ Demonstrated in `AeroNext.Sim`.
 
 ---
 
-## M16 — Regional economics and region-appropriate aircraft
+## M16 — Regional economics and region-appropriate aircraft ✅
 
 Two data additions, both needed before M18 can derive anything from a
 starting city.
@@ -109,12 +109,23 @@ by 1955:
   Constellation).
 - **Asia and South America:** no indigenous airliner manufacturer existed
   in either region by 1955 — inventing one would be fabricating history,
-  not modeling it. Their starting aircraft stays an imported American type
-  (`ManufacturerRegion = NorthAmerica`), which is itself historically
-  accurate (period Asian and South American carriers really did fly
-  Douglas and Lockheed equipment). Document this asymmetry here rather than
-  papering over it with a fictional manufacturer.
+  not modeling it. Their starting aircraft comes from the same fallback
+  rule described below rather than a hardcoded `ManufacturerRegion =
+  NorthAmerica` — it resolves to the Douglas/Lockheed types today only
+  because that's genuinely all the 1955 catalog has, which happens to match
+  real history (period Asian and South American carriers really did fly
+  American equipment). Document this asymmetry here rather than papering
+  over it with a fictional manufacturer.
 - **NorthAmerica:** unaffected — DC-3/Constellation already fit.
+
+**Query rule, implemented as `RegionalFleet.AppropriateAircraft`:** among
+era-available types (reusing `Timeline.AvailableAircraft`, the same check
+`QuarterEngine` already applies to mid-campaign orders), prefer types with
+`ManufacturerRegion == homeRegion`; if none exist yet, fall back to every
+era-available type regardless of manufacturer ("best available import").
+Deliberately not hardcoded to NorthAmerica specifically — the fallback
+stays correct as the catalog grows (see "Kept in mind" below), rather than
+needing revisiting the moment a second manufacturing region gets added.
 
 This milestone adds exactly one non-American type — the minimum needed for
 an honest 1955 starting aircraft per home region, not a general catalog
@@ -128,6 +139,54 @@ Europe/NorthAmerica, best-available import for Asia/SouthAmerica). Tests:
 regional economic factor is computed from `cities.json` (not hardcoded) and
 is strictly positive for all 4 home regions; every home region resolves to
 at least one 1955-available aircraft type.
+
+Done. `RegionalEconomics.Factor` (`AeroNext.Core.Setup`) deliberately
+averages the *same* non-gateway eligible cities `HomeRegions` already
+defines, not every city tagged with that `Region` — using the raw `Region`
+tag would have let remote, near-zero-demand chokepoints (Anchorage,
+Honolulu, Wake, Gander — all tagged `NorthAmerica`) drag that region's
+average down for reasons that have nothing to do with economic strength.
+Measured against the real dataset: NorthAmerica 0.948, Europe 0.963, Asia
+1.143, SouthAmerica 0.865 — Asia comes out strongest (its 5 eligible cities
+are all genuinely high-demand: Shanghai, Singapore, Seoul, Bangkok, Delhi),
+SouthAmerica weakest (only 2 eligible cities, the smallest set of any home
+region). Not tuned to produce this ordering — it's what the existing city
+data actually says once chokepoint noise is excluded.
+
+`AircraftType` gained `Manufacturer` (string) and `ManufacturerRegion`
+(`Region?`), both defaulting empty/null like every other generously-
+defaulted field on this record. `data/aircraft.json` now tags all 5
+existing types (`Douglas`/`Lockheed`/`Boeing`, all `NorthAmerica`) plus the
+new Vickers Viscount (`Europe`, 1953, 48 seats, 2,700 km range — a real
+period turboprop, deliberately shorter-range than the Constellation since
+it's a different, regional aircraft class, not a "later therefore better"
+upgrade). `RegionalFleet.AppropriateAircraft` resolves Europe to
+`[Viscount]` and Asia/SouthAmerica to all 3 available types
+(`[DC-3, Constellation, Viscount]`, since none is home-manufactured) at
+1955 — confirmed directly via `AeroNext.Sim`.
+
+**A real regression risk, checked before finalizing, not assumed away:**
+inserting the Viscount between the Constellation and 707 by
+`AvailableFromYear` broke `AircraftCatalogTests`' existing "later aircraft
+have greater range" assertion — a legitimate failure, not a test bug, since
+a regional turboprop introduced after a long-haul flagship genuinely does
+have less range. Fixed by narrowing that test to the long-haul lineage
+specifically (`l049`/`707`/`747`/`777`), which is the actual invariant
+CLAUDE.md's chokepoint-obsolescence story depends on — documented inline in
+the test rather than silently relaxed. Separately confirmed the M13
+244-quarter campaign's cash trajectory and bankruptcy quarter are
+byte-identical to what M13 already recorded: `BaselineAi` always picks the
+longest-range *available* aircraft, and the Viscount (2,700 km) never beats
+the Constellation (4,200 km) while both are on offer, so it's never
+actually chosen — only the printed "N aircraft type(s) available" count at
+each checkpoint changed, which is expected and correct.
+
+230 tests total (16 new), 100% line/branch coverage on every file this
+milestone touched; overall project coverage improved slightly to
+99.76%/99.60%. Two small pre-existing gaps outside this milestone's scope
+(`BriefingGenerator.cs` at ~98%, `QuarterOrder.cs`'s abstract marker record
+showing 0% on a line with no real logic) predate M16 and weren't chased
+here. Demonstrated in `AeroNext.Sim`.
 
 ---
 

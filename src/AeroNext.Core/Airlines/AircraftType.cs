@@ -1,3 +1,5 @@
+using AeroNext.Core.World;
+
 namespace AeroNext.Core.Airlines;
 
 /// <summary>
@@ -8,6 +10,10 @@ namespace AeroNext.Core.Airlines;
 /// start, so every aircraft built before M13 (all of them, constructed
 /// inline) is implicitly "always available" and unaffected by the era
 /// checks M13 adds. Only M13's JSON fleet catalog states it for real.
+/// ManufacturerRegion defaults to null (unknown/unmodeled) for the same
+/// reason — a synthetic test aircraft has no historical manufacturer, and
+/// only M16's real catalog entries state one, for
+/// <see cref="AeroNext.Core.Setup.RegionalFleet"/> to key off of.
 /// </summary>
 public sealed record AircraftType(
     string Id,
@@ -16,4 +22,6 @@ public sealed record AircraftType(
     int RangeKm = 20_000,
     Money Cost = default,
     int ProductionRatePerQuarter = 4,
-    int AvailableFromYear = 1900);
+    int AvailableFromYear = 1900,
+    string Manufacturer = "",
+    Region? ManufacturerRegion = null);
