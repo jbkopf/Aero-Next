@@ -60,13 +60,23 @@ public static class NetworkPlanner
         return Allocate(routes, itineraries, demandModel);
     }
 
+    /// <summary>
+    /// Called only from Plan() with an origin drawn from servedCities (so it
+    /// always has a neighbors entry) and a destination already confirmed to
+    /// have no direct route to origin (Plan() checks directRouteByPair
+    /// first). So origin.Id is always a valid key, and no candidate hub can
+    /// equal destination — a route from origin straight to destination
+    /// would already have satisfied the nonstop check. Every neighbor also
+    /// always has its own neighbors entry, since AddNeighbor populates both
+    /// directions of a route together. Indexing directly (rather than
+    /// TryGetValue-and-bail) makes those invariants explicit: a violation
+    /// throws immediately instead of silently reporting a reachable pair as
+    /// unserved.
+    /// </summary>
     private static (Route LegOne, Route LegTwo)? FindBestHub(
         City origin, City destination, Dictionary<string, List<(City Neighbor, Route Route)>> neighbors)
     {
-        if (!neighbors.TryGetValue(origin.Id, out var originLegs))
-        {
-            return null;
-        }
+        var originLegs = neighbors[origin.Id];
 
         (Route LegOne, Route LegTwo)? best = null;
         var bestDetourKm = double.MaxValue;
@@ -74,15 +84,10 @@ public static class NetworkPlanner
 
         foreach (var (hub, legOne) in originLegs.OrderBy(n => n.Neighbor.Id, StringComparer.Ordinal))
         {
-            if (hub.Id == destination.Id || !neighbors.TryGetValue(hub.Id, out var hubLegs))
-            {
-                continue;
-            }
-
-            var legTwoMatch = hubLegs.FirstOrDefault(n => n.Neighbor.Id == destination.Id);
+            var legTwoMatch = neighbors[hub.Id].FirstOrDefault(n => n.Neighbor.Id == destination.Id);
             if (legTwoMatch.Route is null)
             {
-                continue;
+                continue; // this candidate hub doesn't connect onward to destination
             }
 
             var detourKm = GreatCircle.DistanceKm(origin, hub) + GreatCircle.DistanceKm(hub, destination);

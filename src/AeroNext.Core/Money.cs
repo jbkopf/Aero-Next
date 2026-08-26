@@ -20,5 +20,10 @@ public readonly record struct Money(long Cents)
     public static bool operator <=(Money a, Money b) => a.Cents <= b.Cents;
     public static bool operator >=(Money a, Money b) => a.Cents >= b.Cents;
 
-    public override string ToString() => $"${Cents / 100:N0}.{Math.Abs(Cents % 100):D2}";
+    public override string ToString()
+    {
+        var sign = Cents < 0 ? "-" : "";
+        var absCents = Math.Abs(Cents);
+        return $"{sign}${absCents / 100:N0}.{absCents % 100:D2}";
+    }
 }

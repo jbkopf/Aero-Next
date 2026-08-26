@@ -109,4 +109,117 @@ public class CompetitiveMarketTests
 
         Assert.True(result.TotalCarried(premium) > result.TotalCarried(basic));
     }
+
+    [Fact]
+    public void Resolve_ZeroQualityCompetitors_DoesNotCrash_CarriesNothing()
+    {
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 5);
+        var b = MakeCity("b", 5, 5, 5);
+        var aircraft = new AircraftType("t", "Test", Seats: 1000);
+
+        // Both airlines have zero quality -> total weight is zero on this
+        // pair. Must not divide by zero or throw; nobody captures the pair.
+        var airlineA = new Airline("A", new[] { new Route(a, b, aircraft, 10) }, Quality: 0.0);
+        var airlineB = new Airline("B", new[] { new Route(a, b, aircraft, 10) }, Quality: 0.0);
+
+        var result = CompetitiveMarket.Resolve(new[] { airlineA, airlineB }, new[] { a, b }, demandModel);
+
+        Assert.Equal(0, result.TotalCarried(airlineA));
+        Assert.Equal(0, result.TotalCarried(airlineB));
+    }
+
+    [Fact]
+    public void Resolve_RouteUsage_SumsCarriedAcrossEveryPairThatSharesALeg()
+    {
+        // Hub scenario: both airlines fly a-hub and hub-b. The hub-b leg
+        // carries each airline's own local hub-b demand *and* its share of
+        // the a-b one-stop connection - RouteUsage.SeatsUsed for hub-b must
+        // equal the sum of both, per airline. This is the per-leg capacity
+        // accounting under competition, never directly checked before (only
+        // TotalCarried per airline was, which can't catch a bug in how
+        // usage is attributed to individual legs).
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 20);
+        var hub = MakeCity("hub", 0, 10, 20);
+        var b = MakeCity("b", 0, 20, 20);
+        var aircraft = new AircraftType("t", "Test", Seats: 1000);
+
+        var airlineA = new Airline("A", new[] { new Route(a, hub, aircraft, 10), new Route(hub, b, aircraft, 10) });
+        var airlineB = new Airline("B", new[] { new Route(a, hub, aircraft, 10), new Route(hub, b, aircraft, 10) });
+
+        var result = CompetitiveMarket.Resolve(new[] { airlineA, airlineB }, new[] { a, hub, b }, demandModel);
+
+        foreach (var airline in new[] { airlineA, airlineB })
+        {
+            var hubToBRoute = airline.Routes.Single(r => r.Origin.Id == "hub" && r.Destination.Id == "b");
+            var hubToBUsage = result.RouteUsage.Single(u => u.Airline == airline && u.Route == hubToBRoute);
+
+            // Pairs are keyed in ascending id order ("b" < "hub" ordinally).
+            var hubToBPairCarried = result.Pairs
+                .Single(p => p.Origin.Id == "b" && p.Destination.Id == "hub")
+                .CarriedByAirline.GetValueOrDefault(airline);
+            var aToBPairCarried = result.Pairs
+                .Single(p => p.Origin.Id == "a" && p.Destination.Id == "b")
+                .CarriedByAirline.GetValueOrDefault(airline);
+
+            Assert.Equal(hubToBPairCarried + aToBPairCarried, hubToBUsage.SeatsUsed);
+        }
+    }
+
+    [Fact]
+    public void RouteUsage_NormalCapacityRoute_LoadFactorDividesSeatsUsedBySeatsPerQuarter()
+    {
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 100);
+        var b = MakeCity("b", 1, 1, 100);
+        var tinyAircraft = new AircraftType("t", "Test", Seats: 10); // capacity-constrained, so LF pins at 1.0
+        var airline = new Airline("A", new[] { new Route(a, b, tinyAircraft, WeeklyRoundTrips: 1) });
+
+        var result = CompetitiveMarket.Resolve(new[] { airline }, new[] { a, b }, demandModel);
+
+        var usage = result.RouteUsage.Single();
+        Assert.True(usage.SeatsPerQuarter > 0);
+        Assert.Equal((double)usage.SeatsUsed / usage.SeatsPerQuarter, usage.LoadFactor, precision: 9);
+    }
+
+    [Fact]
+    public void RouteUsage_ZeroCapacityRoute_LoadFactorIsZero_NotNaN()
+    {
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 20);
+        var b = MakeCity("b", 5, 5, 20);
+        var aircraft = new AircraftType("t", "Test", Seats: 400);
+        var airline = new Airline("A", new[] { new Route(a, b, aircraft, WeeklyRoundTrips: 0) });
+
+        var result = CompetitiveMarket.Resolve(new[] { airline }, new[] { a, b }, demandModel);
+
+        var usage = result.RouteUsage.Single();
+        Assert.Equal(0, usage.SeatsPerQuarter);
+        Assert.Equal(0.0, usage.LoadFactor);
+    }
+
+    [Fact]
+    public void Resolve_IsDeterministic_RegardlessOfAirlineInputOrder()
+    {
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 20);
+        var hub = MakeCity("hub", 0, 10, 20);
+        var b = MakeCity("b", 0, 20, 20);
+        var aircraft = new AircraftType("t", "Test", Seats: 500);
+
+        var airlineA = new Airline("A", new[] { new Route(a, hub, aircraft, 5), new Route(hub, b, aircraft, 5) });
+        var airlineB = new Airline("B", new[] { new Route(a, hub, aircraft, 3) });
+        var airlineC = new Airline("C", new[] { new Route(hub, b, aircraft, 3) });
+
+        var original = CompetitiveMarket.Resolve(new[] { airlineA, airlineB, airlineC }, new[] { a, hub, b }, demandModel);
+        var shuffled = CompetitiveMarket.Resolve(new[] { airlineC, airlineA, airlineB }, new[] { b, a, hub }, demandModel);
+
+        Assert.Equal(original.TotalCarried(airlineA), shuffled.TotalCarried(airlineA));
+        Assert.Equal(original.TotalCarried(airlineB), shuffled.TotalCarried(airlineB));
+        Assert.Equal(original.TotalCarried(airlineC), shuffled.TotalCarried(airlineC));
+        Assert.Equal(
+            original.RouteUsage.Select(u => (u.Airline.Name, u.Route.Origin.Id, u.Route.Destination.Id, u.SeatsUsed)),
+            shuffled.RouteUsage.Select(u => (u.Airline.Name, u.Route.Origin.Id, u.Route.Destination.Id, u.SeatsUsed)));
+    }
 }

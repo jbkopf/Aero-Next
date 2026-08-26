@@ -109,6 +109,21 @@ public class QuarterEngineTests
     }
 
     [Fact]
+    public void Cost_PairWithMatchingOriginButDifferentDestination_CostsOneAction()
+    {
+        // Guards the && in the existing-pair check: a route sharing only
+        // the origin must not be mistaken for the pair actually being
+        // ordered.
+        var a = MakeCity("a", 0, 0, 50);
+        var b = MakeCity("b", 1, 1, 50);
+        var c = MakeCity("c", 2, 2, 50);
+        var existing = new[] { new Route(a, c, Aircraft, WeeklyRoundTrips: 1) }; // a-c exists, not a-b
+        var order = new RouteOrder(a, b, Aircraft, WeeklyRoundTrips: 3);
+
+        Assert.Equal(1, QuarterEngine.Cost(order, existing));
+    }
+
+    [Fact]
     public void Cost_HireExecutive_IsAlwaysFree()
     {
         Assert.Equal(0, QuarterEngine.Cost(new HireExecutiveOrder(), Array.Empty<Route>()));
@@ -184,5 +199,49 @@ public class QuarterEngineTests
         var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, orders, cities, demandModel);
 
         Assert.Equal(3, result.Routes.Count); // still only 3 new routes, not 4
+    }
+
+    [Fact]
+    public void RunQuarter_ReportsQuarterNumber()
+    {
+        var demandModel = new GravityDemandModel();
+        var cities = new[] { MakeCity("a", 0, 0, 50), MakeCity("b", 1, 1, 50) };
+
+        var result = QuarterEngine.RunQuarter(7, Array.Empty<Route>(), QuarterEngine.BaseActionCap, Array.Empty<QuarterOrder>(), cities, demandModel);
+
+        Assert.Equal(7, result.QuarterNumber);
+    }
+
+    private sealed record UnknownOrder : QuarterOrder;
+
+    [Fact]
+    public void Cost_UnknownOrderType_ThrowsNotSupportedException()
+    {
+        // A future order type that forgets to update Cost() should fail
+        // loudly rather than silently be treated as free or crash the
+        // budget check some other way.
+        Assert.Throws<NotSupportedException>(() => QuarterEngine.Cost(new UnknownOrder(), Array.Empty<Route>()));
+    }
+
+    [Fact]
+    public void RunQuarter_IsDeterministic_RegardlessOfOrderOrCityInputOrder()
+    {
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 50);
+        var b = MakeCity("b", 1, 1, 50);
+        var c = MakeCity("c", 2, 2, 50);
+        var orders = new QuarterOrder[]
+        {
+            new RouteOrder(a, b, Aircraft, 3),
+            new RouteOrder(a, c, Aircraft, 2),
+        };
+
+        var original = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, orders, new[] { a, b, c }, demandModel);
+        var shuffled = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, orders.Reverse().ToArray(), new[] { c, b, a }, demandModel);
+
+        Assert.Equal(
+            original.Routes.Select(r => (r.Origin.Id, r.Destination.Id, r.WeeklyRoundTrips)),
+            shuffled.Routes.Select(r => (r.Origin.Id, r.Destination.Id, r.WeeklyRoundTrips)));
+        Assert.Equal(original.Plan.TotalCarried, shuffled.Plan.TotalCarried);
     }
 }

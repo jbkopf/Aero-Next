@@ -79,6 +79,23 @@ public class BriefingGeneratorTests
     }
 
     [Fact]
+    public void Generate_LoadFactorSurge_AboveThreshold_IsReported()
+    {
+        // Mirror image of the drop test: same fixed demand, capacity cut
+        // instead of raised, so load factor rises sharply.
+        var a = MakeCity("a", 0, 0, 4);
+        var b = MakeCity("b", 1, 1, 4);
+        var cities = new[] { a, b };
+
+        var quarter1 = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { new RouteOrder(a, b, Aircraft, 50) }, cities, DemandModel);
+        var quarter2 = QuarterEngine.RunQuarter(2, quarter1.Routes, quarter1.ActionCap, new[] { new RouteOrder(a, b, Aircraft, 1) }, cities, DemandModel);
+
+        var briefing = BriefingGenerator.Generate(quarter1, quarter2);
+
+        Assert.Contains(briefing, i => i.Kind == ExceptionKind.LoadFactorSurged);
+    }
+
+    [Fact]
     public void Generate_CapsAtFiveItems()
     {
         var cities = Enumerable.Range(0, 14).Select(i => MakeCity($"c{i}", i, i, 50)).ToList();

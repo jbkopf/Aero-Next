@@ -51,6 +51,21 @@ public class RouteEvaluatorTests
     }
 
     [Fact]
+    public void Evaluate_ZeroCapacityRoute_LoadFactorIsZero_NotNaN()
+    {
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 50);
+        var b = MakeCity("b", 0, 1, 50);
+        var aircraft = new AircraftType("t", "Test", Seats: 100);
+        var route = new Route(a, b, aircraft, WeeklyRoundTrips: 0); // suspended route: zero capacity
+
+        var load = RouteEvaluator.Evaluate(route, demandModel);
+
+        Assert.Equal(0, load.SeatsPerQuarter);
+        Assert.Equal(0.0, load.LoadFactor);
+    }
+
+    [Fact]
     public void EvaluateNetwork_IsDeterministic_SortedByOriginThenDestination()
     {
         var demandModel = new GravityDemandModel();

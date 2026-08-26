@@ -95,4 +95,40 @@ public class CityCatalogTests
 
         Assert.Throws<InvalidDataException>(() => CityCatalog.Load(json));
     }
+
+    [Fact]
+    public void Load_ThrowsOnEmptyCityList()
+    {
+        Assert.Throws<InvalidDataException>(() => CityCatalog.Load("[]"));
+    }
+
+    [Fact]
+    public void Load_ThrowsWhenJsonDeserializesToNull()
+    {
+        Assert.Throws<InvalidDataException>(() => CityCatalog.Load("null"));
+    }
+
+    [Fact]
+    public void Load_ThrowsOnMissingId()
+    {
+        const string json = """
+        [
+          { "id": "", "name": "No Id", "region": "Asia", "latitude": 0, "longitude": 0, "demandWeight": 10, "isGateway": false, "gateCapacity": null }
+        ]
+        """;
+
+        Assert.Throws<InvalidDataException>(() => CityCatalog.Load(json));
+    }
+
+    [Fact]
+    public void Load_ThrowsOnMissingName()
+    {
+        const string json = """
+        [
+          { "id": "bad", "name": "  ", "region": "Asia", "latitude": 0, "longitude": 0, "demandWeight": 10, "isGateway": false, "gateCapacity": null }
+        ]
+        """;
+
+        Assert.Throws<InvalidDataException>(() => CityCatalog.Load(json));
+    }
 }
