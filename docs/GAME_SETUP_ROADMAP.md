@@ -1,6 +1,6 @@
 # Game Setup & Initial Conditions Roadmap
 
-**Status: M15–M17 complete, M18–M19 not started.** Builds on the completed sim
+**Status: M15–M18 complete, M19 not started.** Builds on the completed sim
 core (`docs/SIM_CORE_ROADMAP.md`, M0–M14, all done). Continues that roadmap's
 milestone numbering (M15+) rather than restarting at M0, since this is the
 next thing built on the same headless core, not a separate project.
@@ -256,7 +256,7 @@ NorthAmerica).
 
 ---
 
-## M18 — Deriving starting conditions from starting city
+## M18 — Deriving starting conditions from starting city ✅
 
 The core of this roadmap: turn a validated (region, city) pair from M17
 into real starting state, using M16's data.
@@ -289,6 +289,59 @@ the starting city to that neighbor, using the starting aircraft, is
 accepted (not rejected for range, era, or budget) by `QuarterEngine` on
 quarter 1. Tests: this exact check, run for every eligible city in the
 data, not just one hand-picked example.
+
+Done. `StartingConditionsResolver.Resolve` (`AeroNext.Core.Setup`) returns
+an `AirlineStartingConditions` (cash, aircraft type, quantity, guaranteed
+route destination) for a given `AirlineSeat`. Cash is
+`$20,000,000 × RegionalEconomics.Factor` (Asia's Shanghai seat starts at
+$22.9M, SouthAmerica's Buenos Aires at $17.3M in the real-data demo — a
+direct, honest consequence of M16's measured factors, not tuned per
+region). Aircraft quantity is a fixed 2, matching the "enough for one real
+route, not a fleet" framing.
+
+**A real finding while implementing "guaranteed turn-1 route":**
+`QuarterEngine` turns out to never check gateway/landing-rights capacity
+against a `RouteOrder` at all — that's exclusively a `NegotiationOrder`
+concern (M9). So M15's "starting cities are non-gateway" restriction isn't
+actually load-bearing for whether a route *can* be flown today; it matters
+for a different reason — keeping a player's guaranteed, un-contested
+assets away from their region's flagship demand magnet, preserving the
+competitive tension CLAUDE.md's "a home region cannot fund a win" pillar
+depends on. `StartingConditionsResolver` deliberately keeps the guaranteed
+neighbor search scoped to `HomeRegions.EligibleStartingCities` (not "any
+same-region city") to stay consistent with that reasoning, rather than
+relying on the coincidence that `QuarterEngine` doesn't enforce it either.
+
+**Aircraft selection tries candidates smallest-`RangeKm`-first, not just
+"the first appropriate one."** A region-appropriate aircraft set can have
+more than one option (Asia/SouthAmerica get all 3 available 1955 types);
+handing out the cheapest one that can actually reach a real, positive-
+demand same-region city is the more defensible "starting fleet" than an
+arbitrary pick, and only steps up to a longer-range type if a smaller one
+can't reach anywhere — verified directly with two synthetic tests (one
+confirming the small-aircraft preference, one confirming the fallback
+actually triggers) rather than trusting the real dataset alone to exercise
+that branch.
+
+**Full real-data sweep, not sampled:** the "Done when" check runs for
+every one of the 17 real eligible starting cities across all 4 home
+regions — every single one resolves successfully and its guaranteed
+`RouteOrder` is accepted by the real `QuarterEngine` on quarter 1, with no
+data gaps needing a fix (the smallest-first search already handled the
+one region, Europe, with only a single appropriate aircraft type and no
+fallback available).
+
+**Fleet ownership still isn't enforced against route capacity anywhere**
+— the same gap M10/M11/M12 each already noted and left open.
+`AircraftQuantity` is real, honest data for that future mechanic to
+consume; nothing in `QuarterEngine` checks it today, consistent with how
+`AircraftType.Cost` has been "real but unenforced" since M11.
+
+258 tests total (6 new), 100% line/branch coverage on `StartingConditions.cs`;
+overall project coverage improved slightly to 99.78%/99.64%. Demonstrated
+in `AeroNext.Sim`: the 4-human configuration's starting cash, aircraft, and
+guaranteed destination, with each guaranteed route order confirmed
+"accepted" against the real `QuarterEngine`, not just computed.
 
 ---
 

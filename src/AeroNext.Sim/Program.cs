@@ -676,3 +676,31 @@ catch (ArgumentException ex)
 {
     Console.WriteLine($"  Rejected (two humans claiming NorthAmerica): {ex.Message}");
 }
+
+// ---------------------------------------------------------------------
+// M18 (Game Setup & Initial Conditions roadmap): deriving starting cash,
+// aircraft, and a guaranteed turn-1 route from each seat's starting city.
+// Confirms the guaranteed route is actually accepted by the real
+// QuarterEngine on quarter 1 — not just computed, but proven to work.
+// ---------------------------------------------------------------------
+Console.WriteLine();
+Console.WriteLine("=== M18: Starting conditions and guaranteed turn-1 route ===");
+
+var setupSeats = GameSetup.CreateSeats(new[]
+{
+    new HumanPlayerChoice("Atlas Air", "ord"),
+    new HumanPlayerChoice("Meridian", "cdg"),
+    new HumanPlayerChoice("Skyward", "sin"),
+    new HumanPlayerChoice("Continental Wings", "eze"),
+}, cities);
+
+foreach (var seat in setupSeats)
+{
+    var conditions = StartingConditionsResolver.Resolve(seat, cities, fleetCatalog);
+    Console.WriteLine($"  {seat.AirlineName,-18} cash {conditions.StartingCash,14}  " +
+        $"{conditions.AircraftQuantity}x {conditions.StartingAircraft.Name,-20} -> {conditions.GuaranteedRouteDestination.Name}");
+
+    var order = new RouteOrder(seat.StartingCity, conditions.GuaranteedRouteDestination, conditions.StartingAircraft, WeeklyRoundTrips: 3);
+    var quarter1 = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, cities, demandModel);
+    Console.WriteLine($"    Quarter 1 route order: {(quarter1.RejectedOrders.Count == 0 ? "accepted" : "REJECTED")}");
+}
