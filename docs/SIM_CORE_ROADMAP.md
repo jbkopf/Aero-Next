@@ -537,7 +537,7 @@ roadmap); era availability's consumer is M13, so it lands there.
 
 ---
 
-## M12 — Financial model and scoring
+## M12 — Financial model and scoring ✅
 
 Full quarterly P&L: revenue from itineraries, operating cost, debt service.
 Refinancing as a private action. This is explicitly "the scoring function,
@@ -546,6 +546,50 @@ center of the design.
 
 **Done when:** a scripted campaign produces a plausible cash trajectory and
 a bankruptcy/failure state triggers correctly.
+
+Done. `FinancialResolver` (`AeroNext.Core.Finance`) is a third resolution
+stage — after `QuarterEngine` (per airline) and `CompetitiveMarket` (cross
+airline) — because revenue has to be based on what an airline actually
+carries once rivals split demand, not its own isolated monopoly plan.
+Revenue is `carried × distance × yield`; operating cost is `capacity
+offered × distance × cost-per-available-seat-km`, charged on capacity
+*flown*, not just seats sold — a route with a bad load factor is a real
+cash drain even before it earns anything, the same causal story M3's load
+factor already told, now with financial stakes attached. Yield and CASK
+are flat global placeholders (not tied to `Airline.Quality` or fare
+stance), matching CLAUDE.md's explicit framing of this as "the scoring
+function, not the point" — a richer "premium carriers charge and cost
+differently" model is a natural future refinement, not required here.
+
+Two foundational pieces placed early finally connect all the way through:
+`Money` (M0) is every figure in the P&L, and `AircraftType.Cost` (M11,
+unused until now) is real, though still unenforced against a purchase
+decision — nothing yet stops ordering an aircraft you can't afford, since
+that would need the fleet-ownership system M11 explicitly deferred.
+
+`RefinanceOrder` (private, free, per CLAUDE.md) borrows cash immediately in
+exchange for a permanently higher debt balance — the bankruptcy-avoidance
+lever, verified directly: an interest bill big enough to trigger bankruptcy
+on its own is avoided by borrowing enough cash first. `FinancialState.
+IsBankrupt` is sticky — once true, `FinancialResolver` stops touching that
+airline's finances at all (zero revenue, cost, and debt service reported
+every quarter after), rather than letting cash silently recover.
+
+**Both demo halves came out honest, not forced:** replaying the M5/M7
+hub-building script produced a real "invest ahead of demand" trajectory —
+cash declining from $20M to $12.7M over 5 quarters, mostly-negative net
+income after a profitable first quarter, but never bankrupt — which is
+itself a legitimate reading of "plausible" (a hub in its build-out phase
+burning cash is realistic, not a failure of the model). A second, separate
+scenario (one deliberately oversized aircraft on the dataset's thinnest
+chokepoint pair) triggers bankruptcy immediately and unambiguously — kept
+as a distinct scripted scenario rather than tuning the main network to
+fail, so neither story had to be bent to produce the other.
+
+**Retirement (CLAUDE.md's third private action, alongside hiring and
+refinancing) is still not built**, for the same reason M10/M11 gave for not
+touching fleet ownership: there's no per-unit aircraft inventory to retire
+anything *from* yet. Noted again here rather than assumed forgotten.
 
 ---
 

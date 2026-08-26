@@ -1,8 +1,9 @@
 using AeroNext.Core;
 using AeroNext.Core.Ai;
 using AeroNext.Core.Airlines;
-using AeroNext.Core.Competition;
 using AeroNext.Core.Alliances;
+using AeroNext.Core.Competition;
+using AeroNext.Core.Finance;
 using AeroNext.Core.Fleet;
 using AeroNext.Core.Negotiations;
 using AeroNext.Core.Turns;
@@ -477,3 +478,49 @@ var rejectedAttempt = QuarterEngine.RunQuarter(
     cities, demandModel);
 var rejectionBriefing = BriefingGenerator.Generate(null, rejectedAttempt);
 Console.WriteLine($"Ordering a Constellation direct on JFK-LHR: {rejectionBriefing.Single().Message}");
+
+// --- M12: financial model and scoring ---
+// "The scoring function, not the point" (CLAUDE.md) — replays the exact
+// same M5/M7 hub-building script, now with a P&L tracked alongside it.
+Console.WriteLine();
+Console.WriteLine("--- M12: quarterly P&L, replaying the M5/M7 hub-building script ---");
+
+var financeState = FinancialState.Start(Money.FromDollars(20_000_000), Money.FromDollars(10_000_000), interestRatePerQuarter: 0.02);
+IReadOnlyList<Route> financeRoutes = Array.Empty<Route>();
+var financeCap = QuarterEngine.BaseActionCap;
+var soloAirlineName = "Trans-Aero";
+
+for (var q = 0; q < quarterlyOrders.Count; q++)
+{
+    var quarter = QuarterEngine.RunQuarter(q + 1, financeRoutes, financeCap, quarterlyOrders[q], cities, demandModel);
+    financeRoutes = quarter.Routes;
+    financeCap = quarter.ActionCap;
+
+    var solo = new Airline(soloAirlineName, financeRoutes);
+    var market = CompetitiveMarket.Resolve(new[] { solo }, cities, demandModel);
+    var (nextFinanceState, statement) = FinancialResolver.Resolve(financeState, solo, market, quarter.AppliedOrders);
+    financeState = nextFinanceState;
+
+    Console.WriteLine($"Q{q + 1}: revenue {statement.Revenue,14}  cost {statement.OperatingCost,14}  " +
+        $"debt svc {statement.DebtService,10}  net {statement.NetIncome,14}  cash {statement.CashBalanceAfter,14}");
+}
+
+// A deliberately reckless operator: heavy debt, thin demand, capacity it can't fill.
+Console.WriteLine();
+Console.WriteLine("--- M12: bankruptcy trigger — reckless overexpansion on thin demand ---");
+
+var recklessCities = new[] { byId["yqx"], byId["ter"], byId["awk"] }; // three of the thinnest chokepoints in the dataset
+var recklessAirline = new Airline("Reckless Air", new[]
+{
+    new Route(recklessCities[0], recklessCities[1], widebody, WeeklyRoundTrips: 14), // huge capacity, negligible demand
+});
+var recklessMarket = CompetitiveMarket.Resolve(new[] { recklessAirline }, cities, demandModel);
+var recklessState = FinancialState.Start(Money.FromDollars(500_000), Money.FromDollars(5_000_000), interestRatePerQuarter: 0.05);
+
+for (var q = 1; q <= 4 && !recklessState.IsBankrupt; q++)
+{
+    var (nextState, statement) = FinancialResolver.Resolve(recklessState, recklessAirline, recklessMarket, Array.Empty<QuarterOrder>());
+    recklessState = nextState;
+    Console.WriteLine($"Q{q}: revenue {statement.Revenue,10}  cost {statement.OperatingCost,14}  " +
+        $"net {statement.NetIncome,14}  cash {statement.CashBalanceAfter,14}  bankrupt={statement.IsBankrupt}");
+}

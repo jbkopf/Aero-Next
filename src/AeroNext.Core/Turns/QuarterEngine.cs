@@ -88,6 +88,7 @@ public static class QuarterEngine
     {
         RouteOrder ro => currentRoutes.Any(r => r.Origin.Id == ro.Origin.Id && r.Destination.Id == ro.Destination.Id) ? 0 : 1,
         HireExecutiveOrder => 0,
+        RefinanceOrder => 0,
         NegotiationOrder => 1,
         AircraftOrder => 1,
         LeaseAircraftOrder => 1,
