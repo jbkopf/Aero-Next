@@ -297,7 +297,7 @@ for *how* they resolve don't exist yet.
 
 ---
 
-## M8 — Baseline AI opponent
+## M8 — Baseline AI opponent ✅
 
 **New requirement, not in the original plan:** CLAUDE.md now states the game
 is always exactly 4 airlines — any seat a human doesn't fill is played by a
@@ -322,6 +322,31 @@ adds that type, not bundled here speculatively.
 **Done when:** a 4-airline scripted quarter (1 human-scripted + 3 AI) runs
 through `QuarterEngine` and `CompetitiveMarket` without any hand-authored
 orders for the AI airlines, and produces a legal, budget-respecting result.
+
+Done. `BaselineAi.DecideOrders` in `AeroNext.Core.Ai`: if it can afford a
+market action, enters the single highest-demand city pair it doesn't
+already serve anywhere in the world (no hub-awareness — it doesn't
+prioritize pairs touching its existing network); always bumps frequency on
+its own most capacity-constrained existing route, since that's free. No
+executive hiring yet, no contested actions (M9/M10 don't exist yet). Pure
+function of current state, no RNG — deterministic by construction, not by
+seeding, since a plain greedy heuristic has nothing to randomize.
+
+`AeroNext.Sim` runs the full always-4-airlines shape: 1 human-scripted seat
+and 3 identical AI seats, each resolved independently through
+`QuarterEngine` (own routes, own action cap, own orders) and combined once
+per quarter through `CompetitiveMarket`. Confirmed two things worth noting:
+the 3 AI airlines make byte-identical decisions every quarter (expected —
+same deterministic heuristic, same world, no differentiation between them
+yet, noted as a known simplification rather than a bug) and, over 3
+quarters, the AI trio piling into CDG-LHR (the world's densest short-haul
+market, per M2/M6) out-carries the human's deliberate long-haul hub
+strategy — an unplanned but fitting callback to what earlier milestones
+already established about short-haul market density.
+
+**Follow-up confirmed still needed at M9/M10**, as flagged above: extending
+`BaselineAi` to bid on landing rights and order aircraft belongs with the
+milestones that add those mechanics.
 
 ---
 

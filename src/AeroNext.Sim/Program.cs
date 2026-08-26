@@ -1,3 +1,4 @@
+using AeroNext.Core.Ai;
 using AeroNext.Core.Airlines;
 using AeroNext.Core.Competition;
 using AeroNext.Core.Turns;
@@ -261,4 +262,53 @@ foreach (var regionalCompetitors in new[]
     Console.WriteLine(contested.TotalCarried(hubAirline) > contested.TotalCarried(regional1)
         ? "Verdict: hub beats each regional competitor once the triangle is this contested."
         : "Verdict: hub still trails even under this much contest.");
+}
+
+// --- M8: baseline AI opponent ---
+// CLAUDE.md: the game is always exactly 4 airlines. This runs 1 human-
+// scripted seat alongside 3 AI seats, each independently resolved through
+// QuarterEngine (its own routes, its own action cap, its own orders), then
+// combined once per quarter through CompetitiveMarket — no hand-authored
+// orders for the AI airlines at any point.
+var leagueNames = new[] { "Trans-Aero (human)", "AI Corp Alpha", "AI Corp Beta", "AI Corp Gamma" };
+var leagueRoutes = leagueNames.ToDictionary(n => n, _ => (IReadOnlyList<Route>)Array.Empty<Route>());
+var leagueCaps = leagueNames.ToDictionary(n => n, _ => QuarterEngine.BaseActionCap);
+
+var humanScript = new List<IReadOnlyList<QuarterOrder>>
+{
+    new QuarterOrder[] { new RouteOrder(byId["jfk"], byId["lhr"], narrowbody, WeeklyRoundTrips: 3) },
+    new QuarterOrder[] { new RouteOrder(byId["jfk"], byId["hnd"], narrowbody, WeeklyRoundTrips: 3) },
+    Array.Empty<QuarterOrder>(),
+};
+
+Console.WriteLine();
+Console.WriteLine("--- M8: baseline AI opponent — 1 human seat + 3 AI seats, always 4 airlines ---");
+
+for (var q = 0; q < humanScript.Count; q++)
+{
+    foreach (var name in leagueNames)
+    {
+        var orders = name == leagueNames[0]
+            ? humanScript[q]
+            : BaselineAi.DecideOrders(leagueRoutes[name], leagueCaps[name], cities, demandModel, narrowbody);
+
+        var result = QuarterEngine.RunQuarter(q + 1, leagueRoutes[name], leagueCaps[name], orders, cities, demandModel);
+
+        leagueRoutes[name] = result.Routes;
+        leagueCaps[name] = result.ActionCap;
+
+        if (name != leagueNames[0])
+        {
+            Console.WriteLine($"  {name} orders: {string.Join(", ", orders.Select(DescribeOrder))}");
+        }
+    }
+
+    var league = leagueNames.Select(n => new Airline(n, leagueRoutes[n])).ToArray();
+    var standings = CompetitiveMarket.Resolve(league, cities, demandModel);
+
+    Console.WriteLine($"Quarter {q + 1} standings:");
+    foreach (var seat in league)
+    {
+        Console.WriteLine($"  {seat.Name,-20} {leagueRoutes[seat.Name].Count} routes, {standings.TotalCarried(seat),8:N0} pax/qtr");
+    }
 }
