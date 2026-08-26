@@ -1,6 +1,6 @@
 # Game Setup & Initial Conditions Roadmap
 
-**Status: M15–M16 complete, M17–M19 not started.** Builds on the completed sim
+**Status: M15–M17 complete, M18–M19 not started.** Builds on the completed sim
 core (`docs/SIM_CORE_ROADMAP.md`, M0–M14, all done). Continues that roadmap's
 milestone numbering (M15+) rather than restarting at M0, since this is the
 next thing built on the same headless core, not a separate project.
@@ -190,7 +190,7 @@ here. Demonstrated in `AeroNext.Sim`.
 
 ---
 
-## M17 — Player setup flow: count, names, starting cities
+## M17 — Player setup flow: count, names, starting cities ✅
 
 The actual "ask the player" sequence, as a pure function over structured
 input (no console I/O in `AeroNext.Core` — `AeroNext.Sim` supplies the
@@ -228,6 +228,31 @@ are rejected; AI seat assignment is deterministic across repeated runs with
 identical human input; **all 4 assigned starting cities are pairwise
 distinct in every tested configuration**, including 0-human (an all-AI
 game must not silently collide two seats onto the same city).
+
+Done. `GameSetup.CreateSeats` (`AeroNext.Core.Setup`) takes a list of
+`HumanPlayerChoice` (airline name + starting city id) — its `Count` *is*
+the human player count, so there's no separate parameter that could
+disagree with it; validated to reject more than 4. Returns 4
+`AirlineSeat` records (name, `IsHuman`, `HomeRegion`, `StartingCity`), one
+per home region, sorted by region name (`Asia`, `Europe`, `NorthAmerica`,
+`SouthAmerica` — ordinal string order, not `Region`'s enum declaration
+order) rather than any dictionary iteration order, per determinism rule
+#3. AI seats are named `"{Region} Air"` and take the highest-`demandWeight`
+eligible city in their assigned region — confirmed against real data:
+Chicago (NorthAmerica), Paris (Europe), Shanghai (Asia), Rio de Janeiro
+(SouthAmerica).
+
+Validation covers every failure mode the "Done when" lists, plus two not
+explicitly named there but caught while writing the tests: submitting the
+exact same city twice (a stricter case of "same region," same rejection
+path) and a human explicitly naming their airline the same string an AI
+seat would auto-generate (e.g. `"NorthAmerica Air"`), which would otherwise
+slip past the human-vs-human duplicate-name check and only collide once
+the AI fill-in pass ran. 22 new tests, 100% line/branch coverage on
+`GameSetup.cs`; overall project coverage improved slightly to
+99.77%/99.63%. Demonstrated in `AeroNext.Sim` across the 0/1/4-human
+configurations plus one deliberate rejection (two humans both reaching for
+NorthAmerica).
 
 ---
 

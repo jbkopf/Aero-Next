@@ -633,3 +633,46 @@ foreach (var region in HomeRegions.All)
     var options = string.Join(", ", appropriate.Select(a => $"{a.Name} ({a.Manufacturer})"));
     Console.WriteLine($"  {region,-13} economic factor {factor,5:F3}  starting aircraft: {options}");
 }
+
+// ---------------------------------------------------------------------
+// M17 (Game Setup & Initial Conditions roadmap): player setup flow.
+// GameSetup.CreateSeats is a pure function over structured input; this is
+// the "ask the player" sequence AeroNext.Sim supplies on its behalf. Three
+// configurations at the scope boundary: 0 humans, 1 human + 3 AI, 4 humans.
+// ---------------------------------------------------------------------
+Console.WriteLine();
+Console.WriteLine("=== M17: Player setup flow ===");
+
+void PrintSeats(string label, IReadOnlyList<HumanPlayerChoice> humanChoices)
+{
+    var seats = GameSetup.CreateSeats(humanChoices, cities);
+    Console.WriteLine($"  {label}:");
+    foreach (var seat in seats)
+    {
+        var role = seat.IsHuman ? "human" : "AI  ";
+        Console.WriteLine($"    [{role}] {seat.AirlineName,-20} {seat.HomeRegion,-13} starting in {seat.StartingCity.Name} ({seat.StartingCity.Id})");
+    }
+}
+
+PrintSeats("0 human players", Array.Empty<HumanPlayerChoice>());
+PrintSeats("1 human + 3 AI", new[] { new HumanPlayerChoice("Founders Airways", "yyz") });
+PrintSeats("4 human players", new[]
+{
+    new HumanPlayerChoice("Atlas Air", "ord"),
+    new HumanPlayerChoice("Meridian", "cdg"),
+    new HumanPlayerChoice("Skyward", "sin"),
+    new HumanPlayerChoice("Continental Wings", "eze"),
+});
+
+try
+{
+    GameSetup.CreateSeats(new[]
+    {
+        new HumanPlayerChoice("Atlas Air", "ord"),
+        new HumanPlayerChoice("Meridian", "sfo"), // also NorthAmerica - rejected
+    }, cities);
+}
+catch (ArgumentException ex)
+{
+    Console.WriteLine($"  Rejected (two humans claiming NorthAmerica): {ex.Message}");
+}
