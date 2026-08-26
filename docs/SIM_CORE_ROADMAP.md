@@ -1,5 +1,13 @@
 # Sim Core Roadmap
 
+**Status: M0–M14 all complete.** Every milestone below is done, tested, and
+demonstrated from `AeroNext.Sim`. The sim core's own scope — headless
+simulation, no rendering, no client — is fully built out per CLAUDE.md's
+"Current phase." What's next lives outside this roadmap's scope on
+purpose: the Godot client and online play, both named explicitly in "Kept
+in mind" below as constraints this roadmap was written to not foreclose,
+not as milestones to schedule here.
+
 Scope: **AeroNext.Core and AeroNext.Sim only.** No Godot, no client, no
 networking. Godot client and online play are the eventual product — this
 roadmap deliberately doesn't plan them — but every milestone below is written
@@ -660,7 +668,7 @@ manually staged as it was in M11's own demo.
 
 ---
 
-## M14 — Determinism regression harness
+## M14 — Determinism regression harness ✅
 
 Formalize what M0–M13 assumed informally: same seed + same orders ⇒ byte-
 identical resolution output, across repeated runs — including AI decisions,
@@ -670,6 +678,45 @@ simultaneous multiplayer possible.
 
 **Done when:** a test runs the same scripted campaign twice and diffs the
 full output; any unordered-collection or ambient-state regression fails CI.
+
+Done — the last milestone, and the smallest change relative to what it
+proves. No new production capability: every resolver (`QuarterEngine`,
+`CompetitiveMarket`, `FinancialResolver`, `LandingRightsResolver`,
+`AircraftOrderResolver`, `AllianceResolver`, `BaselineAi`) was already a
+pure function by construction, built that way from M5 onward specifically
+so this milestone wouldn't require rewriting anything. M14 is purely a
+*test* — `DeterminismRegressionTests` — that proves the whole set actually
+holds together under one realistic, multi-system scenario, not just in
+each resolver's own isolated unit tests.
+
+**Deliberately not the full 244-quarter M13 campaign.** A self-contained
+20-quarter, 4-airline scenario exercises every resolver, including the one
+place actual randomness enters the sim: `LandingRightsResolver.Submit`'s
+`SimRng`-driven negotiation delay (two hand-scripted `AircraftOrder`/
+`AllianceCourtOrder` injections cover the two resolvers `BaselineAi` never
+drives on its own). Running the real 244-quarter campaign twice in a hot
+test loop would work, but a smaller scenario proves the identical claim —
+same resolvers, same seed, same reproduction guarantee — without
+compromising CLAUDE.md's "`dotnet test`, sub-second" feedback loop; the
+full suite still runs in under 100ms with this test included.
+
+**A control test, not just the determinism test itself:** a second test
+confirms two *different* seeds can produce *different* output. Without it,
+a scenario that stopped touching `SimRng`-sensitive code (say, from a
+future refactor) would make the main determinism test trivially,
+uselessly true — passing for the wrong reason. Verified directly before
+finalizing, not just assumed: the scenario's negotiation outcomes (who
+wins gate slots `gw1`/`gw2`, and when) do shift with the shared `SimRng`
+sequence, so the control test genuinely exercises the claim it exists to
+protect — the same "did I write a test that could actually fail"
+discipline applied everywhere else in this project.
+
+**A genuine bonus, not engineered:** building one comprehensive scenario
+that exercises every mechanic together closed two coverage gaps
+(`QuarterEngine` and `NetworkPlanner` branch coverage, both stuck at 97%
+across M9-M13) that no isolated unit test had reached — a concrete
+illustration of why an integration-level determinism harness earns its
+place even in a codebase already this thoroughly unit-tested.
 
 ---
 
