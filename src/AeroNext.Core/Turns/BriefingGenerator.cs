@@ -1,4 +1,5 @@
 using AeroNext.Core.Airlines;
+using AeroNext.Core.World;
 
 namespace AeroNext.Core.Turns;
 
@@ -16,14 +17,13 @@ public static class BriefingGenerator
     {
         var items = new List<BriefingItem>();
 
+        var year = Timeline.YearForQuarter(current.QuarterNumber);
+
         foreach (var order in current.RejectedOrders)
         {
             // Reason isn't stored on the order — re-derive it here rather
             // than widen QuarterResult's shape for a display-only detail.
-            var outOfRange = order is RouteOrder ro && !ro.IsWithinRange;
-            items.Add(outOfRange
-                ? new BriefingItem(ExceptionKind.OrderRejectedOutOfRange, $"Order rejected, aircraft out of range: {Describe(order)}")
-                : new BriefingItem(ExceptionKind.OrderRejectedOverBudget, $"Order rejected, over budget: {Describe(order)}"));
+            items.Add(DescribeRejection(order, year));
         }
 
         var capIncrease = current.AppliedOrders.OfType<HireExecutiveOrder>().Sum(h => h.CapIncrease);
@@ -87,4 +87,27 @@ public static class BriefingGenerator
         HireExecutiveOrder => "hire executive",
         _ => order.GetType().Name,
     };
+
+    private static BriefingItem DescribeRejection(QuarterOrder order, int year)
+    {
+        if (order is RouteOrder ro && !ro.IsWithinRange)
+        {
+            return new BriefingItem(ExceptionKind.OrderRejectedOutOfRange, $"Order rejected, aircraft out of range: {Describe(order)}");
+        }
+
+        var aircraft = order switch
+        {
+            RouteOrder r => r.Aircraft,
+            AircraftOrder a => a.Type,
+            LeaseAircraftOrder l => l.Type,
+            _ => null,
+        };
+
+        if (aircraft is not null && !Timeline.IsAvailable(aircraft, year))
+        {
+            return new BriefingItem(ExceptionKind.OrderRejectedAircraftNotYetAvailable, $"Order rejected, aircraft not yet available: {Describe(order)}");
+        }
+
+        return new BriefingItem(ExceptionKind.OrderRejectedOverBudget, $"Order rejected, over budget: {Describe(order)}");
+    }
 }

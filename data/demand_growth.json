@@ -1,0 +1,6 @@
+[
+  { "year": 1955, "globalMultiplier": 1.0 },
+  { "year": 1970, "globalMultiplier": 1.5 },
+  { "year": 1990, "globalMultiplier": 2.5 },
+  { "year": 2015, "globalMultiplier": 4.0 }
+]

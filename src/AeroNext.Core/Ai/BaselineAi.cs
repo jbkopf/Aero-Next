@@ -6,14 +6,14 @@ namespace AeroNext.Core.Ai;
 
 /// <summary>
 /// A simple heuristic opponent: greedily enters the single highest-demand
-/// city pair its aircraft can actually reach and doesn't already serve, if
-/// it can afford a market action; bids on the single highest-demand
-/// gateway it doesn't yet touch, if it can also afford a contested action
-/// (per CLAUDE.md — negotiations are "blind" even for a skilled human, so
-/// not checking the target's remaining gate capacity before bidding isn't
-/// a missing smarts, it's true to the mechanic); and always bumps
-/// frequency on its own best-performing existing route (free, per
-/// CLAUDE.md — adding frequency to a served pair costs nothing).
+/// city pair its best available aircraft can actually reach and doesn't
+/// already serve, if it can afford a market action; bids on the single
+/// highest-demand gateway it doesn't yet touch, if it can also afford a
+/// contested action (per CLAUDE.md — negotiations are "blind" even for a
+/// skilled human, so not checking the target's remaining gate capacity
+/// before bidding isn't a missing smarts, it's true to the mechanic); and
+/// always bumps frequency on its own best-performing existing route (free,
+/// per CLAUDE.md — adding frequency to a served pair costs nothing).
 ///
 /// Not trying to play well — CLAUDE.md's game is always exactly 4 airlines,
 /// so this exists because the sim can never run a representative quarter
@@ -24,11 +24,12 @@ namespace AeroNext.Core.Ai;
 /// hiring, no aircraft ordering or alliance courting of its own — M9/M10
 /// added those mechanics but neither has consequences that would change
 /// this AI's route decisions, so extending it there would be cosmetic (see
-/// the M9/M10 roadmap notes). Range-awareness (M11) is different: an
-/// out-of-range order is rejected today, for real, so skipping candidates
-/// beyond the aircraft's reach isn't speculative. Purely a function of
-/// current state — no randomness, so it's deterministic by construction
-/// without needing a seeded RNG.
+/// the M9/M10 roadmap notes). Range-awareness (M11) and fleet availability
+/// (M13) are different: an out-of-range or not-yet-available order is
+/// rejected today, for real, so "always fly the best aircraft actually on
+/// offer" isn't speculative. Purely a function of current state — no
+/// randomness, so it's deterministic by construction without needing a
+/// seeded RNG.
 /// </summary>
 public static class BaselineAi
 {
@@ -36,12 +37,18 @@ public static class BaselineAi
     private const int FrequencyIncrement = 2;
     private static readonly Money NegotiationBidAmount = Money.FromDollars(2_000_000);
 
+    /// <param name="availableFleet">
+    /// Aircraft this airline could order today — already filtered to the
+    /// current era by the caller (e.g. Timeline.AvailableAircraft). The AI
+    /// picks whichever has the longest range, tie-broken by id, as its
+    /// default choice for a new route.
+    /// </param>
     public static IReadOnlyList<QuarterOrder> DecideOrders(
         IReadOnlyList<Route> currentRoutes,
         int actionCap,
         IReadOnlyList<City> allCities,
         GravityDemandModel demandModel,
-        AircraftType aircraft)
+        IReadOnlyList<AircraftType> availableFleet)
     {
         var orders = new List<QuarterOrder>();
         var spent = 0;
@@ -53,12 +60,17 @@ public static class BaselineAi
                 bestExisting.Origin, bestExisting.Destination, bestExisting.Aircraft, bestExisting.WeeklyRoundTrips + FrequencyIncrement));
         }
 
-        if (spent + 1 <= actionCap)
+        var bestAircraft = availableFleet
+            .OrderByDescending(a => a.RangeKm)
+            .ThenBy(a => a.Id, StringComparer.Ordinal)
+            .FirstOrDefault();
+
+        if (bestAircraft is not null && spent + 1 <= actionCap)
         {
-            var bestUnserved = FindBestUnservedPair(currentRoutes, allCities, demandModel, aircraft);
+            var bestUnserved = FindBestUnservedPair(currentRoutes, allCities, demandModel, bestAircraft);
             if (bestUnserved is not null)
             {
-                orders.Add(new RouteOrder(bestUnserved.Origin, bestUnserved.Destination, aircraft, NewRouteWeeklyRoundTrips));
+                orders.Add(new RouteOrder(bestUnserved.Origin, bestUnserved.Destination, bestAircraft, NewRouteWeeklyRoundTrips));
                 spent += 1;
             }
         }

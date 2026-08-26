@@ -27,7 +27,9 @@ namespace AeroNext.Core.Turns;
 /// here, rather than silently letting NetworkPlanner treat it as a dead
 /// leg later, keeps the reason visible to the player (CLAUDE.md's
 /// legibility pillar) instead of a route that mysteriously never carries
-/// anyone.
+/// anyone. Same treatment for an aircraft the manufacturer hasn't built
+/// yet this quarter (M13's era availability) — checked against the year
+/// quarterNumber falls in, via Timeline.
 /// </summary>
 public static class QuarterEngine
 {
@@ -44,10 +46,17 @@ public static class QuarterEngine
         var applied = new List<QuarterOrder>();
         var rejected = new List<QuarterOrder>();
         var spent = 0;
+        var year = Timeline.YearForQuarter(quarterNumber);
 
         foreach (var order in orders)
         {
             if (order is RouteOrder ro && !ro.IsWithinRange)
+            {
+                rejected.Add(order);
+                continue;
+            }
+
+            if (!IsAircraftAvailable(order, year))
             {
                 rejected.Add(order);
                 continue;
@@ -113,4 +122,12 @@ public static class QuarterEngine
     }
 
     internal static (string Origin, string Destination) RouteKey(Route route) => (route.Origin.Id, route.Destination.Id);
+
+    private static bool IsAircraftAvailable(QuarterOrder order, int year) => order switch
+    {
+        RouteOrder ro => Timeline.IsAvailable(ro.Aircraft, year),
+        AircraftOrder ao => Timeline.IsAvailable(ao.Type, year),
+        LeaseAircraftOrder lo => Timeline.IsAvailable(lo.Type, year),
+        _ => true, // orders with no aircraft (negotiations, alliances, private actions) are never era-gated
+    };
 }

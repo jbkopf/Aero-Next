@@ -68,6 +68,18 @@ public class GravityDemandModelTests
     }
 
     [Fact]
+    public void ForPair_GlobalMultiplier_ScalesDemandProportionally()
+    {
+        var a = MakeCity("a", 0, 0, 50);
+        var b = MakeCity("b", 10, 10, 50);
+
+        var baseline = new GravityDemandModel(globalMultiplier: 1.0).ForPair(a, b).PassengersPerQuarter;
+        var grown = new GravityDemandModel(globalMultiplier: 4.0).ForPair(a, b).PassengersPerQuarter;
+
+        Assert.InRange(grown, baseline * 4 - 1, baseline * 4 + 1);
+    }
+
+    [Fact]
     public void ForPair_CrossRegionMultiplier_DoesNotAffectSameRegionPairs()
     {
         var a = MakeCity("a", 0, 0, 50, Region.NorthAmerica);

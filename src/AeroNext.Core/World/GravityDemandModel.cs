@@ -33,20 +33,30 @@ public sealed class GravityDemandModel
     private const double DefaultScale = 7.5e6;
     private const double DefaultExponent = 2.0;
     private const double DefaultCrossRegionMultiplier = 6.0;
+    private const double DefaultGlobalMultiplier = 1.0;
     private const double MinDistanceKm = 100.0;
 
     private readonly double _scale;
     private readonly double _exponent;
     private readonly double _crossRegionMultiplier;
+    private readonly double _globalMultiplier;
 
+    /// <summary>
+    /// globalMultiplier is M13's historical growth knob — the campaign
+    /// constructs a new model each year with the era's multiplier from
+    /// Timeline.DemandMultiplierForYear, reusing the same tuned scale,
+    /// exponent, and cross-region multiplier throughout.
+    /// </summary>
     public GravityDemandModel(
         double scale = DefaultScale,
         double exponent = DefaultExponent,
-        double crossRegionMultiplier = DefaultCrossRegionMultiplier)
+        double crossRegionMultiplier = DefaultCrossRegionMultiplier,
+        double globalMultiplier = DefaultGlobalMultiplier)
     {
         _scale = scale;
         _exponent = exponent;
         _crossRegionMultiplier = crossRegionMultiplier;
+        _globalMultiplier = globalMultiplier;
     }
 
     public PairDemand ForPair(City a, City b)
@@ -58,6 +68,8 @@ public sealed class GravityDemandModel
         {
             raw *= _crossRegionMultiplier;
         }
+
+        raw *= _globalMultiplier;
 
         var passengers = (long)Math.Round(raw, MidpointRounding.AwayFromZero);
 

@@ -305,7 +305,7 @@ for (var q = 0; q < humanScript.Count; q++)
     {
         var orders = name == leagueNames[0]
             ? humanScript[q]
-            : BaselineAi.DecideOrders(leagueRoutes[name], leagueCaps[name], cities, demandModel, narrowbody);
+            : BaselineAi.DecideOrders(leagueRoutes[name], leagueCaps[name], cities, demandModel, new[] { narrowbody });
 
         var result = QuarterEngine.RunQuarter(q + 1, leagueRoutes[name], leagueCaps[name], orders, cities, demandModel);
 
@@ -523,4 +523,80 @@ for (var q = 1; q <= 4 && !recklessState.IsBankrupt; q++)
     recklessState = nextState;
     Console.WriteLine($"Q{q}: revenue {statement.Revenue,10}  cost {statement.OperatingCost,14}  " +
         $"net {statement.NetIncome,14}  cash {statement.CashBalanceAfter,14}  bankrupt={statement.IsBankrupt}");
+}
+
+// --- M13: historical arc — the full ~240-quarter campaign, 1955-2015 ---
+// Always 4 airlines, all AI-driven (0 human-scripted satisfies "at most 1").
+Console.WriteLine();
+Console.WriteLine("--- M13: full campaign, 1955-2015, 4 AI-driven airlines ---");
+
+var fleetCatalog = AircraftCatalog.LoadFile(Path.Combine(AppContext.BaseDirectory, "data", "aircraft.json"));
+var growthSchedule = DemandGrowthCatalog.LoadFile(Path.Combine(AppContext.BaseDirectory, "data", "demand_growth.json"));
+
+const int campaignQuarters = 244; // 1955 Q1 through 2015 Q4
+var campaignAirlineNames = new[] { "Atlas Air", "Meridian", "Skyward", "Continental Wings" };
+var campaignRoutes = campaignAirlineNames.ToDictionary(n => n, _ => (IReadOnlyList<Route>)Array.Empty<Route>());
+var campaignCaps = campaignAirlineNames.ToDictionary(n => n, _ => QuarterEngine.BaseActionCap);
+var campaignFinances = campaignAirlineNames.ToDictionary(n => n, _ => FinancialState.Start(Money.FromDollars(20_000_000), Money.FromDollars(10_000_000), interestRatePerQuarter: 0.02));
+
+// Reference chokepoint check: does the era's best available aircraft still
+// need Gander for JFK-LHR, or can it fly direct?
+string ChokepointStatus(int year)
+{
+    var best = Timeline.AvailableAircraft(fleetCatalog, year).OrderByDescending(a => a.RangeKm).First();
+    var direct = new Route(byId["jfk"], byId["lhr"], best, 1).IsWithinRange;
+    return direct ? $"{best.Name} flies JFK-LHR direct" : $"{best.Name} still needs a Gander stop";
+}
+
+// Chosen to capture the actual arc found by running this: steady growth,
+// a peak, rapid decline, and bankruptcy at quarter 22 - not evenly spaced.
+var checkpoints = new HashSet<int> { 1, 10, 16, 20, 22, 41, 121, campaignQuarters };
+
+for (var q = 1; q <= campaignQuarters; q++)
+{
+    var year = Timeline.YearForQuarter(q);
+    var availableFleet = Timeline.AvailableAircraft(fleetCatalog, year);
+    var yearDemandModel = new GravityDemandModel(globalMultiplier: Timeline.DemandMultiplierForYear(growthSchedule, year));
+    var appliedOrdersByAirline = new Dictionary<string, IReadOnlyList<QuarterOrder>>();
+
+    foreach (var name in campaignAirlineNames)
+    {
+        // A bankrupt airline is out: routes and action cap freeze at
+        // whatever they were, rather than an insolvent airline
+        // nonsensically continuing to grow forever.
+        if (campaignFinances[name].IsBankrupt)
+        {
+            appliedOrdersByAirline[name] = Array.Empty<QuarterOrder>();
+            continue;
+        }
+
+        var orders = BaselineAi.DecideOrders(campaignRoutes[name], campaignCaps[name], cities, yearDemandModel, availableFleet);
+        var result = QuarterEngine.RunQuarter(q, campaignRoutes[name], campaignCaps[name], orders, cities, yearDemandModel);
+        campaignRoutes[name] = result.Routes;
+        campaignCaps[name] = result.ActionCap;
+        appliedOrdersByAirline[name] = result.AppliedOrders;
+    }
+
+    var campaignLeague = campaignAirlineNames.Select(n => new Airline(n, campaignRoutes[n])).ToArray();
+    var campaignMarket = CompetitiveMarket.Resolve(campaignLeague, cities, yearDemandModel);
+
+    foreach (var seat in campaignLeague)
+    {
+        var (nextState, _) = FinancialResolver.Resolve(campaignFinances[seat.Name], seat, campaignMarket, appliedOrdersByAirline[seat.Name]);
+        campaignFinances[seat.Name] = nextState;
+    }
+
+    if (!checkpoints.Contains(q))
+    {
+        continue;
+    }
+
+    Console.WriteLine();
+    Console.WriteLine($"Quarter {q} ({year}): {ChokepointStatus(year)}, fleet has {availableFleet.Count} aircraft type(s) available");
+    foreach (var seat in campaignLeague)
+    {
+        var finance = campaignFinances[seat.Name];
+        Console.WriteLine($"  {seat.Name,-18} {campaignRoutes[seat.Name].Count,3} routes, " +
+            $"{campaignMarket.TotalCarried(seat),10:N0} pax/qtr, cash {finance.CashBalance,16}, bankrupt={finance.IsBankrupt}");
+    }
 }

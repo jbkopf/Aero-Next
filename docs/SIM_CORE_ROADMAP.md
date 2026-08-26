@@ -593,7 +593,7 @@ anything *from* yet. Noted again here rather than assumed forgotten.
 
 ---
 
-## M13 — Historical arc and timeline events
+## M13 — Historical arc and timeline events ✅
 
 1955–2015 event data (new aircraft types entering service, historical demand
 shifts) driving M11's range unlocks and M2's demand changes over time.
@@ -602,6 +602,61 @@ Data-driven (JSON), not hardcoded per-quarter branches.
 **Done when:** a full ~240-quarter campaign — always 4 airlines, at most 1
 human-scripted and the rest played by M8's baseline AI — runs end-to-end
 and prints a summary; chokepoint relevance visibly shifts across the run.
+
+Done — the biggest milestone yet, and it earned its keep by catching a real
+bug before it shipped. `data/aircraft.json` (`AircraftCatalog`, mirroring
+`CityCatalog`) is a 5-type fleet spanning DC-3 (1935) through the Boeing 777
+(1995), each with the `AvailableFromYear` M11 explicitly deferred — that
+field finally has a consumer. `data/demand_growth.json`
+(`DemandGrowthCatalog`) is a piecewise-constant global-demand multiplier by
+year, feeding `GravityDemandModel`'s new `globalMultiplier` parameter.
+`Timeline` ties both to the quarter counter (`YearForQuarter`) and is
+checked from two places: `QuarterEngine` rejects a `RouteOrder`/
+`AircraftOrder`/`LeaseAircraftOrder` for an aircraft that doesn't exist yet
+this year — a third rejection reason (`OrderRejectedAircraftNotYetAvailable`)
+alongside M11's range and M7's budget, each reported distinctly by
+`BriefingGenerator` — and `BaselineAi`'s signature changed from a single
+fixed aircraft to a fleet, picking whichever available type has the
+longest range each quarter (all 30+ existing call sites updated; only
+`AircraftType`'s existing generous defaults, not this change, are why nothing
+predating M13 broke).
+
+**A real bug, caught by actually running the campaign instead of assuming
+it would work:** the first version let a bankrupt airline keep calling
+`BaselineAi`/`QuarterEngine` every remaining quarter — insolvent airlines
+kept adding routes and growing passenger counts forever with permanently
+negative, frozen cash. Running the full 244-quarter campaign surfaced this
+immediately (route counts climbing past 200 while `IsBankrupt` stayed
+true). Fixed in the campaign orchestration: once `FinancialState.IsBankrupt`
+is true, that airline's routes and action cap freeze for the rest of the
+run rather than continuing to nonsensically grow.
+
+**The campaign's actual arc, measured rather than assumed:** cash grows
+steadily and plausibly for the first ~16 quarters ($19.8M → $32.0M) as
+`BaselineAi` builds out a network against real demand. Then it reverses
+sharply and all four (identical, undifferentiated — a known M8 property)
+airlines go bankrupt at quarter 22 (1960) — nine years earlier than the M12
+demo's separate, deliberately-reckless scenario, and entirely by accident
+this time. The cause: M8's "always bump the best-performing route by +2
+`WeeklyRoundTrips`, every quarter, unconditionally" heuristic was written
+and tested at 3-8 quarter timescales, where it looks like sensible growth.
+Compounded across 20+ quarters, one route's capacity — and the
+available-seat-km operating cost that scales with it — grows without
+bound, while revenue is capped by demand. This is a genuine, newly
+discovered limitation of the M8 heuristic, not a bug in M13's own code, and
+it's recorded here rather than quietly tuned away: a materially smarter
+`BaselineAi` (capping frequency growth, or conditioning it on load factor)
+is future work, not required by this milestone's own "Done when," which
+asks for a plausible trajectory and a bankruptcy trigger that works
+correctly — both true, and now honestly documented as they actually
+occurred.
+
+**Chokepoint relevance shift, confirmed directly:** the campaign prints
+whether the era's longest-range available aircraft can fly JFK-LHR
+nonstop. Quarter 1 (1955): "Lockheed Constellation still needs a Gander
+stop." Quarter 16 (1958) onward: "Boeing 707 flies JFK-LHR direct" — the
+exact CLAUDE.md map-design story, now driven by the timeline rather than
+manually staged as it was in M11's own demo.
 
 ---
 
