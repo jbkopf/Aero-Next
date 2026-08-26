@@ -704,3 +704,64 @@ foreach (var seat in setupSeats)
     var quarter1 = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, cities, demandModel);
     Console.WriteLine($"    Quarter 1 route order: {(quarter1.RejectedOrders.Count == 0 ? "accepted" : "REJECTED")}");
 }
+
+// ---------------------------------------------------------------------
+// M19 (Game Setup & Initial Conditions roadmap): the full chain, wired
+// into one entry point, run through the real QuarterEngine ->
+// CompetitiveMarket -> FinancialResolver pipeline (not a mock path) for
+// the three configurations at the scope boundary. This is the roadmap's
+// last milestone.
+// ---------------------------------------------------------------------
+Console.WriteLine();
+Console.WriteLine("=== M19: Full setup-through-quarter-1 integration ===");
+
+void RunSetupThroughQuarter1(string label, IReadOnlyList<HumanPlayerChoice> humanChoices)
+{
+    Console.WriteLine($"  --- {label} ---");
+
+    var seats = GameSetup.CreateSeats(humanChoices, cities);
+
+    var conditionsBySeat = seats.ToDictionary(s => s, s => StartingConditionsResolver.Resolve(s, cities, fleetCatalog));
+    var routesBySeat = new Dictionary<AirlineSeat, IReadOnlyList<Route>>();
+    var appliedOrdersBySeat = new Dictionary<AirlineSeat, IReadOnlyList<QuarterOrder>>();
+
+    foreach (var seat in seats)
+    {
+        var conditions = conditionsBySeat[seat];
+        var order = new RouteOrder(seat.StartingCity, conditions.GuaranteedRouteDestination, conditions.StartingAircraft, WeeklyRoundTrips: 3);
+        var quarter1 = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, cities, demandModel);
+
+        routesBySeat[seat] = quarter1.Routes;
+        appliedOrdersBySeat[seat] = quarter1.AppliedOrders;
+
+        if (quarter1.RejectedOrders.Count > 0)
+        {
+            throw new InvalidOperationException($"{seat.AirlineName}'s guaranteed quarter-1 route was rejected — a real bug, not expected.");
+        }
+    }
+
+    var league = seats.Select(s => new Airline(s.AirlineName, routesBySeat[s])).ToArray();
+    var market = CompetitiveMarket.Resolve(league, cities, demandModel);
+
+    foreach (var seat in seats)
+    {
+        var conditions = conditionsBySeat[seat];
+        var airline = league.Single(a => a.Name == seat.AirlineName);
+        var financeStart = FinancialState.Start(conditions.StartingCash, Money.FromDollars(10_000_000), interestRatePerQuarter: 0.02);
+        var (_, statement) = FinancialResolver.Resolve(financeStart, airline, market, appliedOrdersBySeat[seat]);
+
+        var role = seat.IsHuman ? "human" : "AI  ";
+        Console.WriteLine($"    [{role}] {seat.AirlineName,-18} {seat.HomeRegion,-13} " +
+            $"carried {market.TotalCarried(airline),8:N0} pax  net {statement.NetIncome,14}  cash {statement.CashBalanceAfter,14}  bankrupt={statement.IsBankrupt}");
+    }
+}
+
+RunSetupThroughQuarter1("0 human players", Array.Empty<HumanPlayerChoice>());
+RunSetupThroughQuarter1("1 human + 3 AI", new[] { new HumanPlayerChoice("Founders Airways", "yyz") });
+RunSetupThroughQuarter1("4 human players", new[]
+{
+    new HumanPlayerChoice("Atlas Air", "ord"),
+    new HumanPlayerChoice("Meridian", "cdg"),
+    new HumanPlayerChoice("Skyward", "sin"),
+    new HumanPlayerChoice("Continental Wings", "eze"),
+});

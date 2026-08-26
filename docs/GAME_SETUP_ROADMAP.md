@@ -1,6 +1,6 @@
 # Game Setup & Initial Conditions Roadmap
 
-**Status: M15–M18 complete, M19 not started.** Builds on the completed sim
+**Status: M15–M19 all complete.** Builds on the completed sim
 core (`docs/SIM_CORE_ROADMAP.md`, M0–M14, all done). Continues that roadmap's
 milestone numbering (M15+) rather than restarting at M0, since this is the
 next thing built on the same headless core, not a separate project.
@@ -345,7 +345,7 @@ guaranteed destination, with each guaranteed route order confirmed
 
 ---
 
-## M19 — Integration demo and turn-1 validation
+## M19 — Integration demo and turn-1 validation ✅
 
 Wire M15–M18 into one entry point `AeroNext.Sim` can run end-to-end, and
 prove the whole chain with real numbers instead of unit tests in isolation.
@@ -363,6 +363,53 @@ which should be noted honestly: it will still make structurally identical
 *decisions* given similar inputs, since the AI logic itself is out of scope
 here — the difference this roadmap produces is in what each airline starts
 with, not how it decides.
+
+Done — the roadmap's last milestone, and the smallest change relative to
+what it proves, the same shape M14 had for the sim core roadmap. No new
+production capability: `RunSetupThroughQuarter1` in `AeroNext.Sim` is pure
+orchestration — `GameSetup.CreateSeats` → `StartingConditionsResolver.
+Resolve` per seat → a `RouteOrder` through the real `QuarterEngine` per
+seat → one `Airline` league through `CompetitiveMarket.Resolve` → one
+`FinancialResolver.Resolve` per seat, using each seat's own
+`StartingConditions.StartingCash` (not a shared placeholder) as the
+opening `FinancialState`. Demonstrated for all three required
+configurations plus confirmed identical for the fourth (2 human + 2 AI is
+implied by the same code path, not separately special-cased).
+
+**Real, unforced numbers, not tuned to look good:** every seat carries real
+passengers on its guaranteed route (2,184–3,744 pax/qtr depending on the
+destination's demand) and posts a small negative net income for the
+quarter (-$69K to -$146K) — a brand-new route hasn't built up load factor
+yet, the same honest "invest ahead of demand" story M12 already told for
+its own hub-building demo. Nobody is bankrupt after quarter 1, in any of
+the three configurations. This wasn't tuned to come out this way — it's
+what `$20M × regional factor` starting cash against one small route's
+first-quarter economics actually produces.
+
+**The `BaselineAi` non-differentiation note plays out exactly as
+predicted:** the 0-human demo's 4 AI seats now start with genuinely
+different cash, aircraft, and destinations (Asia's carries almost double
+Europe's home region's cheaper aircraft — real, seat-specific numbers, not
+copies of each other for the first time since M8). What they'd each
+*decide* to do starting from quarter 2 is untouched by this roadmap, per
+the explicit scope decision at the top of this document.
+
+261 tests total (3 new, `GameSetupIntegrationTests`, one per required
+configuration via `[Theory]`/`MemberData` rather than three separate
+copy-pasted `[Fact]`s), covering the identical resolver chain the
+`AeroNext.Sim` demo exercises — the same relationship M14's
+`DeterminismRegressionTests` has to its own campaign demo, so a future
+refactor that breaks this wiring fails a test, not just an eyeballed
+console diff. 100% line/branch coverage maintained; overall project
+coverage unchanged at 99.78%/99.64% (no new production code — this
+milestone is glue over M15–M18's already fully-covered logic). The same
+two small pre-existing gaps noted at M16 (`BriefingGenerator.cs`,
+`QuarterOrder.cs`'s empty abstract marker) remain, still out of this
+roadmap's scope.
+
+**Roadmap complete.** M15–M19 all done, tested, coverage-checked, and
+demonstrated from the command line, per this document's own "done when"
+bar at the top.
 
 ---
 
