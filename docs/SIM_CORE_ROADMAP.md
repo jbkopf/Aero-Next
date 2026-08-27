@@ -44,7 +44,9 @@ Tests: schema validation, no duplicate ids, deterministic load order.
 
 Done. 30 cities across the 5 regions (4 home + Africa as a bridge region),
 including all 6 named chokepoints, in `data/cities.json`, loaded and
-validated by `CityCatalog`.
+validated by `CityCatalog`. (Later grown to 33 — see
+`docs/GAME_SETUP_ROADMAP.md`'s "Kept in mind" city-expansion work, outside
+this roadmap's own milestones.)
 
 ---
 
@@ -674,6 +676,22 @@ campaign again rather than assumed unaffected. The underlying finding this
 section documents (M8's heuristic eventually bankrupts an unconditionally-
 growing network) is unchanged; only the specific dollar figures and
 timing are.
+
+**Updated again after the city-expansion work** (`docs/GAME_SETUP_ROADMAP.md`'s
+"Kept in mind" region-by-region city additions, starting with SouthAmerica —
+outside this roadmap's own milestones): `BaselineAi.FindBestUnservedPair`
+searches every city pair in the world, not just pairs near an airline's
+existing network, so adding new cities anywhere changes the candidate pool
+every seat's route decisions are drawn from — a real, broader-reaching
+consequence than the aircraft-catalog rounds, which could mostly be kept
+isolated by tuning range. Re-measured directly rather than assumed safe:
+bankruptcy still triggers at quarter 19 (the timing is unaffected), but the
+specific figures moved — cash at bankruptcy is now -$3,418,181.03 (was
+-$2,660,674.22) and pax carried at that point is 150,853 (was 150,249).
+Confirmed via the 150-game QA harness sweep that correctness (no crashes,
+no invariant violations) holds regardless of the new candidate pairs;
+exact figures were never the thing being protected here, only plausibility
+and a working bankruptcy trigger, both still true.
 
 **Chokepoint relevance shift, confirmed directly:** the campaign prints
 whether the era's longest-range available aircraft can fly JFK-LHR

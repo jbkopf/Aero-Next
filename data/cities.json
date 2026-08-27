@@ -31,6 +31,9 @@
   { "id": "gru", "name": "Sao Paulo",    "region": "SouthAmerica", "latitude": -23.4356, "longitude": -46.4731,  "demandWeight": 75,  "isGateway": true,  "gateCapacity": 3 },
   { "id": "eze", "name": "Buenos Aires", "region": "SouthAmerica", "latitude": -34.8222, "longitude": -58.5358,  "demandWeight": 55,  "isGateway": false, "gateCapacity": null },
   { "id": "gig", "name": "Rio de Janeiro","region": "SouthAmerica","latitude": -22.8090, "longitude": -43.2506,  "demandWeight": 60,  "isGateway": false, "gateCapacity": null },
+  { "id": "scl", "name": "Santiago",     "region": "SouthAmerica", "latitude": -33.4489, "longitude": -70.6693,  "demandWeight": 55,  "isGateway": false, "gateCapacity": null },
+  { "id": "bog", "name": "Bogota",       "region": "SouthAmerica", "latitude": 4.7110,   "longitude": -74.0721,  "demandWeight": 55,  "isGateway": false, "gateCapacity": null },
+  { "id": "lim", "name": "Lima",         "region": "SouthAmerica", "latitude": -12.0464, "longitude": -77.0428,  "demandWeight": 50,  "isGateway": false, "gateCapacity": null },
 
   { "id": "cai", "name": "Cairo",        "region": "Africa",       "latitude": 30.1219,  "longitude": 31.4056,   "demandWeight": 50,  "isGateway": true,  "gateCapacity": 3 },
   { "id": "dss", "name": "Dakar",        "region": "Africa",       "latitude": 14.6708,  "longitude": -17.0733,  "demandWeight": 15,  "isGateway": true,  "gateCapacity": 2 }

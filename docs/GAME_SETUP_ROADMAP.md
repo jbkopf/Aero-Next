@@ -77,6 +77,15 @@ cities total). 11 new tests, 100% line/branch coverage on
 `HomeRegions.cs`; overall project coverage unchanged at 99.75%/99.59%.
 Demonstrated in `AeroNext.Sim`.
 
+**Updated after the city-expansion work** (see "Kept in mind" below):
+SouthAmerica's 2-eligible-city gap was real and got closed directly —
+Santiago, Bogota, and Lima bring every home region to parity at 5 eligible
+non-gateway cities each, confirmed by a new test
+(`EligibleStartingCities_EveryHomeRegion_HasParity_FiveEligibleCities`).
+The mechanism this milestone built (throwing for Africa, reading straight
+from `cities.json`) needed no changes at all — it was already
+data-driven exactly as designed.
+
 ---
 
 ## M16 — Regional economics and region-appropriate aircraft ✅
@@ -146,12 +155,26 @@ defines, not every city tagged with that `Region` — using the raw `Region`
 tag would have let remote, near-zero-demand chokepoints (Anchorage,
 Honolulu, Wake, Gander — all tagged `NorthAmerica`) drag that region's
 average down for reasons that have nothing to do with economic strength.
-Measured against the real dataset: NorthAmerica 0.948, Europe 0.963, Asia
-1.143, SouthAmerica 0.865 — Asia comes out strongest (its 5 eligible cities
-are all genuinely high-demand: Shanghai, Singapore, Seoul, Bangkok, Delhi),
-SouthAmerica weakest (only 2 eligible cities, the smallest set of any home
-region). Not tuned to produce this ordering — it's what the existing city
-data actually says once chokepoint noise is excluded.
+Measured against the real dataset (at the time): NorthAmerica 0.948, Europe
+0.963, Asia 1.143, SouthAmerica 0.865 — Asia comes out strongest (its 5
+eligible cities are all genuinely high-demand: Shanghai, Singapore, Seoul,
+Bangkok, Delhi), SouthAmerica weakest (only 2 eligible cities, the smallest
+set of any home region). Not tuned to produce this ordering — it's what
+the existing city data actually said once chokepoint noise is excluded.
+
+**Updated after the SouthAmerica city expansion** (see "Kept in mind"
+below): since the factor normalizes each region's average against the
+*global* average across all 4 regions' eligible cities, adding cities to
+just one region shifts every region's factor, not only SouthAmerica's —
+re-measured directly: NorthAmerica 0.977, Europe 0.992, Asia 1.178,
+SouthAmerica 0.853. SouthAmerica's own factor moved only slightly (0.865 →
+0.853, since Santiago/Bogota/Lima's demand weights are close to its
+existing average), but the other three regions all rose, because
+SouthAmerica's new cities pulled the global average down. This ripple
+effect — a single region's data change moving every region's number — is
+inherent to how the factor is defined, not a bug; documented here so the
+figures above are read as "as measured at the time," not permanently
+pinned constants.
 
 `AircraftType` gained `Manufacturer` (string) and `ManufacturerRegion`
 (`Region?`), both defaulting empty/null like every other generously-
@@ -293,11 +316,12 @@ data, not just one hand-picked example.
 Done. `StartingConditionsResolver.Resolve` (`AeroNext.Core.Setup`) returns
 an `AirlineStartingConditions` (cash, aircraft type, quantity, guaranteed
 route destination) for a given `AirlineSeat`. Cash is
-`$20,000,000 × RegionalEconomics.Factor` (Asia's Shanghai seat starts at
-$22.9M, SouthAmerica's Buenos Aires at $17.3M in the real-data demo — a
-direct, honest consequence of M16's measured factors, not tuned per
-region). Aircraft quantity is a fixed 2, matching the "enough for one real
-route, not a fleet" framing.
+`$20,000,000 × RegionalEconomics.Factor` (at the time: Asia's Shanghai seat
+started at $22.9M, SouthAmerica's Buenos Aires at $17.3M in the real-data
+demo — a direct, honest consequence of M16's measured factors, not tuned
+per region; see M16's own update note for how these numbers moved after
+the SouthAmerica city expansion). Aircraft quantity is a fixed 2, matching
+the "enough for one real route, not a fleet" framing.
 
 **A real finding while implementing "guaranteed turn-1 route":**
 `QuarterEngine` turns out to never check gateway/landing-rights capacity
@@ -324,12 +348,15 @@ actually triggers) rather than trusting the real dataset alone to exercise
 that branch.
 
 **Full real-data sweep, not sampled:** the "Done when" check runs for
-every one of the 17 real eligible starting cities across all 4 home
-regions — every single one resolves successfully and its guaranteed
-`RouteOrder` is accepted by the real `QuarterEngine` on quarter 1, with no
-data gaps needing a fix (the smallest-first search already handled the
-one region, Europe, with only a single appropriate aircraft type and no
-fallback available).
+every real eligible starting city across all 4 home regions (17 at the
+time; 20 now that SouthAmerica reached parity with the rest — the test
+itself iterates `HomeRegions.EligibleStartingCities` directly rather than
+a hardcoded count, so it picked up the 3 new cities automatically with no
+test changes needed) — every single one resolves successfully and its
+guaranteed `RouteOrder` is accepted by the real `QuarterEngine` on quarter
+1, with no data gaps needing a fix (the smallest-first search already
+handled the one region, Europe, with only a single appropriate aircraft
+type and no fallback available).
 
 **Fleet ownership still isn't enforced against route capacity anywhere**
 — the same gap M10/M11/M12 each already noted and left open.
@@ -398,6 +425,21 @@ regression — the guaranteed-route mechanic is correctly picking up more
 realistic economics and a richer aircraft catalog as later milestones add
 them. Still nobody bankrupt after one quarter in any configuration; the
 finding this section exists to demonstrate is unchanged.
+
+**A third re-measurement, after the SouthAmerica city expansion, landed
+differently than the first two:** the 0-human and 1-human demo seats'
+net income figures are byte-identical to before (still -$159K/-$234K) —
+each of those seats' own starting city (the highest-demandWeight eligible
+city per region, e.g. Rio de Janeiro for SouthAmerica) already had a
+same-region neighbor within range before the expansion, so adding more
+distant options didn't change what `StartingConditionsResolver` picked
+for them. Only starting *cash* moved for those seats, following M16's
+factor shift. The 4-human demo's hardcoded "Continental Wings" seat
+(started at Buenos Aires specifically) did pick a new destination —
+Santiago instead of Rio de Janeiro — since Buenos Aires gained real new
+same-region neighbors the smallest-range-first search now considers; its
+net income (-$224,600.84) still falls inside the already-quoted range, so
+the range claim above holds without needing to widen.
 
 **The `BaselineAi` non-differentiation note plays out exactly as
 predicted:** the 0-human demo's 4 AI seats now start with genuinely
@@ -632,3 +674,46 @@ bar at the top.
   Bombardier, ATR) — the exact list that note named. 40 types span
   1935-2015 with no era thinner than roughly 5 types per decade. Further
   additions remain possible but are no longer closing a named gap.
+
+- **City expansion, region by region — SouthAmerica (round 1 of an ongoing
+  series) done, outside this roadmap's own milestones.** `data/cities.json`
+  grew from 30 to 33 cities: Santiago, Bogota, and Lima bring
+  SouthAmerica's non-gateway "eligible starting city" count from 2 (the
+  thinnest of any home region, well below every other region's 5) to 5,
+  reaching parity. All three are real, significant aviation markets, not
+  padding — chosen the same way M15's original set was: genuine city
+  weight, not filler.
+
+  **A materially bigger blast radius than the aircraft-catalog rounds,
+  and worth understanding why:** every aircraft round could mostly stay
+  isolated by tuning `RangeKm`/`AvailableFromYear` so nothing changed
+  which aircraft `BaselineAi` picks. Cities don't have that same
+  isolation available, for two structural reasons. First,
+  `BaselineAi.FindBestUnservedPair` searches every city pair in the world
+  for its single best move, not pairs near an airline's own network — so
+  new cities anywhere change every seat's candidate pool, not just the
+  region they're added to. Second, `RegionalEconomics.Factor` normalizes
+  each region's average against the *global* average across all 4 home
+  regions' eligible cities — so adding cities to one region shifts every
+  region's factor. Both were measured directly rather than assumed:
+  M13's campaign still bankrupts at quarter 19 (timing unaffected) but the
+  specific cash figure moved (-$2,660,674.22 → -$3,418,181.03, see
+  `docs/SIM_CORE_ROADMAP.md`'s M13 section); all 4 regions' M16 economic
+  factors moved, not just SouthAmerica's (see M16's own update note above).
+  150-game QA harness sweep confirms correctness (no crashes, no invariant
+  violations) holds regardless. This is expected to repeat for every
+  future region in this series — each round's own entry should include a
+  fresh measurement, not assume the last round's isolation-check habits
+  from the aircraft work transfer over.
+
+  New tests added rather than just re-measured figures: `CityCatalogTests.
+  LoadFile_IncludesSouthAmericaExpansionCities` and `HomeRegionsTests.
+  EligibleStartingCities_EveryHomeRegion_HasParity_FiveEligibleCities` —
+  the latter iterates `HomeRegions.All` directly rather than hardcoding a
+  per-region count, so it (and `StartingConditionsTests`' real-data sweep,
+  which iterates `HomeRegions.EligibleStartingCities` the same way)
+  needed zero changes to pick up the 3 new cities automatically, a small
+  but real payoff of that design choice back in M15/M18.
+
+  NorthAmerica, Europe, Asia, and Africa are unexamined by this round —
+  next in the series, one region at a time, per explicit direction.

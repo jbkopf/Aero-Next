@@ -33,6 +33,23 @@ public class CityCatalogTests
     }
 
     [Fact]
+    public void LoadFile_IncludesSouthAmericaExpansionCities()
+    {
+        // SouthAmerica was the thinnest home region (3 cities total, 2
+        // eligible non-gateway starting cities) - Santiago, Bogota, and
+        // Lima bring its non-gateway count to 5, matching every other
+        // home region.
+        var cities = CityCatalog.LoadFile(DataPath);
+        var ids = cities.Select(c => c.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        Assert.Contains("scl", ids);
+        Assert.Contains("bog", ids);
+        Assert.Contains("lim", ids);
+        Assert.All(new[] { "scl", "bog", "lim" }, id =>
+            Assert.Equal(Region.SouthAmerica, cities.Single(c => c.Id == id).Region));
+    }
+
+    [Fact]
     public void GatewayCities_AllHavePositiveGateCapacity()
     {
         var cities = CityCatalog.LoadFile(DataPath);
