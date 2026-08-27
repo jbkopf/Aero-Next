@@ -494,35 +494,39 @@ bar at the top.
   now, so this means threading that board through `DecideOrders`, not
   just changing what it does with cities it can already see.
 
-  **2. Network contiguity.** A new route's origin must already be a city
-  the airline serves — no teleporting a second, disconnected route pair
-  into existence; growth has to reach outward from the existing network,
-  the way a real hub-and-spoke actually grows. This is a bigger `BaselineAi`
-  change than it first looks: `FindBestUnservedPair` today searches every
-  city pair in the world for the single globally-best move, completely
-  independent of the airline's own network — it would need to search only
-  pairs touching an already-served city instead. Two details to settle
-  when this is actually built, not resolved here: whether "originate"
-  means specifically the `RouteOrder.Origin` field or either endpoint
-  (routes function bidirectionally everywhere else in the sim, so
-  requiring literally the `Origin` field specifically, rather than either
-  endpoint, would be an arbitrary distinction worth questioning); and how
-  an airline's very first route is exempted, since nothing today persists
-  a "home city" onto `Airline`/`AirlineSeat` past `StartingConditionsResolver`
-  — the M18 guaranteed route consumes that identity once, at
-  setup, and it isn't carried into the ongoing turn loop, so enforcing
-  "your first route must start from home" needs that identity to actually
-  survive into gameplay, not just setup. Multi-route quarters need one
-  more decision: whether a same-quarter second new route can chain off a
-  first new route being added in the same batch, or whether the
-  served-city check should use only the network as it stood at the start
-  of the quarter, matching `QuarterEngine.Cost`'s existing "evaluated
-  against the quarter's starting routes, not other orders in the same
-  batch" precedent (cited directly in `QuarterEngine.Cost`'s own doc
-  comment) — the latter is almost certainly the right default, both for
-  consistency with that existing rule and because it keeps order
-  resolution independent of submission order within a quarter, which
-  CLAUDE.md's simultaneous-resolution architecture depends on throughout.
+  **2. Network contiguity — rules settled, not just flagged as open
+  questions anymore:**
+
+  - The constrained field is specifically `RouteOrder.Origin`, not "either
+    endpoint" — deliberate, not an arbitrary pick: origin is where growth
+    has to reach *outward from*, `Destination` is deliberately unconstrained
+    (has to be, or an airline could never open anywhere new at all).
+  - The airline's **home city is always a valid origin, every quarter,
+    permanently** — not just exempted for the first-ever route. This is
+    what actually resolves the gap flagged earlier: since home has to stay
+    checkable forever, not just at setup, the airline's home-city identity
+    needs to become a real, persistent field (on `Airline` or wherever it
+    ends up living), not something `StartingConditionsResolver` consumes
+    once and forgets. A concrete consequence worth naming: this makes home
+    city permanently re-enterable even if a later quarter's route churn
+    ever dropped the airline's own home-city route entirely — by design,
+    not as an edge-case bug.
+  - The valid-origin set for a quarter is **the cities touched by routes
+    active at the start of that quarter** (plus home city, always) — a new
+    route order can never chain off another new route order placed in the
+    same quarter. Confirms the recommended default: matches
+    `QuarterEngine.Cost`'s existing "evaluated against the quarter's
+    starting routes, not other orders in the same batch" precedent exactly,
+    keeping order resolution independent of submission order within a
+    quarter, which the simultaneous-resolution architecture depends on
+    throughout.
+
+  Still a genuinely bigger `BaselineAi` change than it looks, unresolved by
+  the above: `FindBestUnservedPair` today searches every city pair in the
+  world for the single globally-best move, completely independent of the
+  airline's own network — it needs to search only pairs whose `Origin` is
+  in the valid-origin set defined above, which also means `DecideOrders`
+  needs to know the airline's home city, not just its current routes.
 - **Gateway home-city exception** — M15 deliberately keeps every region's
   gateway inside the ordinary M9 contested mechanic, including for the
   local airline. Revisit only with real evidence this makes early gateway
