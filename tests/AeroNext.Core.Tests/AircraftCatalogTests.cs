@@ -115,6 +115,40 @@ public class AircraftCatalogTests
     }
 
     [Fact]
+    public void LoadFile_NoAircraft_ExceedsThe777sRange()
+    {
+        // Completes the "longest available" regression class: the 777
+        // (1995) is the campaign's all-time range champion through 2015 -
+        // round 5's widebodies (A380, 787, A350) all came respectably
+        // close in real life without exceeding it. Checked directly rather
+        // than assumed, same as every earlier round in this class.
+        var fleet = AircraftCatalog.LoadFile(DataPath);
+        var boeing777 = fleet.Single(a => a.Id == "777");
+
+        foreach (var aircraft in fleet.Where(a => a.Id != "777"))
+        {
+            Assert.True(aircraft.RangeKm <= boeing777.RangeKm,
+                $"{aircraft.Id} ({aircraft.RangeKm} km) exceeds the 777's {boeing777.RangeKm} km - " +
+                "it would become the campaign's new all-time longest-range aircraft.");
+        }
+    }
+
+    [Fact]
+    public void LoadFile_Includes2000sAnd2010sAircraft()
+    {
+        // Round 5: the final stretch of the campaign timeline (2000-2015)
+        // had only ARJ21 (2008) before this.
+        var fleet = AircraftCatalog.LoadFile(DataPath);
+        var ids = fleet.Select(a => a.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        Assert.Contains("e190", ids);   // Embraer E190 (2004)
+        Assert.Contains("a380", ids);   // Airbus A380 (2005) - largest passenger airliner ever built
+        Assert.Contains("ssj100", ids); // Sukhoi Superjet 100 (2011)
+        Assert.Contains("787", ids);    // Boeing 787 Dreamliner (2011)
+        Assert.Contains("a350", ids);   // Airbus A350 (2015) - available for only the campaign's final quarters
+    }
+
+    [Fact]
     public void LoadFile_Includes1980sAnd1990sAircraft()
     {
         // Round 4: deepens what had been a thin era (only emb120/a320/

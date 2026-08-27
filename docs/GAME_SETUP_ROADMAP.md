@@ -597,3 +597,38 @@ bar at the top.
   are now permanently guarded, not just the ones each round happened to
   stress-test. Full 244-quarter M13 campaign and M16/M18/M19 demo output
   confirmed byte-identical; 150-game QA harness sweep passes cleanly.
+
+- **Round-5 aircraft expansion: 2000-2015, the end of the timeline — done,
+  outside this roadmap's own milestones.** `data/aircraft.json` grew from
+  35 to 40 types, closing out the final stretch that only ARJ21 (2008) had
+  covered: Embraer E190 (2004) is a modern, larger successor sitting
+  alongside EMB-120 in SouthAmerica's own lineup; Airbus A380 (2005, the
+  largest passenger airliner ever built — 525 seats, the catalog's biggest)
+  and Boeing 787 Dreamliner (2011, the composite-airframe efficiency
+  breakthrough — tuned to the catalog's single best `CostPerAvailableSeatKm`,
+  0.06, matching its real-world efficiency reputation) are the era's two
+  defining widebodies; Sukhoi Superjet 100 (2011, `ManufacturerRegion` null
+  like the other Soviet/Russian types) carries that lineage into the
+  modern era; Airbus A350 (2015) closes the catalog out, available for
+  only the campaign's final few quarters by construction.
+
+  **The "longest available" regression class, closed out rather than just
+  extended again:** none of round 5's widebodies (A380 14,800 km, 787
+  14,000 km, A350 15,000 km) exceed the 777's 17,000 km — checked
+  directly, not assumed from round 4's pattern holding. Added a
+  comprehensive closing test, `LoadFile_NoAircraft_ExceedsThe777sRange`,
+  checking the *entire* catalog rather than just aircraft before a cutoff
+  year — the 777 is confirmed the campaign's all-time range champion
+  through 2015, so this whole regression class (four rounds, three
+  transition-specific tests plus this one) is now fully closed rather than
+  needing a fifth guard if a future round adds something past 2015. Full
+  244-quarter M13 campaign and M16/M18/M19 demo output confirmed
+  byte-identical; 150-game QA harness sweep passes cleanly.
+
+  **The aircraft-catalog expansion arc across all five rounds is now
+  complete relative to the original "Kept in mind" note's own scope:**
+  American, European, Soviet, and Chinese manufacturers are all
+  represented, alongside regional-jet/turboprop makers (Embraer,
+  Bombardier, ATR) — the exact list that note named. 40 types span
+  1935-2015 with no era thinner than roughly 5 types per decade. Further
+  additions remain possible but are no longer closing a named gap.
