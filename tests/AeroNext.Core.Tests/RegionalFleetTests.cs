@@ -59,6 +59,64 @@ public class RegionalFleetTests
     }
 
     [Fact]
+    public void AppropriateAircraft_SouthAmerica_GetsOwnManufacturerOnceEmbraerArrives()
+    {
+        var fleet = AircraftCatalog.LoadFile(AircraftDataPath);
+
+        // EMB-120 Brasilia (1985): the first SouthAmerica-manufactured type,
+        // closing the gap RegionalFleetTests documented at the 1955 start.
+        var appropriate = RegionalFleet.AppropriateAircraft(Region.SouthAmerica, fleet, 1985);
+
+        Assert.All(appropriate, a => Assert.Equal(Region.SouthAmerica, a.ManufacturerRegion));
+        Assert.Contains(appropriate, a => a.Id == "emb120");
+    }
+
+    [Fact]
+    public void AppropriateAircraft_Asia_GetsOwnManufacturerOnceComacArrives()
+    {
+        var fleet = AircraftCatalog.LoadFile(AircraftDataPath);
+
+        // COMAC ARJ21 (2008): the first Asia-manufactured type.
+        var appropriate = RegionalFleet.AppropriateAircraft(Region.Asia, fleet, 2008);
+
+        Assert.All(appropriate, a => Assert.Equal(Region.Asia, a.ManufacturerRegion));
+        Assert.Contains(appropriate, a => a.Id == "arj21");
+    }
+
+    [Fact]
+    public void AppropriateAircraft_UnmodeledManufacturerRegion_NeverPreferredOnceEveryRegionHasItsOwn()
+    {
+        var fleet = AircraftCatalog.LoadFile(AircraftDataPath);
+
+        // By 2015 every home region has its own manufactured type
+        // available (Asia's COMAC ARJ21, 2008, is the last to arrive), so
+        // every region's "appropriate" set comes from the own-manufacturer
+        // branch — Tu-104/Il-62 (Soviet, ManufacturerRegion left null; see
+        // AircraftCatalogTests) never surface as anyone's preferred pick.
+        foreach (var region in HomeRegions.All)
+        {
+            var appropriate = RegionalFleet.AppropriateAircraft(region, fleet, 2015);
+
+            Assert.DoesNotContain(appropriate, a => a.Id is "tu104" or "il62");
+        }
+    }
+
+    [Fact]
+    public void AppropriateAircraft_UnmodeledManufacturerRegion_StillAppearsInGenericFallback()
+    {
+        var fleet = AircraftCatalog.LoadFile(AircraftDataPath);
+
+        // SouthAmerica has no manufacturer of its own until Embraer (1985),
+        // so at 1960 - after Tu-104 (1956) but before any regional
+        // manufacturer - it should fall back to every available type,
+        // including the null-region Tu-104. Confirms null ManufacturerRegion
+        // means "unmodeled," not "invisible to the whole game."
+        var appropriate = RegionalFleet.AppropriateAircraft(Region.SouthAmerica, fleet, 1960);
+
+        Assert.Contains(appropriate, a => a.Id == "tu104");
+    }
+
+    [Fact]
     public void AppropriateAircraft_RespectsEraGating()
     {
         var fleet = new[]

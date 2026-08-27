@@ -426,20 +426,29 @@ bar at the top.
 - **Godot client setup screen** — reads M17's structured input/output
   shapes directly; no separate setup logic should ever need to exist
   client-side.
-- **Broaden the aircraft catalog well beyond M16's minimum.** M16 only adds
-  the single non-American type (Vickers Viscount) needed to make Europe's
-  1955 starting aircraft honest — it deliberately doesn't attempt full
-  historical coverage. A real future pass should expand `data/aircraft.json`
-  to most commercially significant airliners actually flown across the
-  campaign's 1955–2015 span: American (Douglas, Lockheed, Boeing, McDonnell
-  Douglas), European (Airbus, British Aerospace/BAC, in addition to the
-  Viscount), Soviet/Russian (Tupolev, Ilyushin — historically dominant
-  across the Eastern Bloc and a natural fit if a Soviet-aligned region or
-  political-alignment mechanic ever lands), Chinese (COMAC, in the later
-  campaign years), and smaller regional-jet manufacturers (Embraer,
-  Bombardier) whose short-hop, lower-capacity aircraft would give the
-  short/medium-haul end of the fleet — currently just the DC-3 and
-  Viscount — much more depth and era coverage. Not scheduled here because
-  M16's own "done when" (one honest 1955 aircraft per home region) doesn't
-  need it; noted so the eventual catalog expansion isn't forgotten or
-  mistaken for out of scope.
+- **Broaden the aircraft catalog well beyond M16's minimum — done, outside
+  this roadmap's own milestones.** `data/aircraft.json` grew from 6 to 14
+  types: Boeing 737 and Bombardier CRJ100 round out NorthAmerica; Airbus
+  A300 and A320 give Europe a real mainline lineage beyond the Viscount;
+  Embraer EMB-120 Brasilia (1985) and COMAC ARJ21 (2008) give SouthAmerica
+  and Asia their own manufactured types for the first time — closing the
+  exact gap M16 could only leave open at the 1955 start (`RegionalFleetTests`
+  now locks in both, once each type's era arrives); Tupolev Tu-104 and
+  Ilyushin Il-62 add real, era-available Soviet aircraft with
+  `ManufacturerRegion` deliberately left `null` — the USSR doesn't map
+  cleanly onto this game's 4-home-region model, and no region should get
+  them handed over as a "starting" type by fiat, so they're flyable by
+  anyone once available but never anyone's preferred pick. Chinese C919
+  (real-world 2017+) was deliberately left out — later than the campaign's
+  2015 end, so it would sit permanently unreachable.
+
+  Verified byte-identical against every previously-recorded M13 campaign
+  figure before considering this done: Il-62's 10,000 km range technically
+  exceeds the Boeing 707's 9,800 km from 1967–1970, which could have
+  changed which aircraft `BaselineAi` picks as "best available" during
+  that window — checked directly rather than assumed safe, and it turns
+  out not to matter, because M13's own campaign has all four airlines
+  already bankrupt (and frozen) by quarter 22 (1960), years before Il-62
+  ever becomes relevant. The full 244-quarter campaign's cash, pax-carried,
+  and bankruptcy-quarter figures are unchanged; only the printed "N
+  aircraft type(s) available" checkpoint count grew, as expected.

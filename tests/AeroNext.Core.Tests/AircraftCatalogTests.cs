@@ -52,18 +52,35 @@ public class AircraftCatalogTests
     }
 
     [Fact]
-    public void LoadFile_NorthAmericaAndEurope_HaveOwnManufacturedTypes()
+    public void LoadFile_EveryHomeRegion_HasAtLeastOneManufacturedType()
     {
-        // M16: real coverage check, not just "the field exists." Asia and
-        // South America are deliberately NOT asserted here — by design,
-        // neither had an indigenous airliner manufacturer this early in the
-        // campaign, so RegionalFleet's own-manufacturer preference has
-        // nothing to prefer for them yet and correctly falls back to
-        // imports (covered by RegionalFleetTests, not here).
+        // M16 could only assert this for NorthAmerica/Europe — Asia and
+        // South America had no indigenous manufacturer that early in the
+        // campaign. The later aircraft-catalog expansion (Embraer for
+        // SouthAmerica, 1985; COMAC for Asia, 2008) closes that gap for
+        // real: every home region now has its own manufactured type
+        // *eventually*, even though (per RegionalFleetTests) neither has
+        // one at the 1955 campaign start.
         var fleet = AircraftCatalog.LoadFile(DataPath);
 
-        Assert.Contains(fleet, a => a.ManufacturerRegion == Region.NorthAmerica);
-        Assert.Contains(fleet, a => a.ManufacturerRegion == Region.Europe);
+        foreach (var region in HomeRegions.All)
+        {
+            Assert.Contains(fleet, a => a.ManufacturerRegion == region);
+        }
+    }
+
+    [Fact]
+    public void LoadFile_IncludesUnmodeledManufacturerRegionAircraft()
+    {
+        // Soviet aircraft (Tupolev, Ilyushin): real, era-available, flyable
+        // by anyone once the era arrives, but deliberately not tagged to
+        // any of the 4 home regions — the USSR doesn't map cleanly onto
+        // this game's coarse world-region model, and no home region should
+        // get them handed to it as a "starting" type by fiat. See
+        // RegionalFleetTests for how the null ManufacturerRegion behaves.
+        var fleet = AircraftCatalog.LoadFile(DataPath);
+
+        Assert.Contains(fleet, a => a.ManufacturerRegion is null);
     }
 
     [Fact]
