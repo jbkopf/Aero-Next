@@ -570,3 +570,30 @@ bar at the top.
   "longest available" transitions, not just the one round 2 happened to
   hit. Full 244-quarter M13 campaign and M16/M18/M19 demo output confirmed
   byte-identical; 150-game QA harness sweep passes cleanly.
+
+- **Round-4 aircraft expansion: the 1980s/90s — done, outside this
+  roadmap's own milestones.** `data/aircraft.json` grew from 28 to 35
+  types, deepening the era right after round 3's stopping point (only
+  emb120/a320/crj100/777 had covered two full decades): McDonnell Douglas
+  MD-80 (1980, DC-9 successor, 1,191 built) and Ilyushin Il-86 (1980, the
+  first Soviet widebody, `ManufacturerRegion` null like the other Soviet
+  types) open the decade; Boeing 767 (1982) and 757 (1983) are Boeing's
+  ETOPS-twin and long-range-narrowbody answers to the widebody-trijet era
+  round 3 covered; ATR 72 (1988) gives Europe a regional turboprop
+  alongside its jets, complementing Embraer/Bombardier rather than
+  duplicating them; Airbus A340 (1993) and A330 (1994) are Airbus's first
+  modern long-range widebodies, arriving just before the 777.
+
+  **Same "longest available" risk class as rounds 2-3, now guarded a third
+  time:** A340 and A330's real-world range (both legitimately close to the
+  747's 13,000 km) got the same deliberate check as DC-6/DC-7 (round 2)
+  and DC-10/L-1011 (round 3) — confirmed neither exceeds it (A340 tuned to
+  12,800 km specifically to stay clear, using its original 1993 variant's
+  range rather than the later extended -500/600 sub-variants, the same
+  "original variant, not a later upgrade" principle round 2 established
+  for DC-6/DC-7). Added a third regression test extending the pattern to
+  the 747→777 transition (`LoadFile_NoPre1995Aircraft_ExceedsThe777sRange`),
+  so all three "longest available" transitions in the campaign's timeline
+  are now permanently guarded, not just the ones each round happened to
+  stress-test. Full 244-quarter M13 campaign and M16/M18/M19 demo output
+  confirmed byte-identical; 150-game QA harness sweep passes cleanly.

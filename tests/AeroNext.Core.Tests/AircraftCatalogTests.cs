@@ -97,6 +97,41 @@ public class AircraftCatalogTests
     }
 
     [Fact]
+    public void LoadFile_NoPre1995Aircraft_ExceedsThe777sRange()
+    {
+        // Third guard in the same "longest available" regression class:
+        // round 4's A330/A340 (both widebodies with real-world range close
+        // to the 747's 13,000 km) are the aircraft this specifically
+        // protects against for the 747->777 transition.
+        var fleet = AircraftCatalog.LoadFile(DataPath);
+        var boeing777 = fleet.Single(a => a.Id == "777");
+
+        foreach (var aircraft in fleet.Where(a => a.AvailableFromYear < 1995 && a.Id != "777"))
+        {
+            Assert.True(aircraft.RangeKm <= boeing777.RangeKm,
+                $"{aircraft.Id} ({aircraft.RangeKm} km, available {aircraft.AvailableFromYear}) exceeds the 777's " +
+                $"{boeing777.RangeKm} km before it arrives in 1995 - this would change BaselineAi's aircraft pick.");
+        }
+    }
+
+    [Fact]
+    public void LoadFile_Includes1980sAnd1990sAircraft()
+    {
+        // Round 4: deepens what had been a thin era (only emb120/a320/
+        // crj100/777 covered two full decades).
+        var fleet = AircraftCatalog.LoadFile(DataPath);
+        var ids = fleet.Select(a => a.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        Assert.Contains("md80", ids);  // McDonnell Douglas MD-80 (1980)
+        Assert.Contains("il86", ids);  // Ilyushin Il-86 (1980) - first Soviet widebody
+        Assert.Contains("767", ids);   // Boeing 767 (1982)
+        Assert.Contains("757", ids);   // Boeing 757 (1983)
+        Assert.Contains("atr72", ids); // ATR 72 (1988) - regional turboprop
+        Assert.Contains("a340", ids);  // Airbus A340 (1993)
+        Assert.Contains("a330", ids);  // Airbus A330 (1994)
+    }
+
+    [Fact]
     public void LoadFile_Includes1960sAnd1970sAircraft()
     {
         // Round 3: the era between the Comet/707 (round 1-2) and the
