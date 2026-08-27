@@ -474,6 +474,27 @@ bar at the top.
   above). Once this roadmap lands, the 4 airlines will no longer have
   identical starting conditions, but will still run the identical
   `BaselineAi` heuristic — a natural, well-scoped next roadmap.
+- **Route entry should require an available slot, not just range/era/budget
+  — noted for the AI-differentiation work above, not implemented now.**
+  M18 already found the gap this would close: `QuarterEngine` never checks
+  landing-rights slot ownership against a `RouteOrder` at all today — only
+  `NegotiationOrder` touches `LandingRightsBoard`, so winning a gateway
+  negotiation currently has no mechanical effect on what routes can
+  actually be flown there. Closing it properly means two connected
+  changes, not one: (1) `QuarterEngine` gains a new rejection reason
+  (mirroring how range/era/budget are each rejected and reported
+  separately by `BriefingGenerator` today) for a `RouteOrder` touching a
+  gateway city the airline holds no slot at; (2) `BaselineAi`'s route
+  search (`FindBestUnservedPair`/`FindBestUnservedGateway`) has to become
+  slot-aware — it doesn't receive `LandingRightsBoard` state at all right
+  now, so "funnel the AI's route choices down from its actual slot
+  holdings" means threading that board through `DecideOrders`, not just
+  changing what it does with cities it can already see. Whichever milestone
+  tackles this should decide whether the same restriction applies to human
+  `RouteOrder`s too (the mechanic reads as a general rule, not
+  AI-specific) — if so it's a `QuarterEngine` change with a human-facing
+  UX question attached (how does a player learn they need a slot before
+  the order is rejected), not purely an AI change.
 - **Gateway home-city exception** — M15 deliberately keeps every region's
   gateway inside the ordinary M9 contested mechanic, including for the
   local airline. Revisit only with real evidence this makes early gateway
