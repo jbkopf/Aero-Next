@@ -474,27 +474,55 @@ bar at the top.
   above). Once this roadmap lands, the 4 airlines will no longer have
   identical starting conditions, but will still run the identical
   `BaselineAi` heuristic — a natural, well-scoped next roadmap.
-- **Route entry should require an available slot, not just range/era/budget
-  — noted for the AI-differentiation work above, not implemented now.**
-  M18 already found the gap this would close: `QuarterEngine` never checks
-  landing-rights slot ownership against a `RouteOrder` at all today — only
-  `NegotiationOrder` touches `LandingRightsBoard`, so winning a gateway
-  negotiation currently has no mechanical effect on what routes can
-  actually be flown there. Closing it properly means two connected
-  changes, not one: (1) `QuarterEngine` gains a new rejection reason
-  (mirroring how range/era/budget are each rejected and reported
-  separately by `BriefingGenerator` today) for a `RouteOrder` touching a
-  gateway city the airline holds no slot at; (2) `BaselineAi`'s route
-  search (`FindBestUnservedPair`/`FindBestUnservedGateway`) has to become
+- **Route entry should require an available slot, and must grow outward
+  from a city the airline already serves — noted for the
+  AI-differentiation work above, not implemented now, applies to human and
+  AI players identically (confirmed, not just an open question anymore).**
+  Two rules, both closing gaps in today's `QuarterEngine`:
+
+  **1. Slot requirement.** M18 already found the gap: `QuarterEngine`
+  never checks landing-rights slot ownership against a `RouteOrder` at
+  all today — only `NegotiationOrder` touches `LandingRightsBoard`, so
+  winning a gateway negotiation currently has no mechanical effect on
+  what routes can actually be flown there. Closing it means: (a)
+  `QuarterEngine` gains a new rejection reason (mirroring how range/era/
+  budget are each rejected and reported separately by `BriefingGenerator`
+  today) for a `RouteOrder` touching a gateway city the airline holds no
+  slot at; (b) `BaselineAi`'s route search
+  (`FindBestUnservedPair`/`FindBestUnservedGateway`) has to become
   slot-aware — it doesn't receive `LandingRightsBoard` state at all right
-  now, so "funnel the AI's route choices down from its actual slot
-  holdings" means threading that board through `DecideOrders`, not just
-  changing what it does with cities it can already see. Whichever milestone
-  tackles this should decide whether the same restriction applies to human
-  `RouteOrder`s too (the mechanic reads as a general rule, not
-  AI-specific) — if so it's a `QuarterEngine` change with a human-facing
-  UX question attached (how does a player learn they need a slot before
-  the order is rejected), not purely an AI change.
+  now, so this means threading that board through `DecideOrders`, not
+  just changing what it does with cities it can already see.
+
+  **2. Network contiguity.** A new route's origin must already be a city
+  the airline serves — no teleporting a second, disconnected route pair
+  into existence; growth has to reach outward from the existing network,
+  the way a real hub-and-spoke actually grows. This is a bigger `BaselineAi`
+  change than it first looks: `FindBestUnservedPair` today searches every
+  city pair in the world for the single globally-best move, completely
+  independent of the airline's own network — it would need to search only
+  pairs touching an already-served city instead. Two details to settle
+  when this is actually built, not resolved here: whether "originate"
+  means specifically the `RouteOrder.Origin` field or either endpoint
+  (routes function bidirectionally everywhere else in the sim, so
+  requiring literally the `Origin` field specifically, rather than either
+  endpoint, would be an arbitrary distinction worth questioning); and how
+  an airline's very first route is exempted, since nothing today persists
+  a "home city" onto `Airline`/`AirlineSeat` past `StartingConditionsResolver`
+  — the M18 guaranteed route consumes that identity once, at
+  setup, and it isn't carried into the ongoing turn loop, so enforcing
+  "your first route must start from home" needs that identity to actually
+  survive into gameplay, not just setup. Multi-route quarters need one
+  more decision: whether a same-quarter second new route can chain off a
+  first new route being added in the same batch, or whether the
+  served-city check should use only the network as it stood at the start
+  of the quarter, matching `QuarterEngine.Cost`'s existing "evaluated
+  against the quarter's starting routes, not other orders in the same
+  batch" precedent (cited directly in `QuarterEngine.Cost`'s own doc
+  comment) — the latter is almost certainly the right default, both for
+  consistency with that existing rule and because it keeps order
+  resolution independent of submission order within a quarter, which
+  CLAUDE.md's simultaneous-resolution architecture depends on throughout.
 - **Gateway home-city exception** — M15 deliberately keeps every region's
   gateway inside the ordinary M9 contested mechanic, including for the
   local airline. Revisit only with real evidence this makes early gateway
