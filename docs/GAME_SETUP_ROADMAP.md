@@ -536,3 +536,37 @@ bar at the top.
   regression; both roadmap docs' recorded M18/M19 figures were re-measured
   and updated. 150-game QA harness sweep passes cleanly (0 violations)
   against the expanded catalog.
+
+- **Round-3 aircraft expansion: the 1960s/70s — done, outside this
+  roadmap's own milestones.** `data/aircraft.json` grew from 21 to 28
+  types, filling in what had been the thinnest era (only Il-62/737/747/A300
+  covered two full decades): Boeing 727 (1963, the best-selling airliner of
+  its era, 1,800+ built) and McDonnell Douglas DC-9 (1965) round out
+  NorthAmerica's short-haul jets; BAC One-Eleven (1965) gives Europe a
+  second short-haul jet alongside the Caravelle; McDonnell Douglas DC-10
+  (1971) and Lockheed L-1011 TriStar (1972) are the era's two rival
+  widebody trijets; Tupolev Tu-154 (1972, `ManufacturerRegion` null like
+  the other Soviet types) was the USSR's 727-equivalent and, with 1,000+
+  built, its most-produced jet airliner; Concorde (1976) is included for
+  historical significance and its genuinely distinctive economics even
+  without a speed mechanic — extremely expensive to buy ($60M, the
+  highest in the catalog) and by far the least efficient per seat-km
+  (0.25, checked directly against every other entry), reflecting why only
+  two heavily-subsidized carriers ever flew it.
+
+  **Lower regression risk than round 2, verified rather than assumed:**
+  every new type is dated 1963 or later — after M13's campaign already
+  freezes everyone bankrupt at quarter 19 (1959, per the efficiency-stat
+  update) — so nothing in this round could touch the campaign's recorded
+  trajectory, and nothing is available by 1955 either, so M16/M18/M19's
+  recorded figures are untouched too. Still checked properly rather than
+  assumed safe from the dates alone: DC-10 and L-1011's real widebody
+  range (both close to 10,000 km) could plausibly have exceeded the 747's
+  13,000 km "longest available" lead the same way DC-6/DC-7 nearly did to
+  the Constellation in round 2 — confirmed neither does, and added a
+  second regression test generalizing the pattern
+  (`LoadFile_NoPre1970Aircraft_ExceedsThe747sRange`, alongside round 2's
+  Constellation-era version) so this class of risk is now guarded at both
+  "longest available" transitions, not just the one round 2 happened to
+  hit. Full 244-quarter M13 campaign and M16/M18/M19 demo output confirmed
+  byte-identical; 150-game QA harness sweep passes cleanly.

@@ -77,6 +77,58 @@ public class AircraftCatalogTests
     }
 
     [Fact]
+    public void LoadFile_NoPre1970Aircraft_ExceedsThe747sRange()
+    {
+        // Same regression class as the Constellation check above, extended
+        // to the next "longest available" leader: M13's campaign and
+        // BaselineAi both rely on the 747 (13,000 km) being the era's best
+        // from 1970 until the 777 (1995). Round 3's widebodies (DC-10,
+        // L-1011) came close to this in real life - checked deliberately,
+        // not assumed safe.
+        var fleet = AircraftCatalog.LoadFile(DataPath);
+        var boeing747 = fleet.Single(a => a.Id == "747");
+
+        foreach (var aircraft in fleet.Where(a => a.AvailableFromYear < 1970 && a.Id != "747"))
+        {
+            Assert.True(aircraft.RangeKm <= boeing747.RangeKm,
+                $"{aircraft.Id} ({aircraft.RangeKm} km, available {aircraft.AvailableFromYear}) exceeds the 747's " +
+                $"{boeing747.RangeKm} km before it arrives in 1970 - this would change BaselineAi's aircraft pick.");
+        }
+    }
+
+    [Fact]
+    public void LoadFile_Includes1960sAnd1970sAircraft()
+    {
+        // Round 3: the era between the Comet/707 (round 1-2) and the
+        // widebody age was previously thin (only il62/737/747/a300).
+        var fleet = AircraftCatalog.LoadFile(DataPath);
+        var ids = fleet.Select(a => a.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        Assert.Contains("727", ids);   // Boeing 727 (1963) - best-selling airliner of its era
+        Assert.Contains("dc9", ids);   // McDonnell Douglas DC-9 (1965)
+        Assert.Contains("bac111", ids); // BAC One-Eleven (1965)
+        Assert.Contains("dc10", ids);  // McDonnell Douglas DC-10 (1971)
+        Assert.Contains("l1011", ids); // Lockheed L-1011 TriStar (1972)
+        Assert.Contains("tu154", ids); // Tupolev Tu-154 (1972) - most-produced Soviet jet airliner
+        Assert.Contains("concorde", ids); // Concorde (1976)
+    }
+
+    [Fact]
+    public void LoadFile_Concorde_HasNotablyPoorEfficiencyDespiteHighCost()
+    {
+        // A deliberate piece of flavor the CostPerAvailableSeatKm stat can
+        // capture even without a speed mechanic: Concorde was famously
+        // expensive to both buy and fly per seat, which is exactly why
+        // only two heavily-subsidized carriers ever operated it.
+        var fleet = AircraftCatalog.LoadFile(DataPath);
+        var concorde = fleet.Single(a => a.Id == "concorde");
+        var worstOtherEfficiency = fleet.Where(a => a.Id != "concorde").Max(a => a.CostPerAvailableSeatKm);
+
+        Assert.True(concorde.CostPerAvailableSeatKm > worstOtherEfficiency,
+            "Concorde should be less efficient per seat-km than every other aircraft in the catalog.");
+    }
+
+    [Fact]
     public void LoadFile_EveryHomeRegion_HasAtLeastOneManufacturedType()
     {
         // M16 could only assert this for NorthAmerica/Europe — Asia and
