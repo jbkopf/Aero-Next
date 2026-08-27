@@ -12,9 +12,10 @@ namespace AeroNext.Core.Airlines;
 /// CostDollars field rather than AircraftType's Money directly, since
 /// System.Text.Json has no built-in notion of Money and a dollar figure in
 /// the JSON is more legible than a nested cents object anyway.
-/// Manufacturer/ManufacturerRegion (M16) are optional — a test snippet that
-/// omits them gets AircraftType's own "" / null defaults, matching every
-/// other generously-defaulted field here.
+/// Manufacturer/ManufacturerRegion (M16) and CostPerAvailableSeatKm are
+/// optional — a test snippet that omits them gets AircraftType's own
+/// "" / null / 0.09 defaults, matching every other generously-defaulted
+/// field here.
 /// </summary>
 public static class AircraftCatalog
 {
@@ -26,7 +27,7 @@ public static class AircraftCatalog
 
     private sealed record Entry(
         string Id, string Name, int Seats, int RangeKm, long CostDollars, int ProductionRatePerQuarter, int AvailableFromYear,
-        string Manufacturer = "", Region? ManufacturerRegion = null);
+        string Manufacturer = "", Region? ManufacturerRegion = null, double CostPerAvailableSeatKm = 0.09);
 
     public static IReadOnlyList<AircraftType> Load(string json)
     {
@@ -38,7 +39,7 @@ public static class AircraftCatalog
         return entries
             .Select(e => new AircraftType(
                 e.Id, e.Name, e.Seats, e.RangeKm, Money.FromDollars(e.CostDollars), e.ProductionRatePerQuarter, e.AvailableFromYear,
-                e.Manufacturer, e.ManufacturerRegion))
+                e.Manufacturer, e.ManufacturerRegion, e.CostPerAvailableSeatKm))
             .OrderBy(a => a.Id, StringComparer.Ordinal)
             .ToList();
     }
@@ -88,6 +89,11 @@ public static class AircraftCatalog
             if (entry.ProductionRatePerQuarter <= 0)
             {
                 throw new InvalidDataException($"Aircraft '{entry.Id}' must have a positive production rate.");
+            }
+
+            if (entry.CostPerAvailableSeatKm <= 0)
+            {
+                throw new InvalidDataException($"Aircraft '{entry.Id}' must have a positive cost per available seat-km.");
             }
         }
     }

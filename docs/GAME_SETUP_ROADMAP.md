@@ -379,12 +379,23 @@ implied by the same code path, not separately special-cased).
 **Real, unforced numbers, not tuned to look good:** every seat carries real
 passengers on its guaranteed route (2,184–3,744 pax/qtr depending on the
 destination's demand) and posts a small negative net income for the
-quarter (-$69K to -$146K) — a brand-new route hasn't built up load factor
-yet, the same honest "invest ahead of demand" story M12 already told for
-its own hub-building demo. Nobody is bankrupt after quarter 1, in any of
-the three configurations. This wasn't tuned to come out this way — it's
-what `$20M × regional factor` starting cash against one small route's
-first-quarter economics actually produces.
+quarter — a brand-new route hasn't built up load factor yet, the same
+honest "invest ahead of demand" story M12 already told for its own
+hub-building demo. Nobody is bankrupt after quarter 1, in any of the three
+configurations. This wasn't tuned to come out this way — it's what `$20M ×
+regional factor` starting cash against one small route's first-quarter
+economics actually produces.
+
+**Re-measured after aircraft-efficiency work landed** (see
+`AircraftType.CostPerAvailableSeatKm`, added later — outside M15–M19's own
+milestones): net income is now -$159K to -$287K per seat (was -$69K to
+-$146K when every aircraft shared one flat operating-cost rate). Each
+seat's aircraft now costs what it actually costs to fly — the DC-3 several
+seats here start with is a comparatively inefficient early type — so this
+isn't a regression, it's the guaranteed-route mechanic correctly picking up
+the more realistic economics a later milestone added. Still nobody
+bankrupt after one quarter in any configuration; the finding this section
+exists to demonstrate is unchanged.
 
 **The `BaselineAi` non-differentiation note plays out exactly as
 predicted:** the 0-human demo's 4 AI seats now start with genuinely
@@ -452,3 +463,32 @@ bar at the top.
   ever becomes relevant. The full 244-quarter campaign's cash, pax-carried,
   and bankruptcy-quarter figures are unchanged; only the printed "N
   aircraft type(s) available" checkpoint count grew, as expected.
+
+- **Per-aircraft operating efficiency — done, outside this roadmap's own
+  milestones.** `AircraftType.CostPerAvailableSeatKm` replaces the flat
+  global operating-cost rate `FinancialResolver` used for every aircraft
+  type — the DC-3 and the 777 used to cost the same per seat-km to fly;
+  now they don't (0.14 vs 0.07 in `data/aircraft.json`, trending down for
+  newer types, with small regional aircraft correctly less efficient per
+  seat than a contemporary mainline jet — a small deliberate deviation
+  from strict chronological ordering, matching real aviation economics).
+  This gives aircraft selection real operating-cost weight for the first
+  time, alongside range/capacity/purchase price — explicitly requested as
+  mechanics to solidify *before* touching `BaselineAi` (which still only
+  picks by longest range and has no cost-awareness at all yet; that's the
+  natural next step for the AI-differentiation item above, not done here).
+
+  **Re-verified against the real dataset, not assumed safe:** since every
+  named aircraft's rate differs from the old flat 0.09 default, this
+  legitimately moved M13's and M19's already-recorded campaign figures —
+  unlike the two changes above, byte-identical wasn't the goal or the
+  result here. Re-ran the full 244-quarter campaign and updated
+  `docs/SIM_CORE_ROADMAP.md`'s M13 section and this document's own M19
+  section with the new numbers: M13's campaign no longer has a rise phase
+  at all (DC-3/Constellation now cost more per seat-km than the old flat
+  rate, so the early network runs a loss from quarter 1) and bankrupts one
+  quarter earlier, at quarter 19 (1959) instead of 22 (1960) — the
+  underlying finding (M8's heuristic eventually bankrupts an
+  unconditionally-growing network) is unchanged, only the specific
+  trajectory and timing. The 150-game QA harness sweep still passes
+  cleanly (0 violations) against the new cost model.

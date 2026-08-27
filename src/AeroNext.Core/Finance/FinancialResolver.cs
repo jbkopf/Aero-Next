@@ -20,24 +20,26 @@ namespace AeroNext.Core.Finance;
 /// real cash drain even before it earns anything, the same causal story
 /// M3's load factor already tells, now with financial stakes.
 ///
-/// Yield (revenue per passenger-km) and cost (per available seat-km) are
-/// flat global placeholders, not tied to Airline.Quality or fare stance —
-/// a richer "premium carriers charge more" model is a natural future
-/// refinement, not required for a plausible cash trajectory and a
-/// bankruptcy trigger to both work.
+/// Yield (revenue per passenger-km) is a flat global placeholder, not tied
+/// to Airline.Quality or fare stance — a richer "premium carriers charge
+/// more" model is a natural future refinement, not required for a
+/// plausible cash trajectory and a bankruptcy trigger to both work.
+///
+/// Operating cost (per available seat-km) is per-aircraft, not a flat
+/// global rate — AircraftType.CostPerAvailableSeatKm, so a route's cost
+/// depends on what's actually flying it, giving aircraft selection real
+/// operating-economics weight alongside range/capacity/purchase price.
 /// </summary>
 public static class FinancialResolver
 {
     public const double DefaultYieldPerPassengerKm = 0.12;
-    public const double DefaultCostPerAvailableSeatKm = 0.09;
 
     public static (FinancialState State, QuarterlyStatement Statement) Resolve(
         FinancialState state,
         Airline airline,
         CompetitiveMarketResult marketResult,
         IReadOnlyList<QuarterOrder> appliedOrders,
-        double yieldPerPassengerKm = DefaultYieldPerPassengerKm,
-        double costPerAvailableSeatKm = DefaultCostPerAvailableSeatKm)
+        double yieldPerPassengerKm = DefaultYieldPerPassengerKm)
     {
         if (state.IsBankrupt)
         {
@@ -45,7 +47,7 @@ public static class FinancialResolver
         }
 
         var revenue = ComputeRevenue(airline, marketResult, yieldPerPassengerKm);
-        var operatingCost = ComputeOperatingCost(airline, marketResult, costPerAvailableSeatKm);
+        var operatingCost = ComputeOperatingCost(airline, marketResult);
         var borrowed = appliedOrders.OfType<RefinanceOrder>().Aggregate(Money.Zero, (sum, o) => sum + o.AdditionalBorrowing);
         var debtBalance = state.DebtBalance + borrowed;
         var debtService = new Money((long)Math.Round(debtBalance.Cents * state.InterestRatePerQuarter, MidpointRounding.AwayFromZero));
@@ -79,13 +81,13 @@ public static class FinancialResolver
         return new Money(cents);
     }
 
-    private static Money ComputeOperatingCost(Airline airline, CompetitiveMarketResult marketResult, double costPerAvailableSeatKm)
+    private static Money ComputeOperatingCost(Airline airline, CompetitiveMarketResult marketResult)
     {
         var cents = 0L;
 
         foreach (var usage in marketResult.RouteUsage.Where(u => u.Airline == airline))
         {
-            cents += (long)Math.Round(usage.SeatsPerQuarter * usage.Route.DistanceKm * costPerAvailableSeatKm * 100, MidpointRounding.AwayFromZero);
+            cents += (long)Math.Round(usage.SeatsPerQuarter * usage.Route.DistanceKm * usage.Route.Aircraft.CostPerAvailableSeatKm * 100, MidpointRounding.AwayFromZero);
         }
 
         return new Money(cents);

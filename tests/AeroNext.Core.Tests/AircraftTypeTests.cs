@@ -30,6 +30,7 @@ public class AircraftTypeTests
         Assert.Equal(4, type.ProductionRatePerQuarter);
         Assert.Equal("", type.Manufacturer);
         Assert.Null(type.ManufacturerRegion);
+        Assert.Equal(0.09, type.CostPerAvailableSeatKm);
     }
 
     [Fact]
@@ -39,5 +40,13 @@ public class AircraftTypeTests
 
         Assert.Equal("Vickers", type.Manufacturer);
         Assert.Equal(Region.Europe, type.ManufacturerRegion);
+    }
+
+    [Fact]
+    public void Constructor_StoresCostPerAvailableSeatKm()
+    {
+        var type = new AircraftType("777", "Boeing 777", Seats: 300, CostPerAvailableSeatKm: 0.07);
+
+        Assert.Equal(0.07, type.CostPerAvailableSeatKm);
     }
 }

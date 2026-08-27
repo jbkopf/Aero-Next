@@ -14,6 +14,13 @@ namespace AeroNext.Core.Airlines;
 /// reason — a synthetic test aircraft has no historical manufacturer, and
 /// only M16's real catalog entries state one, for
 /// <see cref="AeroNext.Core.Setup.RegionalFleet"/> to key off of.
+/// CostPerAvailableSeatKm defaults to 0.09 — the flat rate every aircraft
+/// effectively used before this field existed, so a synthetic test
+/// aircraft's operating economics are unchanged by its introduction. Only
+/// the real catalog's named aircraft state their own rate, trending lower
+/// for newer types (real jet-age and high-bypass-turbofan efficiency
+/// gains) — see <see cref="AeroNext.Core.Finance.FinancialResolver"/>,
+/// which reads this per aircraft rather than a single global placeholder.
 /// </summary>
 public sealed record AircraftType(
     string Id,
@@ -24,4 +31,5 @@ public sealed record AircraftType(
     int ProductionRatePerQuarter = 4,
     int AvailableFromYear = 1900,
     string Manufacturer = "",
-    Region? ManufacturerRegion = null);
+    Region? ManufacturerRegion = null,
+    double CostPerAvailableSeatKm = 0.09);

@@ -549,9 +549,12 @@ string ChokepointStatus(int year)
     return direct ? $"{best.Name} flies JFK-LHR direct" : $"{best.Name} still needs a Gander stop";
 }
 
-// Chosen to capture the actual arc found by running this: steady growth,
-// a peak, rapid decline, and bankruptcy at quarter 22 - not evenly spaced.
-var checkpoints = new HashSet<int> { 1, 10, 16, 20, 22, 41, 121, campaignQuarters };
+// Chosen to capture the actual arc found by running this: steady decline
+// from quarter 1 (per-aircraft operating cost, added after this milestone
+// first shipped, means the early DC-3/Constellation network runs a loss
+// from day one - there's no rise phase anymore) and bankruptcy at
+// quarter 19 - not evenly spaced.
+var checkpoints = new HashSet<int> { 1, 10, 16, 19, 41, 121, campaignQuarters };
 
 for (var q = 1; q <= campaignQuarters; q++)
 {

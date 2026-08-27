@@ -135,6 +135,33 @@ public class FinancialResolverTests
     }
 
     [Fact]
+    public void Resolve_OperatingCost_ScalesExactlyWithAircraftsOwnRate()
+    {
+        // Operating cost is per-aircraft now, not one flat global rate —
+        // two airlines flying the identical route/seats/frequency, differing
+        // only in CostPerAvailableSeatKm, should differ in operating cost by
+        // exactly the same ratio as their rates.
+        var a = MakeCity("a", 0, 0, 1);
+        var b = MakeCity("b", 60, 60, 1); // far + light: negligible demand, isolates cost from revenue
+        var lowRate = new AircraftType("low", "Low", Seats: 100, CostPerAvailableSeatKm: 0.05);
+        var highRate = new AircraftType("high", "High", Seats: 100, CostPerAvailableSeatKm: 0.20);
+
+        var lowAirline = new Airline("Low", new[] { new Route(a, b, lowRate, WeeklyRoundTrips: 5) });
+        var highAirline = new Airline("High", new[] { new Route(a, b, highRate, WeeklyRoundTrips: 5) });
+
+        var lowMarket = CompetitiveMarket.Resolve(new[] { lowAirline }, new[] { a, b }, DemandModel);
+        var highMarket = CompetitiveMarket.Resolve(new[] { highAirline }, new[] { a, b }, DemandModel);
+
+        var state = FinancialState.Start(Money.FromDollars(10_000_000), Money.Zero, interestRatePerQuarter: 0.0);
+
+        var (_, lowStatement) = FinancialResolver.Resolve(state, lowAirline, lowMarket, Array.Empty<QuarterOrder>());
+        var (_, highStatement) = FinancialResolver.Resolve(state, highAirline, highMarket, Array.Empty<QuarterOrder>());
+
+        Assert.True(lowStatement.OperatingCost.Cents > 0);
+        Assert.Equal(highStatement.OperatingCost.Cents, lowStatement.OperatingCost.Cents * 4); // 0.20 / 0.05 = 4x
+    }
+
+    [Fact]
     public void Resolve_NonCarryingAirlineInCompetitiveMarket_OnlyPaysItsOwnOperatingCost()
     {
         var a = MakeCity("a", 0, 0, 100);

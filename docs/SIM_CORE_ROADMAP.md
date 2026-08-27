@@ -639,13 +639,12 @@ true). Fixed in the campaign orchestration: once `FinancialState.IsBankrupt`
 is true, that airline's routes and action cap freeze for the rest of the
 run rather than continuing to nonsensically grow.
 
-**The campaign's actual arc, measured rather than assumed:** cash grows
-steadily and plausibly for the first ~16 quarters ($19.8M → $32.0M) as
-`BaselineAi` builds out a network against real demand. Then it reverses
-sharply and all four (identical, undifferentiated — a known M8 property)
-airlines go bankrupt at quarter 22 (1960) — nine years earlier than the M12
-demo's separate, deliberately-reckless scenario, and entirely by accident
-this time. The cause: M8's "always bump the best-performing route by +2
+**The campaign's actual arc, measured rather than assumed:** all four
+(identical, undifferentiated — a known M8 property) airlines go bankrupt at
+quarter 19 (1959), declining steadily from $19.8M at quarter 1 with no rise
+phase — nine years earlier than the M12 demo's separate,
+deliberately-reckless scenario, and entirely by accident this time. The
+cause: M8's "always bump the best-performing route by +2
 `WeeklyRoundTrips`, every quarter, unconditionally" heuristic was written
 and tested at 3-8 quarter timescales, where it looks like sensible growth.
 Compounded across 20+ quarters, one route's capacity — and the
@@ -658,6 +657,23 @@ is future work, not required by this milestone's own "Done when," which
 asks for a plausible trajectory and a bankruptcy trigger that works
 correctly — both true, and now honestly documented as they actually
 occurred.
+
+**Updated after this milestone first shipped:** the figures above were
+re-measured following a later addition, outside this roadmap
+(`AircraftType.CostPerAvailableSeatKm`, `docs/GAME_SETUP_ROADMAP.md`'s
+"Kept in mind" aircraft-efficiency work), which replaced the flat global
+operating-cost rate every aircraft used here with a per-aircraft one. The
+original run (flat 0.09 for every type) actually had a rise phase — cash
+grew from $19.8M to a $32.0M peak at quarter 16 before reversing, with
+bankruptcy at quarter 22. DC-3 and Constellation, the only two aircraft
+types available this early, now cost more to operate per seat-km (0.14 and
+0.12) than that old flat rate, so the early network runs a loss from day
+one instead of an initial profit — a legitimate consequence of real
+aircraft-efficiency differentiation, re-verified by actually running the
+campaign again rather than assumed unaffected. The underlying finding this
+section documents (M8's heuristic eventually bankrupts an unconditionally-
+growing network) is unchanged; only the specific dollar figures and
+timing are.
 
 **Chokepoint relevance shift, confirmed directly:** the campaign prints
 whether the era's longest-range available aircraft can fly JFK-LHR

@@ -110,6 +110,46 @@ public class AircraftCatalogTests
     }
 
     [Fact]
+    public void Load_ParsesCostPerAvailableSeatKm_WhenPresent()
+    {
+        const string json = """
+        [{ "id": "t", "name": "Test", "seats": 100, "rangeKm": 1000, "costDollars": 1, "productionRatePerQuarter": 4, "availableFromYear": 1960, "costPerAvailableSeatKm": 0.07 }]
+        """;
+
+        var fleet = AircraftCatalog.Load(json);
+
+        Assert.Equal(0.07, fleet.Single().CostPerAvailableSeatKm);
+    }
+
+    [Fact]
+    public void Load_CostPerAvailableSeatKm_DefaultsTo009_WhenAbsent()
+    {
+        const string json = """
+        [{ "id": "t", "name": "Test", "seats": 100, "rangeKm": 1000, "costDollars": 1, "productionRatePerQuarter": 4, "availableFromYear": 1960 }]
+        """;
+
+        var fleet = AircraftCatalog.Load(json);
+
+        Assert.Equal(0.09, fleet.Single().CostPerAvailableSeatKm);
+    }
+
+    [Fact]
+    public void LoadFile_LaterAircraft_GenerallyHaveLowerCostPerAvailableSeatKm()
+    {
+        // Not strictly monotonic (a small regional jet is less efficient
+        // per seat than a contemporary mainline aircraft, same as real
+        // aviation economics) - checked here as "the newest, biggest
+        // mainline jets end up cheaper per seat-km than the earliest
+        // piston aircraft," not a strict ordering over every entry.
+        var fleet = AircraftCatalog.LoadFile(DataPath);
+        var dc3 = fleet.Single(a => a.Id == "dc3");
+        var modernMainline = fleet.Where(a => a.Id is "a320" or "777").ToList();
+
+        Assert.All(modernMainline, a => Assert.True(a.CostPerAvailableSeatKm < dc3.CostPerAvailableSeatKm,
+            $"{a.Id} ({a.CostPerAvailableSeatKm}) should be more efficient per seat-km than the 1935 DC-3 ({dc3.CostPerAvailableSeatKm})."));
+    }
+
+    [Fact]
     public void Load_ConvertsCostDollarsToMoney()
     {
         const string json = """
@@ -167,6 +207,7 @@ public class AircraftCatalogTests
     [InlineData("""{ "id": "x", "name": "N", "seats": 0, "rangeKm": 1000, "costDollars": 1, "productionRatePerQuarter": 4, "availableFromYear": 1960 }""")]
     [InlineData("""{ "id": "x", "name": "N", "seats": 100, "rangeKm": 0, "costDollars": 1, "productionRatePerQuarter": 4, "availableFromYear": 1960 }""")]
     [InlineData("""{ "id": "x", "name": "N", "seats": 100, "rangeKm": 1000, "costDollars": 1, "productionRatePerQuarter": 0, "availableFromYear": 1960 }""")]
+    [InlineData("""{ "id": "x", "name": "N", "seats": 100, "rangeKm": 1000, "costDollars": 1, "productionRatePerQuarter": 4, "availableFromYear": 1960, "costPerAvailableSeatKm": 0 }""")]
     public void Load_ThrowsOnInvalidEntry(string entry)
     {
         var json = $"[{entry}]";
