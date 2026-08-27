@@ -386,16 +386,18 @@ configurations. This wasn't tuned to come out this way — it's what `$20M ×
 regional factor` starting cash against one small route's first-quarter
 economics actually produces.
 
-**Re-measured after aircraft-efficiency work landed** (see
-`AircraftType.CostPerAvailableSeatKm`, added later — outside M15–M19's own
-milestones): net income is now -$159K to -$287K per seat (was -$69K to
--$146K when every aircraft shared one flat operating-cost rate). Each
-seat's aircraft now costs what it actually costs to fly — the DC-3 several
-seats here start with is a comparatively inefficient early type — so this
-isn't a regression, it's the guaranteed-route mechanic correctly picking up
-the more realistic economics a later milestone added. Still nobody
-bankrupt after one quarter in any configuration; the finding this section
-exists to demonstrate is unchanged.
+**Re-measured twice since**, both times outside M15–M19's own milestones:
+first when `AircraftType.CostPerAvailableSeatKm` landed (net income moved
+from -$69K/-$146K to -$159K/-$287K — every seat's aircraft now costs what
+it actually costs to fly, not one flat global rate), then again when the
+round-2 pre-1965 aircraft expansion added smaller, cheaper-to-fly options
+(Convair 340, Ilyushin Il-14) that `StartingConditionsResolver`'s
+smallest-range-first search now picks over the DC-3 for several seats,
+moving net income to roughly -$159K/-$234K. Neither change is a
+regression — the guaranteed-route mechanic is correctly picking up more
+realistic economics and a richer aircraft catalog as later milestones add
+them. Still nobody bankrupt after one quarter in any configuration; the
+finding this section exists to demonstrate is unchanged.
 
 **The `BaselineAi` non-differentiation note plays out exactly as
 predicted:** the 0-human demo's 4 AI seats now start with genuinely
@@ -492,3 +494,45 @@ bar at the top.
   unconditionally-growing network) is unchanged, only the specific
   trajectory and timing. The 150-game QA harness sweep still passes
   cleanly (0 violations) against the new cost model.
+
+- **Round-2 aircraft expansion: pre-1965 depth — done, outside this
+  roadmap's own milestones.** `data/aircraft.json` grew from 14 to 21
+  types, all focused on popular, commercially significant aircraft
+  actually flying before 1965 (round 1 mostly filled in later eras):
+  Douglas DC-6 (1947) and DC-7 (1953) extend the Douglas piston lineage
+  between the DC-3 and the DC-8; Convair 340 (1948) gives NorthAmerica a
+  second short/medium-haul option alongside the DC-3; de Havilland Comet
+  (1952) — the real first commercial jet airliner, six years before the
+  707 — and Sud Aviation Caravelle (1959, the first short-haul jet, whose
+  rear-engine layout influenced the 727/DC-9/BAC 111) round out Europe
+  beyond the Viscount; Douglas DC-8 (1959) gives NorthAmerica a direct 707
+  rival; Ilyushin Il-14 (1954) is the actual Soviet DC-3-equivalent,
+  joining Tu-104 (`ManufacturerRegion` left `null`, same reasoning as
+  round 1).
+
+  **The real regression risk this round, checked deliberately:** DC-6 and
+  DC-7's genuine historical range (up to ~7,240 km and ~8,300 km for their
+  extended/long-range sub-variants) would have exceeded the Constellation's
+  4,200 km before 1955, silently swapping M13's campaign narrative and
+  starting aircraft — a bigger version of the Il-62 risk from round 1.
+  Resolved by using each type's *typical full-payload* range for its
+  *original* 1947/1953 variant (4,000 km / 4,100 km) rather than a later
+  extended-range sub-variant's record figure — a legitimate, non-fabricated
+  simplification (commercial service rarely flew at max-range/min-payload
+  anyway), consistent with how the existing Constellation entry was already
+  a simplification of a multi-variant family. Locked in with a new test
+  (`LoadFile_NoPre1958Aircraft_ExceedsConstellationsRange`) so a future data
+  edit can't silently reintroduce the risk. Verified directly: the full
+  244-quarter M13 campaign is byte-identical to its post-efficiency-update
+  state (bankruptcy still at quarter 19/1959, same cash and pax figures) —
+  the growth in aircraft options never actually changes which one
+  `BaselineAi` picks before quarter 19, since none of them ever became
+  "longest available."
+
+  **M18/M19 did change, correctly:** `StartingConditionsResolver`'s
+  smallest-range-first search now finds smaller, cheaper-to-fly options for
+  several regions (Ilyushin Il-14 for Asia's guaranteed route, Convair 340
+  for NorthAmerica's, both replacing the DC-3) — expected, not a
+  regression; both roadmap docs' recorded M18/M19 figures were re-measured
+  and updated. 150-game QA harness sweep passes cleanly (0 violations)
+  against the expanded catalog.

@@ -39,7 +39,25 @@ public class RegionalFleetTests
         var appropriate = RegionalFleet.AppropriateAircraft(Region.Europe, fleet, 1955);
 
         Assert.All(appropriate, a => Assert.Equal(Region.Europe, a.ManufacturerRegion));
+        // Round-2 aircraft expansion: the de Havilland Comet (1952) is
+        // Europe's own manufacturer too, alongside the Viscount.
         Assert.Contains(appropriate, a => a.Id == "viscount");
+        Assert.Contains(appropriate, a => a.Id == "comet");
+    }
+
+    [Fact]
+    public void AppropriateAircraft_NorthAmerica_HasMultipleOwnManufacturedTypes_At1955()
+    {
+        var fleet = AircraftCatalog.LoadFile(AircraftDataPath);
+
+        var appropriate = RegionalFleet.AppropriateAircraft(Region.NorthAmerica, fleet, 1955);
+
+        Assert.All(appropriate, a => Assert.Equal(Region.NorthAmerica, a.ManufacturerRegion));
+        // Round-2 pre-1965 expansion: DC-6, DC-7, and Convair 340 all join
+        // DC-3/Constellation as real 1955-available NorthAmerica options.
+        Assert.Equal(
+            new[] { "cv340", "dc3", "dc6", "dc7", "l049" },
+            appropriate.Select(a => a.Id).OrderBy(id => id, StringComparer.Ordinal));
     }
 
     [Fact]

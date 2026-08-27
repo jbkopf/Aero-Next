@@ -52,6 +52,31 @@ public class AircraftCatalogTests
     }
 
     [Fact]
+    public void LoadFile_NoPre1958Aircraft_ExceedsConstellationsRange()
+    {
+        // Regression guard for a real risk checked during the round-2
+        // pre-1965 expansion: M13's campaign narrative and BaselineAi's
+        // aircraft selection both hinge on the Constellation (l049, 4,200
+        // km) being 1955's longest-range available aircraft until the
+        // Boeing 707 (1958) arrives. Adding period-real DC-6/DC-7 without
+        // checking this could have silently swapped the campaign's
+        // starting aircraft to whichever new type has the longest "typical
+        // payload" range - verified once by actually running the campaign
+        // (docs/SIM_CORE_ROADMAP.md's M13 section), locked in here so a
+        // future data edit can't silently reintroduce it.
+        var fleet = AircraftCatalog.LoadFile(DataPath);
+        var constellation = fleet.Single(a => a.Id == "l049");
+
+        foreach (var aircraft in fleet.Where(a => a.AvailableFromYear < 1958 && a.Id != "l049"))
+        {
+            Assert.True(aircraft.RangeKm <= constellation.RangeKm,
+                $"{aircraft.Id} ({aircraft.RangeKm} km, available {aircraft.AvailableFromYear}) exceeds the Constellation's " +
+                $"{constellation.RangeKm} km before the 707 arrives in 1958 - this would change BaselineAi's aircraft pick " +
+                "and M13's campaign trajectory. Confirm that's intended, then update docs/SIM_CORE_ROADMAP.md's M13 section.");
+        }
+    }
+
+    [Fact]
     public void LoadFile_EveryHomeRegion_HasAtLeastOneManufacturedType()
     {
         // M16 could only assert this for NorthAmerica/Europe — Asia and
