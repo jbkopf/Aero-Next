@@ -1,11 +1,16 @@
 [
   { "id": "jfk", "name": "New York",     "region": "NorthAmerica", "latitude": 40.6413,  "longitude": -73.7781,  "demandWeight": 100, "isGateway": true,  "gateCapacity": 3 },
   { "id": "lax", "name": "Los Angeles",  "region": "NorthAmerica", "latitude": 33.9416,  "longitude": -118.4085, "demandWeight": 85,  "isGateway": true,  "gateCapacity": 3 },
+  { "id": "atl", "name": "Atlanta",      "region": "NorthAmerica", "latitude": 33.6407,  "longitude": -84.4277,  "demandWeight": 90,  "isGateway": false, "gateCapacity": null },
   { "id": "ord", "name": "Chicago",      "region": "NorthAmerica", "latitude": 41.9742,  "longitude": -87.9073,  "demandWeight": 70,  "isGateway": false, "gateCapacity": null },
+  { "id": "dfw", "name": "Dallas",       "region": "NorthAmerica", "latitude": 32.8998,  "longitude": -97.0403,  "demandWeight": 70,  "isGateway": false, "gateCapacity": null },
   { "id": "sfo", "name": "San Francisco","region": "NorthAmerica", "latitude": 37.6213,  "longitude": -122.3790, "demandWeight": 65,  "isGateway": false, "gateCapacity": null },
-  { "id": "mia", "name": "Miami",        "region": "NorthAmerica", "latitude": 25.7959,  "longitude": -80.2870,  "demandWeight": 55,  "isGateway": false, "gateCapacity": null },
-  { "id": "yyz", "name": "Toronto",      "region": "NorthAmerica", "latitude": 43.6777,  "longitude": -79.6248,  "demandWeight": 60,  "isGateway": false, "gateCapacity": null },
   { "id": "mex", "name": "Mexico City",  "region": "NorthAmerica", "latitude": 19.4363,  "longitude": -99.0721,  "demandWeight": 65,  "isGateway": false, "gateCapacity": null },
+  { "id": "yyz", "name": "Toronto",      "region": "NorthAmerica", "latitude": 43.6777,  "longitude": -79.6248,  "demandWeight": 60,  "isGateway": false, "gateCapacity": null },
+  { "id": "mia", "name": "Miami",        "region": "NorthAmerica", "latitude": 25.7959,  "longitude": -80.2870,  "demandWeight": 55,  "isGateway": false, "gateCapacity": null },
+  { "id": "den", "name": "Denver",       "region": "NorthAmerica", "latitude": 39.8561,  "longitude": -104.6737, "demandWeight": 55,  "isGateway": false, "gateCapacity": null },
+  { "id": "iah", "name": "Houston",      "region": "NorthAmerica", "latitude": 29.9902,  "longitude": -95.3368,  "demandWeight": 55,  "isGateway": false, "gateCapacity": null },
+  { "id": "yvr", "name": "Vancouver",    "region": "NorthAmerica", "latitude": 49.1967,  "longitude": -123.1815, "demandWeight": 50,  "isGateway": false, "gateCapacity": null },
 
   { "id": "anc", "name": "Anchorage",    "region": "NorthAmerica", "latitude": 61.1743,  "longitude": -149.9963, "demandWeight": 5,   "isGateway": true,  "gateCapacity": 2 },
   { "id": "hnl", "name": "Honolulu",     "region": "NorthAmerica", "latitude": 21.3187,  "longitude": -157.9224, "demandWeight": 20,  "isGateway": true,  "gateCapacity": 2 },

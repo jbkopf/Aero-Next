@@ -113,6 +113,31 @@ public class CityCatalogTests
     }
 
     [Fact]
+    public void LoadFile_IncludesNorthAmericaExpansionCities()
+    {
+        // NorthAmerica already had 5 eligible cities and 2 flagship
+        // gateways (jfk/lax) - the established baseline - so this round
+        // was depth only, no new gateway: Atlanta, Dallas, Denver,
+        // Houston, and Vancouver, all non-gateway. Atlanta in particular
+        // closed a real gap - one of the world's busiest airports for
+        // much of this campaign's timeline wasn't represented at all.
+        var cities = CityCatalog.LoadFile(DataPath);
+        var ids = cities.Select(c => c.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        Assert.Contains("atl", ids);
+        Assert.Contains("dfw", ids);
+        Assert.Contains("den", ids);
+        Assert.Contains("iah", ids);
+        Assert.Contains("yvr", ids);
+        Assert.All(new[] { "atl", "dfw", "den", "iah", "yvr" }, id =>
+        {
+            var city = cities.Single(c => c.Id == id);
+            Assert.Equal(Region.NorthAmerica, city.Region);
+            Assert.False(city.IsGateway);
+        });
+    }
+
+    [Fact]
     public void GatewayCities_AllHavePositiveGateCapacity()
     {
         var cities = CityCatalog.LoadFile(DataPath);

@@ -205,6 +205,20 @@ join) — just resolved with the opposite sign this time, and worth showing
 the arithmetic for since eyeballing "more/fewer cities" doesn't reliably
 predict which way either number moves.
 
+**Updated a fourth time after the NorthAmerica city expansion:**
+NorthAmerica 0.979, Europe 0.959, Asia 1.133, SouthAmerica 0.848 — every
+region's factor *rose* this time, the mirror image of the Asia round,
+verified with the same arithmetic discipline. NorthAmerica's own average
+barely moved (63.0 → 63.5 across its now-10-city set — the 5 new cities
+average 64: Atlanta's 90 pulling up against Denver/Houston/Vancouver's
+50s-55 pulling down). The *global* denominator fell slightly (about
+65.0 → 64.9), because NorthAmerica's new cities' average (64) sits just
+below the prior global average, the same mechanism as the Europe round
+but in the direction that raises everyone else's factor rather than
+lowering it: numerator flat, denominator down, factor up for Europe,
+Asia, and SouthAmerica, plus a small direct boost for NorthAmerica's own
+factor from both effects at once.
+
 `AircraftType` gained `Manufacturer` (string) and `ManufacturerRegion`
 (`Region?`), both defaulting empty/null like every other generously-
 defaulted field on this record. `data/aircraft.json` now tags all 5
@@ -378,12 +392,12 @@ that branch.
 
 **Full real-data sweep, not sampled:** the "Done when" check runs for
 every real eligible starting city across all 4 home regions (17 at the
-time; 34 now, after the SouthAmerica, Europe, and Asia expansions — the
-test itself iterates `HomeRegions.EligibleStartingCities` directly rather
-than a hardcoded count, so it picked up all 12 new cities automatically
-across all three rounds with no test changes needed) — every single one
-resolves successfully and its guaranteed `RouteOrder` is accepted by the
-real `QuarterEngine` on quarter
+time; 39 now, after the SouthAmerica, Europe, Asia, and NorthAmerica
+expansions — the test itself iterates `HomeRegions.EligibleStartingCities`
+directly rather than a hardcoded count, so it picked up all 17 new cities
+automatically across all four rounds with no test changes needed) — every
+single one resolves successfully and its guaranteed `RouteOrder` is
+accepted by the real `QuarterEngine` on quarter
 1, with no data gaps needing a fix (the smallest-first search already
 handled the one region, Europe, with only a single appropriate aircraft
 type and no fallback available).
@@ -487,6 +501,18 @@ demandWeight pick — Beijing's 95 edges out Shanghai's 90), moving net
 income from -$217,927.55 to -$219,670.15 — inside the already-quoted
 range, so it still holds without widening. Europe, NorthAmerica, and
 SouthAmerica's demo seats are all byte-identical to the previous
+measurement.
+
+**A sixth re-measurement, after the NorthAmerica city expansion:**
+NorthAmerica's own AI seat now starts in Atlanta rather than Chicago (per
+M15's highest-demandWeight pick — Atlanta's 90 comfortably beats
+Chicago's 70), and both the 1-human and 4-human demo's hardcoded
+NorthAmerica seats (Toronto and Chicago respectively — starting cities
+unaffected, since neither is the new highest-weight pick) found different,
+cheaper guaranteed destinations among the newly-expanded eligible set.
+All of these land at -$217K to -$233K, still inside the already-quoted
+-$168K/-$234K range, so it holds without widening a fourth time. Europe
+and SouthAmerica's demo seats are byte-identical to the previous
 measurement.
 
 **The `BaselineAi` non-differentiation note plays out exactly as
@@ -918,3 +944,54 @@ bar at the top.
   150-game QA harness sweep passes cleanly (0 violations); runtime grew
   again (120s → 150s), consistent with the established pattern. Only
   NorthAmerica and Africa remain unexamined in this series.
+
+- **City expansion round 4: NorthAmerica (depth only, no new gateway) —
+  done, outside this roadmap's own milestones.** NorthAmerica already sat
+  at the same baseline as the other regions (5 eligible cities, 2
+  flagship gateways — jfk/lax) before this round, so — same as Asia, and
+  unlike Europe — no gateway asymmetry to resolve, depth only.
+  `data/cities.json` grew from 43 to 48 cities: Atlanta (90, closing a
+  real, specific gap — one of the world's busiest airports for much of
+  this campaign's 1955–2015 timeline wasn't represented at all, despite
+  Delta's mega-hub status there), plus Dallas, Denver, Houston, and
+  Vancouver, all non-gateway. Atlanta's weight now edges out even LA
+  (85) for NorthAmerica's #2 spot behind New York.
+
+  **Fourth consecutive round in the same ripple pattern, same mechanism,
+  further along the same trend.** Dallas-Houston alone is a 220,797
+  pax/qtr market. Re-measured directly: peak moved later and higher again
+  (quarter 41, $66.3M → **quarter 47, $82.0M** — the highest ever
+  recorded) and bankruptcy moved later again (quarter 54 →
+  **quarter 61, 1970**), frozen at 61 routes and -$3,215,437.86.
+  `AeroNext.Sim`'s checkpoint list rewritten a fourth time (1, 15, 47, 61,
+  121, 244). Worth naming as a real, cumulative pattern rather than
+  re-explaining each round from scratch: this is the fourth straight
+  round where adding cities pushed the peak later/higher and bankruptcy
+  later, and the fourth straight round where it never once prevented
+  bankruptcy — see `docs/SIM_CORE_ROADMAP.md`'s M13 section for the full
+  four-round streak, treated there as real, growing evidence for the
+  underlying cause (M8's missing growth ceiling), not repeated here.
+
+  **The M16 ripple flipped sign again — back to "rises," matching Europe's
+  direction rather than Asia's — worked out by hand and cross-checked
+  against all 4 regions' actual measured factors before writing it down:**
+  NorthAmerica's own average barely moved (63.0 → 63.5 — Atlanta's 90
+  pulling up against Denver/Houston/Vancouver's 50s pulling down), while
+  the *global* denominator fell slightly (~65.0 → ~64.9, since
+  NorthAmerica's 5 new cities average 64, just under the prior global
+  average) — numerator flat, denominator down, so every region's factor
+  rose a little, NorthAmerica's own by a bit more than the rest since both
+  effects favor it at once. Full arithmetic, verified against all four
+  regions' post-round numbers (not just the direction), is in M16's own
+  update note above.
+
+  New test: `CityCatalogTests.LoadFile_IncludesNorthAmericaExpansionCities`.
+  Also fixed a hardcoded test expectation
+  (`GameSetupTests.CreateSeats_ZeroHumans_PicksHighestDemandEligibleCityPerRegion`
+  — Atlanta now beats Chicago for NorthAmerica's AI seat). 150-game QA
+  harness sweep passes cleanly (0 violations); runtime grew again
+  (150s → 232s). Only Africa remains unexamined in this series — a
+  different kind of decision than the other three, since it isn't a home
+  region at all (M15's bridge-region design), so "expand Africa" would
+  first need deciding whether to keep it a pure chokepoint role or turn it
+  into a real home region, not just add cities to an existing one.

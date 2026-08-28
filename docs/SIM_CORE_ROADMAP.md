@@ -737,6 +737,22 @@ problem is the heuristic's missing growth ceiling, not an artifact of a
 thin map. 150-game QA harness sweep confirms correctness still holds
 (0 violations); runtime grew again, 120s → 150s.
 
+**Updated a fifth time, after the NorthAmerica city-expansion round.**
+Atlanta (90, closing a real gap — one of the world's busiest airports for
+much of this campaign's timeline wasn't represented at all) plus Dallas,
+Denver, Houston, and Vancouver extend the same rise phase further still.
+Re-measured directly: peak **quarter 47 (1966): $82.0M** (was quarter 41,
+$66.3M) — the highest ever recorded here — and bankruptcy **quarter 61
+(1970)** (was quarter 54), frozen at 61 routes and -$3,215,437.86.
+`AeroNext.Sim`'s checkpoint list rewritten a fourth time (1, 15, 47, 61,
+121, 244). Worth naming directly since it's now a four-round streak: every
+single city-expansion round so far has pushed the peak later/higher and
+bankruptcy later, never once broken the underlying finding, and never
+once prevented it — which is a real, cumulative form of evidence that
+M8's missing growth ceiling is the actual cause, not an artifact of any
+one map shape. 150-game QA harness sweep still confirms correctness
+(0 violations); runtime grew again, 150s → 232s.
+
 **Chokepoint relevance shift, confirmed directly:** the campaign prints
 whether the era's longest-range available aircraft can fly JFK-LHR
 nonstop. Quarter 1 (1955): "Lockheed Constellation still needs a Gander
