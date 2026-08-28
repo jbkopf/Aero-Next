@@ -550,12 +550,12 @@ string ChokepointStatus(int year)
 }
 
 // Chosen to capture the actual arc found by running this: a mild early
-// dip, a real rise phase driven by the dense Amsterdam-area European
-// cluster (added after this milestone first shipped - see
-// docs/GAME_SETUP_ROADMAP.md's Europe city-expansion note), a peak at
-// quarter 36 ($48.7M), then a rapid late crash to bankruptcy at
-// quarter 47 (1966) - not evenly spaced.
-var checkpoints = new HashSet<int> { 1, 15, 36, 47, 121, campaignQuarters };
+// dip, a real rise phase driven by the dense European and Asian clusters
+// added after this milestone first shipped (see
+// docs/GAME_SETUP_ROADMAP.md's Europe and Asia city-expansion notes), a
+// peak at quarter 41 ($66.3M), then a rapid late crash to bankruptcy at
+// quarter 54 (1968) - not evenly spaced.
+var checkpoints = new HashSet<int> { 1, 15, 41, 54, 121, campaignQuarters };
 
 for (var q = 1; q <= campaignQuarters; q++)
 {

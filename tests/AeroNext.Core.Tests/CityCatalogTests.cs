@@ -90,6 +90,29 @@ public class CityCatalogTests
     }
 
     [Fact]
+    public void LoadFile_IncludesAsiaExpansionCities()
+    {
+        // Asia already had 5 eligible cities and 2 flagship gateways
+        // (hnd/hkg) - matching the post-Europe-round baseline, so this
+        // round was depth only, no new gateway: Beijing, Mumbai, Dubai,
+        // Kuala Lumpur, and Taipei, all non-gateway.
+        var cities = CityCatalog.LoadFile(DataPath);
+        var ids = cities.Select(c => c.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        Assert.Contains("pek", ids);
+        Assert.Contains("bom", ids);
+        Assert.Contains("dxb", ids);
+        Assert.Contains("kul", ids);
+        Assert.Contains("tpe", ids);
+        Assert.All(new[] { "pek", "bom", "dxb", "kul", "tpe" }, id =>
+        {
+            var city = cities.Single(c => c.Id == id);
+            Assert.Equal(Region.Asia, city.Region);
+            Assert.False(city.IsGateway);
+        });
+    }
+
+    [Fact]
     public void GatewayCities_AllHavePositiveGateCapacity()
     {
         var cities = CityCatalog.LoadFile(DataPath);

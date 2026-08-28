@@ -720,6 +720,23 @@ via the 150-game QA harness sweep that correctness holds regardless
 bankrupting — a real cost of a richer map worth knowing about, not a
 regression).
 
+**Updated a fourth time, after the Asia city-expansion round — the same
+pattern repeating, one region further.** Beijing (95, edging out Shanghai
+as Asia's single highest-demand city), Dubai, Mumbai, Kuala Lumpur, and
+Taipei add another dense cluster (kul-sin alone is a 375,570 pax/qtr
+market, rivaling the campaign's biggest pairs) `BaselineAi` folds into the
+same rise phase. Re-measured directly: the peak moved later and higher —
+**quarter 41 (1965): $66.3M** (was quarter 36, $48.7M) — and bankruptcy
+moved later again too — **quarter 54 (1968)** (was quarter 47), frozen at
+54 routes and -$5,549,829.39. `AeroNext.Sim`'s checkpoint list was
+rewritten again (1, 15, 41, 54, 121, 244) to match. The underlying finding
+is, again, unchanged — each successive city-expansion round has made the
+network richer and the road to bankruptcy longer, but has not once
+prevented it, which is itself a fairly strong demonstration that the
+problem is the heuristic's missing growth ceiling, not an artifact of a
+thin map. 150-game QA harness sweep confirms correctness still holds
+(0 violations); runtime grew again, 120s → 150s.
+
 **Chokepoint relevance shift, confirmed directly:** the campaign prints
 whether the era's longest-range available aircraft can fly JFK-LHR
 nonstop. Quarter 1 (1955): "Lockheed Constellation still needs a Gander

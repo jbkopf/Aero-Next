@@ -29,7 +29,7 @@ public class GameSetupTests
         // (non-gateway) city in each home region.
         Assert.Equal("ord", byRegion[Region.NorthAmerica].StartingCity.Id);
         Assert.Equal("cdg", byRegion[Region.Europe].StartingCity.Id);
-        Assert.Equal("pvg", byRegion[Region.Asia].StartingCity.Id);
+        Assert.Equal("pek", byRegion[Region.Asia].StartingCity.Id);
         Assert.Equal("gig", byRegion[Region.SouthAmerica].StartingCity.Id);
     }
 

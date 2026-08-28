@@ -185,6 +185,26 @@ adding cities to a region doesn't necessarily raise that region's own
 factor, only the global denominator every region is measured against. The
 other three regions all rose slightly for exactly that reason.
 
+**Updated a third time after the Asia city expansion:** NorthAmerica
+0.969, Europe 0.957, Asia 1.131, SouthAmerica 0.846 — every region's
+factor *fell*, including Asia's own, worked out by hand to confirm before
+writing it down rather than just eyeballing the direction. Asia's own
+average dropped from 76.0 to 73.5 (the 5 new cities average 71 — Dubai
+85, Mumbai 65, Kuala Lumpur/Taipei 55 each, Beijing's 95 not enough to
+offset the other four), which explains Asia's own factor falling. The
+other three regions' *own* averages didn't move at all (no new
+NorthAmerica/Europe/SouthAmerica cities this round) — their factors fell
+because the *global* denominator rose, from about 63.8 to about 65.0:
+Asia's 5 new cities average 71, below Asia's own prior average but still
+above the old global average, so folding them in pulls the shared
+denominator up even as it pulls Asia's own numerator down. Both of those
+are the same mechanism as the Europe round's note (a region's own factor
+and the global denominator can move independently, and even in opposite
+directions, depending on how the new cities compare to each pool they
+join) — just resolved with the opposite sign this time, and worth showing
+the arithmetic for since eyeballing "more/fewer cities" doesn't reliably
+predict which way either number moves.
+
 `AircraftType` gained `Manufacturer` (string) and `ManufacturerRegion`
 (`Region?`), both defaulting empty/null like every other generously-
 defaulted field on this record. `data/aircraft.json` now tags all 5
@@ -358,12 +378,12 @@ that branch.
 
 **Full real-data sweep, not sampled:** the "Done when" check runs for
 every real eligible starting city across all 4 home regions (17 at the
-time; 24 now, after both the SouthAmerica and Europe expansions — the test
-itself iterates `HomeRegions.EligibleStartingCities` directly rather than
-a hardcoded count, so it picked up all 7 new cities automatically across
-both rounds with no test changes needed) — every single one resolves
-successfully and its guaranteed `RouteOrder` is accepted by the real
-`QuarterEngine` on quarter
+time; 34 now, after the SouthAmerica, Europe, and Asia expansions — the
+test itself iterates `HomeRegions.EligibleStartingCities` directly rather
+than a hardcoded count, so it picked up all 12 new cities automatically
+across all three rounds with no test changes needed) — every single one
+resolves successfully and its guaranteed `RouteOrder` is accepted by the
+real `QuarterEngine` on quarter
 1, with no data gaps needing a fix (the smallest-first search already
 handled the one region, Europe, with only a single appropriate aircraft
 type and no fallback available).
@@ -460,6 +480,14 @@ the new options and picks it over Rome, moving its net income from
 seats are all byte-identical to the previous measurement (none of their
 own starting cities' guaranteed-route picks were affected by cities added
 to Europe). The range is now roughly **-$168K/-$234K**.
+
+**A fifth re-measurement, after the Asia city expansion:** Asia's own AI
+seat now starts in Beijing rather than Shanghai (per M15's highest-
+demandWeight pick — Beijing's 95 edges out Shanghai's 90), moving net
+income from -$217,927.55 to -$219,670.15 — inside the already-quoted
+range, so it still holds without widening. Europe, NorthAmerica, and
+SouthAmerica's demo seats are all byte-identical to the previous
+measurement.
 
 **The `BaselineAi` non-differentiation note plays out exactly as
 predicted:** the 0-human demo's 4 AI seats now start with genuinely
@@ -845,5 +873,48 @@ bar at the top.
   even though the trajectory shape itself changed; the sweep's own runtime
   roughly tripled (44s → 120s) simply because campaigns now run far more
   routes before bankrupting, a real cost worth knowing about, not a
-  regression. NorthAmerica, Asia, and Africa remain unexamined — next in
-  the series.
+  regression. NorthAmerica and Africa remain unexamined — next in the
+  series.
+
+- **City expansion round 3: Asia (depth only, no new gateway) — done,
+  outside this roadmap's own milestones.** Asia already sat at the same
+  post-Europe-round baseline (5 eligible cities, 2 flagship gateways —
+  hnd/hkg) before this round, so unlike Europe there was no gateway
+  asymmetry to resolve; this round added depth only. `data/cities.json`
+  grew from 38 to 43 cities: Beijing (95, edging out Shanghai as Asia's
+  single highest-demand city — a real omission the previous roster had,
+  given Shanghai was already there), Dubai (85 — one of the world's
+  busiest airports by the campaign's 2015 end, tagged `Asia` for lack of a
+  finer-grained Middle East region in this game's 4-home-region model),
+  Mumbai, Kuala Lumpur, and Taipei, all non-gateway.
+
+  **A comparable-scale ripple to the Europe round, same mechanism, further
+  along the same trend line.** Kuala Lumpur-Singapore alone is a 375,570
+  pax/qtr market — rivaling the campaign's biggest pairs — and `BaselineAi`
+  folds the whole new cluster into the same rise phase the Europe round
+  already opened up. Re-measured directly: the peak moved later and higher
+  again (quarter 36, $48.7M → **quarter 41, $66.3M**) and bankruptcy moved
+  later again too (quarter 47 → **quarter 54, 1968**), frozen at 54 routes
+  and -$5,549,829.39. `AeroNext.Sim`'s checkpoint list was rewritten a
+  third time to match (1, 15, 41, 54, 121, 244). Full reasoning for why
+  three consecutive rounds moving the same numbers in the same direction
+  still isn't a problem — each round makes the network richer and the
+  road to bankruptcy longer, but has never once prevented it — is in
+  `docs/SIM_CORE_ROADMAP.md`'s M13 section, not repeated here.
+
+  **The M16 economic-factor ripple resolved with the opposite sign this
+  time, worked out by hand rather than eyeballed:** every region's factor
+  *fell*, including Asia's own (1.192 → 1.131) — Asia's 5 new cities
+  average 71, below Asia's own prior average of 76 (pulling Asia's own
+  number down) but still above the *global* average of ~63.8 across all
+  eligible cities (pulling the shared denominator up, which pulls every
+  other region's factor down too, even though their own averages didn't
+  move at all). See M16's own update note for the full arithmetic — worth
+  showing the actual numbers rather than asserting the direction, since it
+  isn't predictable from "more cities" alone, as this round's opposite
+  sign from the Europe round demonstrates directly.
+
+  New test: `CityCatalogTests.LoadFile_IncludesAsiaExpansionCities`.
+  150-game QA harness sweep passes cleanly (0 violations); runtime grew
+  again (120s → 150s), consistent with the established pattern. Only
+  NorthAmerica and Africa remain unexamined in this series.
