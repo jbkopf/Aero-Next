@@ -13,10 +13,15 @@
   { "id": "yqx", "name": "Gander",       "region": "NorthAmerica", "latitude": 48.9369,  "longitude": -54.5680,  "demandWeight": 2,   "isGateway": true,  "gateCapacity": 2 },
 
   { "id": "lhr", "name": "London",       "region": "Europe",       "latitude": 51.4700,  "longitude": -0.4543,   "demandWeight": 95,  "isGateway": true,  "gateCapacity": 3 },
+  { "id": "ams", "name": "Amsterdam",    "region": "Europe",       "latitude": 52.3105,  "longitude": 4.7683,    "demandWeight": 90,  "isGateway": true,  "gateCapacity": 3 },
   { "id": "cdg", "name": "Paris",        "region": "Europe",       "latitude": 49.0097,  "longitude": 2.5479,    "demandWeight": 85,  "isGateway": false, "gateCapacity": null },
   { "id": "fra", "name": "Frankfurt",    "region": "Europe",       "latitude": 50.0379,  "longitude": 8.5622,    "demandWeight": 75,  "isGateway": false, "gateCapacity": null },
+  { "id": "ist", "name": "Istanbul",     "region": "Europe",       "latitude": 41.2753,  "longitude": 28.7519,   "demandWeight": 70,  "isGateway": false, "gateCapacity": null },
+  { "id": "muc", "name": "Munich",       "region": "Europe",       "latitude": 48.3538,  "longitude": 11.7861,   "demandWeight": 65,  "isGateway": false, "gateCapacity": null },
   { "id": "fco", "name": "Rome",         "region": "Europe",       "latitude": 41.8003,  "longitude": 12.2389,   "demandWeight": 60,  "isGateway": false, "gateCapacity": null },
   { "id": "mad", "name": "Madrid",       "region": "Europe",       "latitude": 40.4983,  "longitude": -3.5676,   "demandWeight": 60,  "isGateway": false, "gateCapacity": null },
+  { "id": "bcn", "name": "Barcelona",    "region": "Europe",       "latitude": 41.2974,  "longitude": 2.0833,    "demandWeight": 55,  "isGateway": false, "gateCapacity": null },
+  { "id": "zrh", "name": "Zurich",       "region": "Europe",       "latitude": 47.4647,  "longitude": 8.5492,    "demandWeight": 50,  "isGateway": false, "gateCapacity": null },
   { "id": "lis", "name": "Lisbon",       "region": "Europe",       "latitude": 38.7813,  "longitude": -9.1359,   "demandWeight": 40,  "isGateway": false, "gateCapacity": null },
   { "id": "ter", "name": "Azores",       "region": "Europe",       "latitude": 38.7618,  "longitude": -27.0908,  "demandWeight": 3,   "isGateway": true,  "gateCapacity": 2 },
 

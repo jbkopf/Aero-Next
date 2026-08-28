@@ -549,12 +549,13 @@ string ChokepointStatus(int year)
     return direct ? $"{best.Name} flies JFK-LHR direct" : $"{best.Name} still needs a Gander stop";
 }
 
-// Chosen to capture the actual arc found by running this: steady decline
-// from quarter 1 (per-aircraft operating cost, added after this milestone
-// first shipped, means the early DC-3/Constellation network runs a loss
-// from day one - there's no rise phase anymore) and bankruptcy at
-// quarter 19 - not evenly spaced.
-var checkpoints = new HashSet<int> { 1, 10, 16, 19, 41, 121, campaignQuarters };
+// Chosen to capture the actual arc found by running this: a mild early
+// dip, a real rise phase driven by the dense Amsterdam-area European
+// cluster (added after this milestone first shipped - see
+// docs/GAME_SETUP_ROADMAP.md's Europe city-expansion note), a peak at
+// quarter 36 ($48.7M), then a rapid late crash to bankruptcy at
+// quarter 47 (1966) - not evenly spaced.
+var checkpoints = new HashSet<int> { 1, 15, 36, 47, 121, campaignQuarters };
 
 for (var q = 1; q <= campaignQuarters; q++)
 {

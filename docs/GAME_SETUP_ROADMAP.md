@@ -176,6 +176,15 @@ inherent to how the factor is defined, not a bug; documented here so the
 figures above are read as "as measured at the time," not permanently
 pinned constants.
 
+**Updated again after the Europe city expansion:** the same ripple, one
+more round — NorthAmerica 0.988, Europe 0.976, Asia 1.192, SouthAmerica
+0.863. Europe's own factor actually *fell* slightly (0.992 → 0.976)
+despite gaining 4 new eligible cities, because Munich/Istanbul/Barcelona/
+Zurich's weights (65/70/55/50) average below Europe's existing set —
+adding cities to a region doesn't necessarily raise that region's own
+factor, only the global denominator every region is measured against. The
+other three regions all rose slightly for exactly that reason.
+
 `AircraftType` gained `Manufacturer` (string) and `ManufacturerRegion`
 (`Region?`), both defaulting empty/null like every other generously-
 defaulted field on this record. `data/aircraft.json` now tags all 5
@@ -349,11 +358,12 @@ that branch.
 
 **Full real-data sweep, not sampled:** the "Done when" check runs for
 every real eligible starting city across all 4 home regions (17 at the
-time; 20 now that SouthAmerica reached parity with the rest — the test
+time; 24 now, after both the SouthAmerica and Europe expansions — the test
 itself iterates `HomeRegions.EligibleStartingCities` directly rather than
-a hardcoded count, so it picked up the 3 new cities automatically with no
-test changes needed) — every single one resolves successfully and its
-guaranteed `RouteOrder` is accepted by the real `QuarterEngine` on quarter
+a hardcoded count, so it picked up all 7 new cities automatically across
+both rounds with no test changes needed) — every single one resolves
+successfully and its guaranteed `RouteOrder` is accepted by the real
+`QuarterEngine` on quarter
 1, with no data gaps needing a fix (the smallest-first search already
 handled the one region, Europe, with only a single appropriate aircraft
 type and no fallback available).
@@ -440,6 +450,16 @@ Santiago instead of Rio de Janeiro — since Buenos Aires gained real new
 same-region neighbors the smallest-range-first search now considers; its
 net income (-$224,600.84) still falls inside the already-quoted range, so
 the range claim above holds without needing to widen.
+
+**A fourth re-measurement, after the Europe city expansion, did widen the
+range slightly:** Europe's own seat (starting at London, per M15's
+highest-demandWeight pick — unaffected by the new cities, since none of
+them out-weigh London) now finds a *closer* guaranteed destination among
+the new options and picks it over Rome, moving its net income from
+-$158,794.70 to -$167,863.85. Asia, NorthAmerica, and SouthAmerica's demo
+seats are all byte-identical to the previous measurement (none of their
+own starting cities' guaranteed-route picks were affected by cities added
+to Europe). The range is now roughly **-$168K/-$234K**.
 
 **The `BaselineAi` non-differentiation note plays out exactly as
 predicted:** the 0-human demo's 4 AI seats now start with genuinely
@@ -761,8 +781,10 @@ bar at the top.
 
   New tests added rather than just re-measured figures: `CityCatalogTests.
   LoadFile_IncludesSouthAmericaExpansionCities` and `HomeRegionsTests.
-  EligibleStartingCities_EveryHomeRegion_HasParity_FiveEligibleCities` —
-  the latter iterates `HomeRegions.All` directly rather than hardcoding a
+  EligibleStartingCities_EveryHomeRegion_HasAtLeastFiveEligibleCities`
+  (renamed from an exact-5 check to a floor check during the Europe round
+  below, once a region legitimately grew past 5 — see that entry) — the
+  latter iterates `HomeRegions.All` directly rather than hardcoding a
   per-region count, so it (and `StartingConditionsTests`' real-data sweep,
   which iterates `HomeRegions.EligibleStartingCities` the same way)
   needed zero changes to pick up the 3 new cities automatically, a small
@@ -770,3 +792,58 @@ bar at the top.
 
   NorthAmerica, Europe, Asia, and Africa are unexamined by this round —
   next in the series, one region at a time, per explicit direction.
+
+- **City expansion round 2: Europe (depth, not equalization) — done,
+  outside this roadmap's own milestones.** Unlike SouthAmerica, Europe
+  already had 5 eligible cities — parity, not a gap — so this round's
+  goal was different: real depth, plus bringing Europe's gateway count in
+  line with NorthAmerica's (jfk+lax) and Asia's (hnd+hkg) 2-flagship
+  pattern, a structural asymmetry noted but deliberately not addressed
+  during the SouthAmerica round. Decided explicitly rather than assumed:
+  asked directly whether to add a second gateway or stay non-gateway-only
+  like SouthAmerica; the answer was to add one. `data/cities.json` grew
+  from 33 to 38 cities: Amsterdam joins London as Europe's second
+  flagship gateway (cap 3, `demandWeight` 90 — comparable to London's 95),
+  plus Munich, Istanbul, Barcelona, and Zurich as new non-gateway options,
+  bringing Europe to 9 eligible cities and 3 gateways total (lhr, ams,
+  and the Azores chokepoint).
+
+  **A materially bigger ripple than the SouthAmerica round — this time it
+  changed M13's campaign *timing*, not just its magnitude.** Amsterdam's
+  arrival creates a dense cluster of short-haul, high-demand European
+  pairs (ams-lhr, fra-muc, ams-fra, ams-cdg, muc-zrh, fra-zrh) that
+  `BaselineAi` discovers and exploits far more effectively than the older,
+  thinner map allowed. Re-measured directly, not assumed to hold: the
+  campaign now has a real three-phase arc instead of the efficiency-stat
+  update's steady decline — a mild early dip, a genuine rise to a new peak
+  of $48.7M at quarter 36 (nearly 2.5x starting cash, the highest peak
+  ever recorded in this project's history), then a rapid crash to
+  bankruptcy at **quarter 47 (1966)** — more than double the previous
+  quarter-19 timing. Full details and the reasoning for why this doesn't
+  undermine M13's own finding are in `docs/SIM_CORE_ROADMAP.md`'s M13
+  section, not repeated here. `AeroNext.Sim`'s checkpoint list was
+  rewritten to match the new arc (1, 15, 36, 47, 121, 244) rather than
+  leaving stale checkpoints that would print a now-inaccurate story.
+
+  **A real, worth-knowing consequence for the M16 economic factors too:**
+  Europe's *own* factor actually fell slightly despite gaining 4 new
+  eligible cities (0.992 → 0.976), because the new cities' demand weights
+  average below Europe's existing set — proof the ripple effect isn't
+  simply "more cities always raises everyone's number," it depends on
+  what the new cities are actually worth relative to the pool they join
+  (see M16's own update note for the full before/after across all 4
+  regions). The parity test from the SouthAmerica round
+  (`EligibleStartingCities_EveryHomeRegion_HasParity_FiveEligibleCities`)
+  legitimately failed once Europe passed 5 — not a regression, the
+  intended consequence of organic per-region growth — and was rewritten
+  to a `>= 5` floor check
+  (`EligibleStartingCities_EveryHomeRegion_HasAtLeastFiveEligibleCities`).
+
+  New tests: `CityCatalogTests.LoadFile_IncludesEuropeExpansionCities` and
+  `Europe_HasTwoFlagshipGateways_MatchingNorthAmericaAndAsia`. 150-game QA
+  harness sweep still passes cleanly (0 violations) — correctness holds
+  even though the trajectory shape itself changed; the sweep's own runtime
+  roughly tripled (44s → 120s) simply because campaigns now run far more
+  routes before bankrupting, a real cost worth knowing about, not a
+  regression. NorthAmerica, Asia, and Africa remain unexamined — next in
+  the series.

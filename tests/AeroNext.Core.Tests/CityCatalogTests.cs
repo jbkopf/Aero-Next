@@ -50,6 +50,46 @@ public class CityCatalogTests
     }
 
     [Fact]
+    public void LoadFile_IncludesEuropeExpansionCities()
+    {
+        // Europe already had 5 eligible cities (parity, not a gap like
+        // SouthAmerica) - this round is depth, not equalization: Amsterdam
+        // joins London as Europe's second flagship gateway (matching
+        // NorthAmerica's jfk+lax and Asia's hnd+hkg 2-gateway pattern),
+        // plus Munich, Istanbul, Barcelona, and Zurich as new non-gateway
+        // options.
+        var cities = CityCatalog.LoadFile(DataPath);
+        var ids = cities.Select(c => c.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        Assert.Contains("ams", ids);
+        Assert.Contains("muc", ids);
+        Assert.Contains("ist", ids);
+        Assert.Contains("bcn", ids);
+        Assert.Contains("zrh", ids);
+        Assert.All(new[] { "ams", "muc", "ist", "bcn", "zrh" }, id =>
+            Assert.Equal(Region.Europe, cities.Single(c => c.Id == id).Region));
+
+        var amsterdam = cities.Single(c => c.Id == "ams");
+        Assert.True(amsterdam.IsGateway);
+        Assert.True(amsterdam.GateCapacity is > 0);
+    }
+
+    [Fact]
+    public void Europe_HasTwoFlagshipGateways_MatchingNorthAmericaAndAsia()
+    {
+        // lhr/ams for Europe now mirrors jfk/lax (NorthAmerica) and
+        // hnd/hkg (Asia) - Azores (ter) is a chokepoint gateway, not a
+        // flagship, so it's deliberately excluded from this count.
+        var cities = CityCatalog.LoadFile(DataPath);
+        var europeanFlagshipGateways = cities
+            .Where(c => c.Region == Region.Europe && c.IsGateway && c.Id != "ter")
+            .Select(c => c.Id)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        Assert.Equal(new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "lhr", "ams" }, europeanFlagshipGateways);
+    }
+
+    [Fact]
     public void GatewayCities_AllHavePositiveGateCapacity()
     {
         var cities = CityCatalog.LoadFile(DataPath);

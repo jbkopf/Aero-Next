@@ -693,6 +693,33 @@ no invariant violations) holds regardless of the new candidate pairs;
 exact figures were never the thing being protected here, only plausibility
 and a working bankruptcy trigger, both still true.
 
+**Updated a third time, after the Europe city-expansion round — this one
+changed the timing, not just the magnitude.** Adding Amsterdam (a second
+European flagship gateway) plus Munich, Istanbul, Barcelona, and Zurich
+created a dense cluster of short-haul, high-demand European pairs
+(ams-lhr, fra-muc, ams-fra, ams-cdg, muc-zrh, fra-zrh — several outrank
+every pre-existing top-15 market except JFK-LHR-class routes) that
+`BaselineAi` finds and exploits far more effectively than the older,
+thinner European map allowed. Re-measured directly, not assumed to hold:
+the campaign now has a real three-phase arc — a mild early dip (quarter 1:
+$19.8M → quarter ~15: $17.8M, still the DC-3/Constellation-era loss the
+efficiency-stat update introduced), a genuine rise phase driven almost
+entirely by the new European cluster (peaking at quarter 36 (1963):
+$48.7M — nearly 2.5x the starting cash, and higher than any previously
+recorded peak in this section's history), then a rapid late crash to
+bankruptcy at **quarter 47 (1966)**, more than double the previous
+quarter-19 timing, frozen at 47 routes and -$6,276,571.67. The underlying
+finding (M8's unconditional-growth heuristic eventually bankrupts the
+network no matter how the map or economics are tuned around it) is
+unchanged and, if anything, more convincingly demonstrated — a much
+richer, more profitable network still isn't enough to save an airline
+from a heuristic with no growth ceiling, it just takes longer. Confirmed
+via the 150-game QA harness sweep that correctness holds regardless
+(0 violations; the sweep's own runtime roughly tripled, 44s → 120s for
+150 games, simply because campaigns now run far more routes before
+bankrupting — a real cost of a richer map worth knowing about, not a
+regression).
+
 **Chokepoint relevance shift, confirmed directly:** the campaign prints
 whether the era's longest-range available aircraft can fly JFK-LHR
 nonstop. Quarter 1 (1955): "Lockheed Constellation still needs a Gander

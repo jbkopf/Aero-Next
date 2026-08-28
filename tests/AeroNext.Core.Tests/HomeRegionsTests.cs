@@ -51,17 +51,22 @@ public class HomeRegionsTests
     }
 
     [Fact]
-    public void EligibleStartingCities_EveryHomeRegion_HasParity_FiveEligibleCities()
+    public void EligibleStartingCities_EveryHomeRegion_HasAtLeastFiveEligibleCities()
     {
         // SouthAmerica was the thinnest region (2 eligible cities against
         // 5 for every other region) until the SouthAmerica city expansion
-        // (Santiago, Bogota, Lima) brought it to parity.
+        // (Santiago, Bogota, Lima) brought it to parity. City expansion is
+        // an ongoing, region-by-region series (per explicit direction) and
+        // regions are expected to keep growing unevenly from here — a
+        // floor, not an exact match, is the durable invariant: no future
+        // region should ever end up thinner than the SouthAmerica-era
+        // baseline every region had reached at that point.
         var cities = CityCatalog.LoadFile(CitiesDataPath);
 
         foreach (var region in HomeRegions.All)
         {
             var eligible = HomeRegions.EligibleStartingCities(region, cities);
-            Assert.Equal(5, eligible.Count);
+            Assert.True(eligible.Count >= 5, $"{region} has only {eligible.Count} eligible cities, below the established baseline.");
         }
     }
 
