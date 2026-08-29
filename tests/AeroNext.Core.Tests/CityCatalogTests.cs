@@ -138,6 +138,49 @@ public class CityCatalogTests
     }
 
     [Fact]
+    public void LoadFile_IncludesAerobizSupersonicCities()
+    {
+        // Cross-referenced against Aerobiz Supersonic's own city roster
+        // (the game this project is a spiritual successor to, per
+        // CLAUDE.md) and added the clearest, best-attested gaps: Moscow
+        // and Berlin (Europe), Washington and Havana (NorthAmerica), and
+        // Tehran, Manila, and Sydney (Asia - tagged for lack of a finer
+        // Middle East/Oceania region, same precedent as Dubai/Istanbul).
+        var cities = CityCatalog.LoadFile(DataPath);
+        var ids = cities.Select(c => c.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        Assert.Contains("mow", ids);
+        Assert.Contains("ber", ids);
+        Assert.Contains("was", ids);
+        Assert.Contains("hav", ids);
+        Assert.Contains("thr", ids);
+        Assert.Contains("mnl", ids);
+        Assert.Contains("syd", ids);
+    }
+
+    [Fact]
+    public void Sydney_IsAGateway_NotEligibleStartingCity()
+    {
+        // A real regression this addition surfaced: Sydney is ~7,000 km
+        // from every other Asia-tagged city - too remote for any 1955-era
+        // aircraft to reach from it, which broke
+        // StartingConditionsTests.Resolve_EveryEligibleStartingCity_
+        // ProducesAcceptedQuarter1Route when Sydney was first added as
+        // non-gateway. Tagging it a gateway (reflecting its real role as
+        // Oceania's isolated entry point, the same way Cairo/Dakar gate
+        // Africa) removes it from HomeRegions.EligibleStartingCities
+        // without inventing new exclusion logic, and it's still fully
+        // flyable once an airline has long-enough-range aircraft (M18
+        // already found QuarterEngine never gates routes to gateways).
+        var cities = CityCatalog.LoadFile(DataPath);
+        var sydney = cities.Single(c => c.Id == "syd");
+
+        Assert.True(sydney.IsGateway);
+        Assert.True(sydney.GateCapacity is > 0);
+        Assert.DoesNotContain(HomeRegions.EligibleStartingCities(Region.Asia, cities), c => c.Id == "syd");
+    }
+
+    [Fact]
     public void GatewayCities_AllHavePositiveGateCapacity()
     {
         var cities = CityCatalog.LoadFile(DataPath);

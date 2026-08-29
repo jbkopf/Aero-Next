@@ -753,6 +753,31 @@ M8's missing growth ceiling is the actual cause, not an artifact of any
 one map shape. 150-game QA harness sweep still confirms correctness
 (0 violations); runtime grew again, 150s → 232s.
 
+**Updated a sixth time, after cross-referencing the city list against
+Aerobiz Supersonic (the game this project is a spiritual successor to)
+and adding its clearest gaps — and this round broke the four-round
+streak, worth recording precisely rather than assumed to continue.**
+Moscow and Berlin (Europe), Washington and Havana (NorthAmerica), and
+Tehran, Manila, and Sydney (Asia — Sydney tagged a gateway, not eligible,
+after a real regression it surfaced; see
+`docs/GAME_SETUP_ROADMAP.md`'s city-expansion note) — seven cities across
+three regions at once, unlike every prior round's single-region focus.
+Re-measured directly, not assumed to extend the pattern: the peak is now
+**smaller and earlier** — quarter 26 (1961): $24.6M (was quarter 47,
+$82.0M) — and bankruptcy moved **earlier**, not later — **quarter 55
+(1968)** (was quarter 61), frozen at 55 routes and -$3,959,013.42.
+`AeroNext.Sim`'s checkpoint list rewritten a fifth time (1, 15, 26, 55,
+121, 244). The likely cause: this round's additions were thinner and more
+scattered per region than the four single-region depth rounds before it
+(and Washington/Havana in particular are comparatively low-weight,
+pulling down rather than up) — but the honest lesson is that the streak
+was never a law, just what happened to be true for four single-region,
+concentrated rounds in a row; a thinner, more scattered round reversed
+it immediately. The underlying finding is, once again, unaffected either
+way — bankruptcy still happens, just on a different schedule depending on
+what the map actually contains. 150-game QA harness sweep confirms
+correctness still holds (0 violations).
+
 **Chokepoint relevance shift, confirmed directly:** the campaign prints
 whether the era's longest-range available aircraft can fly JFK-LHR
 nonstop. Quarter 1 (1955): "Lockheed Constellation still needs a Gander

@@ -11,6 +11,8 @@
   { "id": "den", "name": "Denver",       "region": "NorthAmerica", "latitude": 39.8561,  "longitude": -104.6737, "demandWeight": 55,  "isGateway": false, "gateCapacity": null },
   { "id": "iah", "name": "Houston",      "region": "NorthAmerica", "latitude": 29.9902,  "longitude": -95.3368,  "demandWeight": 55,  "isGateway": false, "gateCapacity": null },
   { "id": "yvr", "name": "Vancouver",    "region": "NorthAmerica", "latitude": 49.1967,  "longitude": -123.1815, "demandWeight": 50,  "isGateway": false, "gateCapacity": null },
+  { "id": "was", "name": "Washington",   "region": "NorthAmerica", "latitude": 38.9072,  "longitude": -77.0369,  "demandWeight": 60,  "isGateway": false, "gateCapacity": null },
+  { "id": "hav", "name": "Havana",       "region": "NorthAmerica", "latitude": 23.1136,  "longitude": -82.3666,  "demandWeight": 35,  "isGateway": false, "gateCapacity": null },
 
   { "id": "anc", "name": "Anchorage",    "region": "NorthAmerica", "latitude": 61.1743,  "longitude": -149.9963, "demandWeight": 5,   "isGateway": true,  "gateCapacity": 2 },
   { "id": "hnl", "name": "Honolulu",     "region": "NorthAmerica", "latitude": 21.3187,  "longitude": -157.9224, "demandWeight": 20,  "isGateway": true,  "gateCapacity": 2 },
@@ -27,6 +29,8 @@
   { "id": "mad", "name": "Madrid",       "region": "Europe",       "latitude": 40.4983,  "longitude": -3.5676,   "demandWeight": 60,  "isGateway": false, "gateCapacity": null },
   { "id": "bcn", "name": "Barcelona",    "region": "Europe",       "latitude": 41.2974,  "longitude": 2.0833,    "demandWeight": 55,  "isGateway": false, "gateCapacity": null },
   { "id": "zrh", "name": "Zurich",       "region": "Europe",       "latitude": 47.4647,  "longitude": 8.5492,    "demandWeight": 50,  "isGateway": false, "gateCapacity": null },
+  { "id": "mow", "name": "Moscow",       "region": "Europe",       "latitude": 55.7558,  "longitude": 37.6173,   "demandWeight": 70,  "isGateway": false, "gateCapacity": null },
+  { "id": "ber", "name": "Berlin",       "region": "Europe",       "latitude": 52.5200,  "longitude": 13.4050,   "demandWeight": 55,  "isGateway": false, "gateCapacity": null },
   { "id": "lis", "name": "Lisbon",       "region": "Europe",       "latitude": 38.7813,  "longitude": -9.1359,   "demandWeight": 40,  "isGateway": false, "gateCapacity": null },
   { "id": "ter", "name": "Azores",       "region": "Europe",       "latitude": 38.7618,  "longitude": -27.0908,  "demandWeight": 3,   "isGateway": true,  "gateCapacity": 2 },
 
@@ -42,6 +46,9 @@
   { "id": "bom", "name": "Mumbai",       "region": "Asia",         "latitude": 19.0887,  "longitude": 72.8679,   "demandWeight": 65,  "isGateway": false, "gateCapacity": null },
   { "id": "kul", "name": "Kuala Lumpur", "region": "Asia",         "latitude": 2.7456,   "longitude": 101.7099,  "demandWeight": 55,  "isGateway": false, "gateCapacity": null },
   { "id": "tpe", "name": "Taipei",       "region": "Asia",         "latitude": 25.0797,  "longitude": 121.2342,  "demandWeight": 55,  "isGateway": false, "gateCapacity": null },
+  { "id": "syd", "name": "Sydney",       "region": "Asia",         "latitude": -33.8688, "longitude": 151.2093,  "demandWeight": 60,  "isGateway": true,  "gateCapacity": 2 },
+  { "id": "mnl", "name": "Manila",       "region": "Asia",         "latitude": 14.5995,  "longitude": 120.9842,  "demandWeight": 55,  "isGateway": false, "gateCapacity": null },
+  { "id": "thr", "name": "Tehran",       "region": "Asia",         "latitude": 35.6892,  "longitude": 51.3890,   "demandWeight": 45,  "isGateway": false, "gateCapacity": null },
 
   { "id": "gru", "name": "Sao Paulo",    "region": "SouthAmerica", "latitude": -23.4356, "longitude": -46.4731,  "demandWeight": 75,  "isGateway": true,  "gateCapacity": 3 },
   { "id": "eze", "name": "Buenos Aires", "region": "SouthAmerica", "latitude": -34.8222, "longitude": -58.5358,  "demandWeight": 55,  "isGateway": false, "gateCapacity": null },

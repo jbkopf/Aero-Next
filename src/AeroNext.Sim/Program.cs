@@ -550,12 +550,12 @@ string ChokepointStatus(int year)
 }
 
 // Chosen to capture the actual arc found by running this: a mild early
-// dip, a real rise phase driven by the dense European, Asian, and
-// NorthAmerica clusters added after this milestone first shipped (see
-// docs/GAME_SETUP_ROADMAP.md's city-expansion notes), a peak at
-// quarter 47 ($82.0M), then a rapid late crash to bankruptcy at
-// quarter 61 (1970) - not evenly spaced.
-var checkpoints = new HashSet<int> { 1, 15, 47, 61, 121, campaignQuarters };
+// dip, a smaller and earlier peak than prior rounds recorded (see
+// docs/GAME_SETUP_ROADMAP.md's city-expansion notes — this round reversed
+// the "later and higher" trend the last four rounds had established), a
+// peak at quarter 26 ($24.6M), a long decline with a brief plateau around
+// quarter 40-50, then bankruptcy at quarter 55 (1968) - not evenly spaced.
+var checkpoints = new HashSet<int> { 1, 15, 26, 55, 121, campaignQuarters };
 
 for (var q = 1; q <= campaignQuarters; q++)
 {
