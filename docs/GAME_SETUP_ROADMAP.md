@@ -454,6 +454,36 @@ assertions rewritten rather than just renamed, since "all seats' regions ==
 seats), 100% line/branch coverage maintained on `GameSetup.cs`; overall
 project coverage unchanged at 99.78%/99.64%.
 
+**Updated again: regions are no longer exclusive.** This milestone's
+original design point 2 ("a city's region is claimed exclusively") is
+retired — multiple airlines, human or AI, can now share a home region, as
+long as their starting cities stay distinct (still enforced, moved from an
+implicit consequence of the old region-keyed dictionary to an explicit
+`claimedCityIds` check). CLAUDE.md's own "a home region cannot fund a win"
+pillar already assumes rivals converge on the same demand pool — a region
+was never meant to be a private lane, and the old exclusivity rule was
+tightening the game past what the design actually called for.
+
+**AI region *choice* deliberately stays exactly as naive as before —
+explicit scope decision, not an oversight.** AI still only ever picks from
+*unclaimed* regions, richest-by-`RegionalEconomics.Factor` first, same
+logic as the Asia-split update above; it never deliberately doubles up on
+a human's region even though that's now legal. Giving AI a reason to
+contest a region a human is already in is real strategy, deferred to the
+future AI-fleshout work this roadmap's own scope note already excludes
+(see the top of this document), not bolted on here. Confirmed directly:
+with one human in NorthAmerica, the AI's 3 seats still land on the 3
+next-richest *distinct* unclaimed regions, not NorthAmerica again.
+
+296 tests total (2 new: all 4 seats sharing one region with distinct
+cities; AI still avoiding a human-shared region for its own picks), plus
+the exclusivity test rewritten from "throws" to "succeeds." 100%
+line/branch coverage maintained; overall project coverage unchanged at
+99.78%/99.64%. `AeroNext.Sim`'s M17 demo's old "two humans claiming
+NorthAmerica → rejected" scenario, now legal, was replaced with a
+positive demo of the same input succeeding, plus a still-real rejection
+demo (two humans claiming the identical city).
+
 ---
 
 ## M18 — Deriving starting conditions from starting city ✅

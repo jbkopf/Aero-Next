@@ -4,7 +4,7 @@ namespace AeroNext.Core.Setup;
 
 /// <summary>
 /// One human player's setup choices. StartingCityId must resolve to a
-/// non-gateway city in one of the 4 home regions — see
+/// non-gateway city in one of the home regions — see
 /// <see cref="HomeRegions.EligibleStartingCities"/>. Gateway cities stay
 /// inside the ordinary M9 contested mechanic for everyone, including the
 /// local airline, per M15.
@@ -12,9 +12,10 @@ namespace AeroNext.Core.Setup;
 public sealed record HumanPlayerChoice(string AirlineName, string StartingCityId);
 
 /// <summary>
-/// One finalized airline's setup outcome — the direct implementation of
-/// "four home regions... one per player" (CLAUDE.md): every seat maps to
-/// exactly one home region and exactly one starting city within it.
+/// One finalized airline's setup outcome. Every seat maps to exactly one
+/// home region and exactly one starting city within it — but as of the
+/// same-region change below, region is no longer unique across seats; only
+/// the starting city is.
 /// </summary>
 public sealed record AirlineSeat(string AirlineName, bool IsHuman, Region HomeRegion, City StartingCity);
 
@@ -30,6 +31,15 @@ public sealed record AirlineSeat(string AirlineName, bool IsHuman, Region HomeRe
 /// humans claim any home region they like, and whichever slots remain go to
 /// the richest *unclaimed* regions by RegionalEconomics.Factor — so not
 /// every home region appears in every game.
+///
+/// **Regions are no longer exclusive.** Multiple humans (or a human and an
+/// AI) can now share a home region, as long as their starting cities are
+/// distinct — CLAUDE.md's "a home region cannot fund a win" pillar already
+/// assumes rivals can converge on the same demand pool; a region was never
+/// meant to be a private lane. AI region *choice* stays exactly as naive as
+/// before (still just "richest unclaimed region," never doubling up on its
+/// own) — giving AI a reason to deliberately share a region with a human is
+/// real strategy, left for the AI fleshout work, not bolted on here.
 /// </summary>
 public static class GameSetup
 {
@@ -42,7 +52,9 @@ public static class GameSetup
 
         var citiesById = allCities.ToDictionary(c => c.Id, StringComparer.OrdinalIgnoreCase);
         var claimedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var humanSeatsByRegion = new Dictionary<Region, AirlineSeat>();
+        var claimedCityIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var claimedRegions = new HashSet<Region>();
+        var humanSeats = new List<AirlineSeat>();
 
         foreach (var choice in humanChoices)
         {
@@ -66,17 +78,20 @@ public static class GameSetup
                 throw new ArgumentException($"'{choice.StartingCityId}' is not an eligible starting city.", nameof(humanChoices));
             }
 
-            if (!humanSeatsByRegion.TryAdd(city.Region, new AirlineSeat(choice.AirlineName, IsHuman: true, city.Region, city)))
+            if (!claimedCityIds.Add(city.Id))
             {
-                throw new ArgumentException($"Region '{city.Region}' is already claimed by another airline.", nameof(humanChoices));
+                throw new ArgumentException($"'{city.Id}' is already claimed by another airline.", nameof(humanChoices));
             }
+
+            claimedRegions.Add(city.Region);
+            humanSeats.Add(new AirlineSeat(choice.AirlineName, IsHuman: true, city.Region, city));
         }
 
-        var seats = new List<AirlineSeat>(humanSeatsByRegion.Values);
+        var seats = new List<AirlineSeat>(humanSeats);
         var remainingSlots = 4 - seats.Count;
 
         var aiRegions = HomeRegions.All
-            .Where(r => !humanSeatsByRegion.ContainsKey(r))
+            .Where(r => !claimedRegions.Contains(r))
             .Select(r => (Region: r, Factor: RegionalEconomics.Factor(r, allCities)))
             .OrderByDescending(x => x.Factor)
             .ThenBy(x => x.Region.ToString(), StringComparer.Ordinal)
@@ -99,6 +114,9 @@ public static class GameSetup
             seats.Add(new AirlineSeat(aiName, IsHuman: false, region, startingCity));
         }
 
-        return seats.OrderBy(s => s.HomeRegion.ToString(), StringComparer.Ordinal).ToList();
+        return seats
+            .OrderBy(s => s.HomeRegion.ToString(), StringComparer.Ordinal)
+            .ThenBy(s => s.AirlineName, StringComparer.Ordinal)
+            .ToList();
     }
 }

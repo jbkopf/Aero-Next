@@ -666,17 +666,25 @@ PrintSeats("4 human players", new[]
     new HumanPlayerChoice("Continental Wings", "eze"),
 });
 
+// Regions are no longer exclusive - two humans can now share a home
+// region, as long as their starting cities are distinct.
+PrintSeats("2 humans sharing NorthAmerica", new[]
+{
+    new HumanPlayerChoice("Atlas Air", "ord"),
+    new HumanPlayerChoice("Meridian", "sfo"), // also NorthAmerica - now allowed
+});
+
 try
 {
     GameSetup.CreateSeats(new[]
     {
         new HumanPlayerChoice("Atlas Air", "ord"),
-        new HumanPlayerChoice("Meridian", "sfo"), // also NorthAmerica - rejected
+        new HumanPlayerChoice("Meridian", "ord"), // same city - still rejected
     }, cities);
 }
 catch (ArgumentException ex)
 {
-    Console.WriteLine($"  Rejected (two humans claiming NorthAmerica): {ex.Message}");
+    Console.WriteLine($"  Rejected (two humans claiming the same city): {ex.Message}");
 }
 
 // ---------------------------------------------------------------------

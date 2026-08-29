@@ -166,15 +166,65 @@ public class GameSetupTests
     }
 
     [Fact]
-    public void CreateSeats_TwoHumansClaimSameRegion_DifferentCities_Throws()
+    public void CreateSeats_TwoHumansClaimSameRegion_DifferentCities_Succeeds()
     {
+        // Regions are no longer exclusive - a home region was never meant
+        // to be a private lane (CLAUDE.md's "a home region cannot fund a
+        // win" already assumes rivals converge on the same demand pool).
+        // Only starting city needs to stay distinct.
         var choices = new[]
         {
             new HumanPlayerChoice("Atlas Air", "ord"),
             new HumanPlayerChoice("Meridian", "sfo"), // also NorthAmerica
         };
 
-        Assert.Throws<ArgumentException>(() => GameSetup.CreateSeats(choices, RealCities));
+        var seats = GameSetup.CreateSeats(choices, RealCities);
+
+        var atlas = seats.Single(s => s.AirlineName == "Atlas Air");
+        var meridian = seats.Single(s => s.AirlineName == "Meridian");
+        Assert.Equal(Region.NorthAmerica, atlas.HomeRegion);
+        Assert.Equal(Region.NorthAmerica, meridian.HomeRegion);
+        Assert.NotEqual(atlas.StartingCity.Id, meridian.StartingCity.Id);
+    }
+
+    [Fact]
+    public void CreateSeats_AllFourHumansClaimSameRegion_DistinctCities_Succeeds()
+    {
+        // The extreme case: every region has at least 4 eligible cities
+        // (the established parity floor), so a region can host all 4
+        // seats at once now that region exclusivity is gone.
+        var choices = new[]
+        {
+            new HumanPlayerChoice("A", "ord"),
+            new HumanPlayerChoice("B", "sfo"),
+            new HumanPlayerChoice("C", "atl"),
+            new HumanPlayerChoice("D", "mia"),
+        };
+
+        var seats = GameSetup.CreateSeats(choices, RealCities);
+
+        Assert.Equal(4, seats.Count);
+        Assert.All(seats, s => Assert.Equal(Region.NorthAmerica, s.HomeRegion));
+        Assert.Equal(4, seats.Select(s => s.StartingCity.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count());
+    }
+
+    [Fact]
+    public void CreateSeats_HumanSharesRegionWithAi_AiStillPicksRichestOtherUnclaimedRegion()
+    {
+        // AI region choice stays exactly as naive as before this change -
+        // it never doubles up on its own, even though a human sharing a
+        // region with it is now legal. One human takes NorthAmerica (the
+        // richest region), so AI's 3 picks should be the next-richest
+        // three distinct, still-unclaimed regions - same "richest
+        // unclaimed" logic as the zero-human case, just starting from a
+        // smaller pool.
+        var choices = new[] { new HumanPlayerChoice("Atlas Air", "ord") };
+
+        var seats = GameSetup.CreateSeats(choices, RealCities);
+
+        Assert.Equal(4, seats.Count);
+        Assert.Equal(1, seats.Count(s => s.HomeRegion == Region.NorthAmerica));
+        Assert.Equal(4, seats.Select(s => s.HomeRegion).Distinct().Count());
     }
 
     [Fact]
