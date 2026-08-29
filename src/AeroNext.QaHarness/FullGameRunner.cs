@@ -42,31 +42,46 @@ public static class FullGameRunner
     /// <summary>Anything past this is almost certainly a sign-flip/overflow bug, not a plausible airline balance.</summary>
     private static readonly Money SaneMagnitudeBound = Money.FromDollars(1_000_000_000_000);
 
+    /// <param name="seats">
+    /// The 4 finalized airline seats to run. Normally built via
+    /// GameConfigGenerator + GameSetup.CreateSeats (one per home region,
+    /// per M15); the unconstrained-regions QA mode builds these a different
+    /// way (see UnconstrainedSeatGenerator) — this method itself has no
+    /// opinion on how seats were produced.
+    /// </param>
+    /// <param name="distinctRegionsExpected">
+    /// Whether "each seat has a different home region" should be checked as
+    /// an invariant. True for real GameSetup-produced seats; false for the
+    /// unconstrained-regions QA mode, where duplicate regions are the point.
+    /// </param>
     public static FullGameResult Run(
         int gameIndex, int configSeed, int campaignSeed, int quarters,
+        IReadOnlyList<AirlineSeat> seats, bool distinctRegionsExpected,
         IReadOnlyList<City> cities, IReadOnlyList<AircraftType> fleetCatalog, IReadOnlyList<DemandGrowthPoint> growthSchedule)
     {
         var violations = new List<GameViolation>();
-        var configRng = new SimRng(configSeed);
         var campaignRng = new SimRng(campaignSeed);
 
-        var humanChoices = GameConfigGenerator.Generate(configRng, cities);
-        var seats = GameSetup.CreateSeats(humanChoices, cities);
         var names = seats.Select(s => s.AirlineName).ToList();
 
-        if (seats.Count != 4
-            || seats.Select(s => s.HomeRegion).Distinct().Count() != 4
-            || seats.Select(s => s.StartingCity.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count() != 4)
+        if (seats.Count != 4 || names.Distinct(StringComparer.OrdinalIgnoreCase).Count() != 4)
         {
-            violations.Add(new GameViolation(0, "-", "GameSetup did not produce 4 seats with distinct regions/cities."));
+            violations.Add(new GameViolation(0, "-", "Seats did not have 4 distinct airline names."));
+        }
+
+        if (distinctRegionsExpected && seats.Select(s => s.HomeRegion).Distinct().Count() != 4)
+        {
+            violations.Add(new GameViolation(0, "-", "GameSetup did not produce 4 seats with distinct regions."));
         }
 
         var conditionsByName = seats.ToDictionary(s => s.AirlineName, s => StartingConditionsResolver.Resolve(s, cities, fleetCatalog));
         var seatByName = seats.ToDictionary(s => s.AirlineName);
+        var homeRegionByName = seats.ToDictionary(s => s.AirlineName, s => s.HomeRegion);
         var routes = names.ToDictionary(n => n, _ => (IReadOnlyList<Route>)Array.Empty<Route>());
         var caps = names.ToDictionary(n => n, _ => QuarterEngine.BaseActionCap);
         var finances = names.ToDictionary(n => n, n => FinancialState.Start(conditionsByName[n].StartingCash, DefaultStartingDebt, DefaultInterestRatePerQuarter));
         var bankruptcyQuarter = names.ToDictionary(n => n, n => (int?)null);
+        var humanCount = seats.Count(s => s.IsHuman);
 
         var landingBoard = LandingRightsBoard.Empty;
 
@@ -176,6 +191,6 @@ public static class FullGameRunner
 
         var finalCash = names.ToDictionary(n => n, n => finances[n].CashBalance);
 
-        return new FullGameResult(gameIndex, configSeed, campaignSeed, humanChoices.Count, quarters, violations, finalCash, bankruptcyQuarter);
+        return new FullGameResult(gameIndex, configSeed, campaignSeed, humanCount, quarters, violations, finalCash, bankruptcyQuarter, homeRegionByName);
     }
 }

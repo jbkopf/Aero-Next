@@ -1,4 +1,6 @@
+using AeroNext.Core;
 using AeroNext.Core.Airlines;
+using AeroNext.Core.Setup;
 using AeroNext.Core.World;
 using AeroNext.QaHarness;
 
@@ -9,18 +11,27 @@ using AeroNext.QaHarness;
 // - this is the slower, broader QA tier for "does the whole system hold
 // together across the real space of games," not fast per-commit feedback.
 //
-// Usage: dotnet run --project src/AeroNext.QaHarness [--games N] [--quarters N] [--seed N]
+// Usage: dotnet run --project src/AeroNext.QaHarness [--games N] [--quarters N] [--seed N] [--unconstrained-regions]
+//
+// --unconstrained-regions swaps GameSetup.CreateSeats (which enforces "each
+// home region claimed by at most one airline") for UnconstrainedSeatGenerator
+// (independent random region per seat, duplicates allowed) - a QA-only
+// question ("is a region's disadvantage intrinsic, or just an artifact of
+// always facing exactly one same-region rival"), not a real game
+// configuration.
 var games = 100;
 var quarters = 244; // the full 1955-2015 campaign, matching M13
 var baseSeed = 1;
+var unconstrainedRegions = false;
 
-for (var i = 0; i < args.Length - 1; i++)
+for (var i = 0; i < args.Length; i++)
 {
     switch (args[i])
     {
         case "--games": games = int.Parse(args[++i]); break;
         case "--quarters": quarters = int.Parse(args[++i]); break;
         case "--seed": baseSeed = int.Parse(args[++i]); break;
+        case "--unconstrained-regions": unconstrainedRegions = true; break;
     }
 }
 
@@ -28,7 +39,7 @@ var cities = CityCatalog.LoadFile(Path.Combine(AppContext.BaseDirectory, "data",
 var fleetCatalog = AircraftCatalog.LoadFile(Path.Combine(AppContext.BaseDirectory, "data", "aircraft.json"));
 var growthSchedule = DemandGrowthCatalog.LoadFile(Path.Combine(AppContext.BaseDirectory, "data", "demand_growth.json"));
 
-Console.WriteLine($"AeroNext QA harness: {games} games x {quarters} quarters, base seed {baseSeed}");
+Console.WriteLine($"AeroNext QA harness: {games} games x {quarters} quarters, base seed {baseSeed}{(unconstrainedRegions ? " [unconstrained regions: duplicates allowed]" : "")}");
 Console.WriteLine();
 
 var results = new List<FullGameResult>();
@@ -41,7 +52,12 @@ for (var i = 0; i < games; i++)
 
     try
     {
-        var result = FullGameRunner.Run(i, configSeed, campaignSeed, quarters, cities, fleetCatalog, growthSchedule);
+        var configRng = new SimRng(configSeed);
+        IReadOnlyList<AirlineSeat> seats = unconstrainedRegions
+            ? UnconstrainedSeatGenerator.Generate(configRng, cities)
+            : GameSetup.CreateSeats(GameConfigGenerator.Generate(configRng, cities), cities);
+
+        var result = FullGameRunner.Run(i, configSeed, campaignSeed, quarters, seats, distinctRegionsExpected: !unconstrainedRegions, cities, fleetCatalog, growthSchedule);
         results.Add(result);
 
         if (!result.Success)
@@ -80,6 +96,17 @@ if (hardFailures.Count > 0)
         Console.WriteLine($"  game {gameIndex}: configSeed={configSeed} campaignSeed={campaignSeed}");
         Console.WriteLine($"    {ex}");
     }
+}
+
+var regionalOutcomes = RegionalOutcomeReport.Aggregate(results.Where(r => r.Success).ToList());
+
+Console.WriteLine();
+Console.WriteLine($"=== Regional Outcome Breakdown (from {passed} clean games) ===");
+Console.WriteLine($"{"Region",-14}{"Seats",7}{"Bankrupt",10}{"BnkrptQ",9}{"AvgCash",18}{"MedianCash",18}{"Wins",7}");
+foreach (var o in regionalOutcomes)
+{
+    var bankruptQ = o.AverageBankruptcyQuarter is { } q ? q.ToString("N1") : "n/a";
+    Console.WriteLine($"{o.Region,-14}{o.SeatsCounted,7}{o.BankruptcyCount,10}{bankruptQ,9}{o.AverageFinalCash,18}{o.MedianFinalCash,18}{o.Wins,7}");
 }
 
 var exitCode = failed == 0 && hardFailures.Count == 0 ? 0 : 1;

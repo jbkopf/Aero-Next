@@ -1,4 +1,5 @@
 using AeroNext.Core;
+using AeroNext.Core.World;
 
 namespace AeroNext.QaHarness;
 
@@ -12,7 +13,8 @@ public sealed record FullGameResult(
     int QuartersRun,
     IReadOnlyList<GameViolation> Violations,
     IReadOnlyDictionary<string, Money> FinalCash,
-    IReadOnlyDictionary<string, int?> BankruptcyQuarter)
+    IReadOnlyDictionary<string, int?> BankruptcyQuarter,
+    IReadOnlyDictionary<string, Region> HomeRegionByName)
 {
     public bool Success => Violations.Count == 0;
 }
