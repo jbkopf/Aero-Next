@@ -216,6 +216,39 @@ public class CityCatalogTests
     }
 
     [Fact]
+    public void LoadFile_IncludesAerobizSupersonicMinorTierCities()
+    {
+        // Second half of the "by tier, not region" pacing the user chose
+        // for the 43-city gap found against Aerobiz Supersonic's full
+        // list: the ~19 smaller/chokepoint-tier cities left after the
+        // major-tier round. Mostly secondary gateways and regional
+        // stepping-stones (Pacific islands, North African coastal cities)
+        // rather than demand centers in their own right.
+        var cities = CityCatalog.LoadFile(DataPath);
+        var ids = cities.Select(c => c.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var expectedByRegion = new (string Id, Region Region)[]
+        {
+            ("kin", Region.NorthAmerica),
+            ("nce", Region.Europe), ("msq", Region.Europe), ("rov", Region.Europe),
+            ("tun", Region.Africa), ("tip", Region.Africa),
+            ("per", Region.Asia), ("fuk", Region.Asia), ("tas", Region.Asia),
+            ("isb", Region.Asia), ("adl", Region.Asia), ("ceb", Region.Asia),
+            ("spr", Region.Asia), ("nan", Region.Asia), ("gum", Region.Asia),
+            ("khv", Region.Asia), ("nou", Region.Asia), ("ppt", Region.Asia),
+            ("spn", Region.Asia),
+        };
+
+        Assert.Equal(19, expectedByRegion.Length);
+        Assert.All(expectedByRegion, entry =>
+        {
+            Assert.Contains(entry.Id, ids);
+            Assert.Equal(entry.Region, cities.Single(c => c.Id == entry.Id).Region);
+            Assert.False(cities.Single(c => c.Id == entry.Id).IsGateway);
+        });
+    }
+
+    [Fact]
     public void GatewayCities_AllHavePositiveGateCapacity()
     {
         var cities = CityCatalog.LoadFile(DataPath);

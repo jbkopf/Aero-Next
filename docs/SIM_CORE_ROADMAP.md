@@ -794,6 +794,22 @@ law" reading the previous update already settled on, not a new pattern
 worth naming. 150-game QA harness sweep confirms correctness at this
 scale (0 violations), same as every round before it.
 
+**Updated an eighth time, after the Aerobiz Supersonic minor-tier
+round — 19 new cities across four regions, the second half of the "by
+tier, not region" pacing.** Re-measured with a full `Enumerable.Range(1,
+60)` sweep rather than assumed to follow the previous round's checkpoints:
+the true peak shifted marginally, **quarter 35 (1963) → quarter 34
+(1963)**, $34,230,777.35 → **$34,270,806.67** — close enough that
+spot-checking quarter 35 alone would have missed it, which is why the
+full sweep runs every round rather than trusting the prior round's
+checkpoint set to still be exact. Bankruptcy held at **quarter 52
+(1967)**, frozen at 52 routes, -$1,615,927.79 (a different exact figure
+from the previous round's -$185,275.06, since the new cities shift which
+routes exist and what they cost, even though the quarter number itself
+didn't move). `AeroNext.Sim`'s checkpoint list rewritten a seventh time
+(1, 15, 34, 52, 121, 244). 150-game QA harness sweep confirms correctness
+at this scale (0 violations), same as every round before it.
+
 **Chokepoint relevance shift, confirmed directly:** the campaign prints
 whether the era's longest-range available aircraft can fly JFK-LHR
 nonstop. Quarter 1 (1955): "Lockheed Constellation still needs a Gander

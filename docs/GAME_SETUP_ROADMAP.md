@@ -265,6 +265,29 @@ global demand search but structurally invisible to this specific
 calculation. First time this roadmap's had cities to actually
 demonstrate that boundary with, rather than just state it.
 
+**Updated a seventh time after the Aerobiz Supersonic minor-tier round:**
+NorthAmerica 1.121, Europe 1.031, Asia 0.903, SouthAmerica 1.085 — **the
+first time any region's factor has dropped below 1.0**, computed directly
+from `cities.json` rather than assumed to follow the previous round's
+direction. The global denominator fell sharply (58.33 → 50.71 across 77
+eligible cities, up from 60), driven almost entirely by Asia's 13 new
+entries (Perth, Fukuoka, Tashkent, Islamabad, Adelaide, Cebu, Sapporo,
+Nandi, Guam, Khabarovsk, Noumea, Papeete, Saipan — Pacific/regional
+stepping-stones, not demand centers), which average only 22.31, pulling
+Asia's own average down hard (61.84 → 45.78 across 32 cities) — enough
+that even though the global denominator fell too, Asia's own average fell
+further in relative terms, so its factor crossed under 1.0 for the first
+time this series. NorthAmerica (avg 59.0 → 56.88 across 16 cities, adding
+only Kingston at weight 25) and Europe (avg 55.47 → 52.29 across 24
+cities, adding Nice/Minsk/Rostov averaging 30) both saw their own averages
+fall too, but by less than the shared denominator fell, so both factors
+rose (1.011 → 1.121, 0.951 → 1.031). SouthAmerica, untouched again, simply
+inherited the falling denominator and rose furthest in relative terms
+(0.943 → 1.085). **Africa's two new cities this round (Tunis, Tripoli)
+are, again, invisible to this calculation** — same structural boundary as
+the major-tier round, holding steady as Africa keeps gaining cities every
+round without ever entering `HomeRegions.All`.
+
 `AircraftType` gained `Manufacturer` (string) and `ManufacturerRegion`
 (`Region?`), both defaulting empty/null like every other generously-
 defaulted field on this record. `data/aircraft.json` now tags all 5
@@ -438,18 +461,22 @@ that branch.
 
 **Full real-data sweep, not sampled:** the "Done when" check runs for
 every real eligible starting city across all 4 home regions (17 at the
-time; 60 now, after six expansion rounds (SouthAmerica, Europe, Asia,
-NorthAmerica, the Aerobiz Supersonic cross-reference, and its major-tier
-follow-up) — the test itself iterates `HomeRegions.EligibleStartingCities`
-directly rather than a hardcoded count, so it picked up 42 of the 47
-non-Africa new cities automatically across all six rounds with no test
-changes needed (Sydney is the one exception — tagged a gateway
-specifically so it's excluded from this sweep, after it failed the check
-as a non-gateway city; the 4 Africa additions are the other explained
-gap, since Africa isn't a home region at all and `EligibleStartingCities`
-throws for it by design — see this document's own "Kept in mind" entries
-for both)) — every single one resolves successfully and its guaranteed
-`RouteOrder` is accepted by the
+time; 77 now, after seven expansion rounds (SouthAmerica, Europe, Asia,
+NorthAmerica, the Aerobiz Supersonic cross-reference, and its major- and
+minor-tier follow-ups) — the test itself iterates
+`HomeRegions.EligibleStartingCities` directly rather than a hardcoded
+count, so it picked up 42 of the 47 non-Africa new cities automatically
+across the first six rounds with no test changes needed (Sydney is the
+one exception — tagged a gateway specifically so it's excluded from this
+sweep, after it failed the check as a non-gateway city), then all 17 of
+the minor-tier round's non-Africa new cities with zero further exceptions
+(none of them are gateways) — 59 of 64 non-Africa new cities picked up
+automatically overall. The 6 Africa additions across the major- and
+minor-tier rounds are the other explained gap, since Africa isn't a home
+region at all and `EligibleStartingCities` throws for it by design — see
+this document's own "Kept in mind" entries for all three)) — every single
+one resolves successfully and its guaranteed `RouteOrder` is accepted by
+the
 real `QuarterEngine` on quarter
 1, with no data gaps needing a fix (the smallest-first search already
 handled the one region, Europe, with only a single appropriate aircraft
@@ -586,6 +613,19 @@ meaningfully smaller loss, becoming the new least-negative figure in the
 set. Asia, NorthAmerica, and SouthAmerica's demo seats are all
 byte-identical to the previous measurement. The range is now roughly
 **-$122K/-$234K**.
+
+**A ninth re-measurement, after the minor-tier round: only Asia's demo
+seats moved.** Asia's own AI seat (still starting at Beijing — none of
+the 13 new Asia cities out-weigh its 95) now finds a closer, cheaper
+guaranteed destination among them (Fukuoka and several other new entries
+sit much nearer Beijing than whatever the smallest-range-first search
+used before), moving net income from -$219,670.15 to -$231,054.25 — still
+inside the already-quoted -$122K/-$234K range, so it holds without
+widening. Europe, NorthAmerica, and SouthAmerica's demo seats are all
+byte-identical to the previous measurement — confirmed by temporarily
+reverting `cities.json` to its pre-round state and re-running the demo
+side by side, not just eyeballed. Starting *cash* moved for every seat
+regardless, following M16's factor shifts, same as every round before it.
 
 **The `BaselineAi` non-differentiation note plays out exactly as
 predicted:** the 0-human demo's 4 AI seats now start with genuinely
@@ -1193,3 +1233,54 @@ bar at the top.
   Khabarovsk, Cebu, Guam, Saipan, Perth, Adelaide, Noumea, Nandi,
   Papeete, Kingston) are the next round in this series, by the same
   explicit pacing decision.
+
+- **City expansion round 7: Aerobiz Supersonic's actual full list, minor
+  tier — done, outside this roadmap's own milestones.** The second half
+  of the previous round's explicit pacing decision (major first, minor
+  later): the ~19 smaller/chokepoint-tier cities left after round 6.
+  `data/cities.json` grew from 79 to 98 cities — 1 for NorthAmerica
+  (Kingston), 3 for Europe (Nice, Minsk, Rostov), 2 for Africa (Tunis,
+  Tripoli), and 13 for Asia (Perth, Fukuoka, Tashkent, Islamabad,
+  Adelaide, Cebu, Sapporo, Nandi, Guam, Khabarovsk, Noumea, Papeete,
+  Saipan — Pacific islands and regional stepping-stones, not demand
+  centers, matching the tier's own description). One data-entry mistake
+  caught before it shipped: Tunis and Tripoli were first typed under
+  `"region": "Europe"` (they're North African) — caught on review of the
+  edit itself and fixed before running anything, not surfaced by a test
+  failure.
+
+  **`RegionalEconomics.Factor` crossed a threshold it hadn't before:**
+  Asia's factor dropped below 1.0 for the first time in this series
+  (1.060 → 0.903), driven by its 13 new cities averaging only 22.31 —
+  well below every other round's new-city average — pulling Asia's own
+  eligible-city average down harder than the falling global denominator
+  could offset. See M16's own update note for the full region-by-region
+  arithmetic, verified directly against `cities.json` rather than
+  assumed from the previous round's direction.
+
+  Peak and bankruptcy barely moved this time — quarter 35/$34.6M →
+  **quarter 34/$34,270,806.67**; bankruptcy held at **quarter 52
+  (1967)**, same quarter as the previous round but a different exact
+  dollar figure. Small enough that spot-checking the previous round's
+  checkpoints would have missed the peak's shift entirely — caught only
+  because a full `Enumerable.Range(1, 60)` sweep runs every round
+  regardless of how small the expected change looks. `AeroNext.Sim`'s
+  checkpoint list rewritten a seventh time (1, 15, 34, 52, 121, 244).
+  Full reasoning is in `docs/SIM_CORE_ROADMAP.md`'s M13 section.
+
+  M19's demo seats mostly held steady: only Asia's AI seat moved (still
+  starting at Beijing, but a closer, cheaper guaranteed destination
+  turned up among the new Asia cities), net income -$219,670.15 →
+  -$231,054.25, confirmed by temporarily reverting `cities.json` and
+  diffing the demo output side by side rather than assumed from the
+  city list alone. Europe, NorthAmerica, and SouthAmerica's demo seats
+  are byte-identical. The -$122K/-$234K range holds without widening.
+
+  New test: `CityCatalogTests.LoadFile_IncludesAerobizSupersonicMinorTierCities`
+  (19 cities, region and non-gateway status both asserted). 150-game QA
+  harness sweep passes cleanly (150/150, 0 violations, 0 crashes) at 98
+  cities. Coverage holds at the established 99.78%/99.64% baseline, no
+  new gaps. **This closes out the Aerobiz Supersonic cross-reference
+  arc**: all 43 genuine gaps found against the user-supplied complete
+  89-city list are now in the roster, split major/minor exactly as the
+  user directed rather than by region or all at once.
