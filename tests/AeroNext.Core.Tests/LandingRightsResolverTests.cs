@@ -10,7 +10,7 @@ namespace AeroNext.Core.Tests;
 public class LandingRightsResolverTests
 {
     private static City MakeCity(string id, int gateCapacity) =>
-        new(id, id.ToUpperInvariant(), Region.Asia, 0, 0, 50, IsGateway: true, GateCapacity: gateCapacity);
+        new(id, id.ToUpperInvariant(), Region.EastAsia, 0, 0, 50, IsGateway: true, GateCapacity: gateCapacity);
 
     private static Airline MakeAirline(string name) => new(name, Array.Empty<Route>());
 

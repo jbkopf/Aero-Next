@@ -6,7 +6,7 @@ namespace AeroNext.Core.Tests;
 
 public class NetworkPlannerTests
 {
-    private static City MakeCity(string id, double lat, double lon, int weight, Region region = Region.Asia) =>
+    private static City MakeCity(string id, double lat, double lon, int weight, Region region = Region.EastAsia) =>
         new(id, id.ToUpperInvariant(), region, lat, lon, weight, false, null);
 
     [Fact]

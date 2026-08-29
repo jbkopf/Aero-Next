@@ -24,6 +24,12 @@ public sealed record AirlineSeat(string AirlineName, bool IsHuman, Region HomeRe
 /// CLAUDE.md, the sim never runs with fewer than 4 competing networks. A
 /// pure function over structured input; AeroNext.Sim supplies the actual
 /// "ask the player" sequence — no console I/O belongs in AeroNext.Core.
+///
+/// Since the Asia region split (HomeRegions.All has 6 members for exactly 4
+/// player slots), this is a genuine draft rather than "one seat per region":
+/// humans claim any home region they like, and whichever slots remain go to
+/// the richest *unclaimed* regions by RegionalEconomics.Factor — so not
+/// every home region appears in every game.
 /// </summary>
 public static class GameSetup
 {
@@ -66,16 +72,19 @@ public static class GameSetup
             }
         }
 
-        var seats = new List<AirlineSeat>();
+        var seats = new List<AirlineSeat>(humanSeatsByRegion.Values);
+        var remainingSlots = 4 - seats.Count;
 
-        foreach (var region in HomeRegions.All.OrderBy(r => r.ToString(), StringComparer.Ordinal))
+        var aiRegions = HomeRegions.All
+            .Where(r => !humanSeatsByRegion.ContainsKey(r))
+            .Select(r => (Region: r, Factor: RegionalEconomics.Factor(r, allCities)))
+            .OrderByDescending(x => x.Factor)
+            .ThenBy(x => x.Region.ToString(), StringComparer.Ordinal)
+            .Take(remainingSlots)
+            .Select(x => x.Region);
+
+        foreach (var region in aiRegions)
         {
-            if (humanSeatsByRegion.TryGetValue(region, out var humanSeat))
-            {
-                seats.Add(humanSeat);
-                continue;
-            }
-
             var startingCity = HomeRegions.EligibleStartingCities(region, allCities)
                 .OrderByDescending(c => c.DemandWeight)
                 .ThenBy(c => c.Id, StringComparer.Ordinal)
@@ -90,6 +99,6 @@ public static class GameSetup
             seats.Add(new AirlineSeat(aiName, IsHuman: false, region, startingCity));
         }
 
-        return seats;
+        return seats.OrderBy(s => s.HomeRegion.ToString(), StringComparer.Ordinal).ToList();
     }
 }

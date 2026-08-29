@@ -36,7 +36,9 @@ public class RegionalEconomicsTests
             new City("na2", "NA Two", Region.NorthAmerica, 0, 0, 50, false, null),
             new City("eu1", "EU One", Region.Europe, 0, 0, 50, false, null),
             new City("eu2", "EU Two", Region.Europe, 0, 0, 50, false, null),
-            new City("as1", "AS One", Region.Asia, 0, 0, 50, false, null),
+            new City("ea1", "EA One", Region.EastAsia, 0, 0, 50, false, null),
+            new City("sw1", "SW One", Region.SouthWestAsia, 0, 0, 50, false, null),
+            new City("au1", "AU One", Region.AustralAsia, 0, 0, 50, false, null),
             new City("sa1", "SA One", Region.SouthAmerica, 0, 0, 50, false, null),
         };
 
@@ -53,7 +55,7 @@ public class RegionalEconomicsTests
         {
             new City("na1", "NA Rich", Region.NorthAmerica, 0, 0, 100, false, null),
             new City("eu1", "EU Poor", Region.Europe, 0, 0, 20, false, null),
-            new City("as1", "AS Mid", Region.Asia, 0, 0, 60, false, null),
+            new City("as1", "AS Mid", Region.EastAsia, 0, 0, 60, false, null),
             new City("sa1", "SA Mid", Region.SouthAmerica, 0, 0, 60, false, null),
         };
 
@@ -71,7 +73,7 @@ public class RegionalEconomicsTests
         {
             new City("na1", "NA One", Region.NorthAmerica, 0, 0, 50, false, null),
             new City("eu1", "EU One", Region.Europe, 0, 0, 50, false, null),
-            new City("as1", "AS One", Region.Asia, 0, 0, 50, false, null),
+            new City("as1", "AS One", Region.EastAsia, 0, 0, 50, false, null),
             new City("sa1", "SA One", Region.SouthAmerica, 0, 0, 50, false, null),
         };
 

@@ -61,11 +61,15 @@ public class RegionalFleetTests
     }
 
     [Fact]
-    public void AppropriateAircraft_AsiaAndSouthAmerica_FallBackToBestAvailableImport_At1955()
+    public void AppropriateAircraft_RegionsWithNoManufacturer_FallBackToBestAvailableImport_At1955()
     {
         var fleet = AircraftCatalog.LoadFile(AircraftDataPath);
 
-        foreach (var region in new[] { Region.Asia, Region.SouthAmerica })
+        // EastAsia (COMAC arrives 2008) and SouthAmerica (Embraer arrives
+        // 1985) both eventually get their own manufacturer; SouthWestAsia
+        // and AustralAsia never do under current data - all four have none
+        // yet at the 1955 campaign start, so all fall back the same way.
+        foreach (var region in new[] { Region.EastAsia, Region.SouthWestAsia, Region.AustralAsia, Region.SouthAmerica })
         {
             var appropriate = RegionalFleet.AppropriateAircraft(region, fleet, 1955);
 
@@ -95,9 +99,9 @@ public class RegionalFleetTests
         var fleet = AircraftCatalog.LoadFile(AircraftDataPath);
 
         // COMAC ARJ21 (2008): the first Asia-manufactured type.
-        var appropriate = RegionalFleet.AppropriateAircraft(Region.Asia, fleet, 2008);
+        var appropriate = RegionalFleet.AppropriateAircraft(Region.EastAsia, fleet, 2008);
 
-        Assert.All(appropriate, a => Assert.Equal(Region.Asia, a.ManufacturerRegion));
+        Assert.All(appropriate, a => Assert.Equal(Region.EastAsia, a.ManufacturerRegion));
         Assert.Contains(appropriate, a => a.Id == "arj21");
     }
 
@@ -106,12 +110,15 @@ public class RegionalFleetTests
     {
         var fleet = AircraftCatalog.LoadFile(AircraftDataPath);
 
-        // By 2015 every home region has its own manufactured type
-        // available (Asia's COMAC ARJ21, 2008, is the last to arrive), so
-        // every region's "appropriate" set comes from the own-manufacturer
-        // branch — Tu-104/Il-62 (Soviet, ManufacturerRegion left null; see
-        // AircraftCatalogTests) never surface as anyone's preferred pick.
-        foreach (var region in HomeRegions.All)
+        // By 2015, NorthAmerica/Europe/EastAsia/SouthAmerica each have their
+        // own manufactured type available (EastAsia's COMAC ARJ21, 2008, is
+        // the last to arrive), so those four regions' "appropriate" sets
+        // come from the own-manufacturer branch — Tu-104/Il-62 (Soviet,
+        // ManufacturerRegion left null; see AircraftCatalogTests) never
+        // surface as their preferred pick. SouthWestAsia and AustralAsia
+        // have no manufacturer under current data at all, so they're
+        // exempt here — see the fallback test below for their case.
+        foreach (var region in new[] { Region.NorthAmerica, Region.Europe, Region.EastAsia, Region.SouthAmerica })
         {
             var appropriate = RegionalFleet.AppropriateAircraft(region, fleet, 2015);
 

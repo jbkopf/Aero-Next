@@ -1,11 +1,16 @@
 namespace AeroNext.Core.World;
 
 /// <summary>
-/// CLAUDE.md specifies exactly 4 player-assignable home regions, matching
-/// the always-4-airlines rule. Africa is a chokepoint/bridge region (Cairo,
-/// Dakar) — reachable and strategically relevant, but never a player's home
-/// base, per M1's original note. This is the first place that distinction
-/// becomes a real, queryable thing rather than just a comment.
+/// CLAUDE.md's always-4-airlines rule is about player *slots*, not region
+/// count — since the original Asia region split into EastAsia/
+/// SouthWestAsia/AustralAsia (an investigation into Asia's ~165° of
+/// longitude sprawl, the largest of any region), there are 6 home regions
+/// for exactly 4 slots. GameSetup.CreateSeats is a real draft: humans pick
+/// any of these 6, and any slot they don't fill goes to the richest
+/// unclaimed region by RegionalEconomics.Factor — so not every home region
+/// appears in every game. Africa is a separate concept, a chokepoint/bridge
+/// region (Cairo, Dakar) — reachable and strategically relevant, but never
+/// player-assignable at all, per M1's original note.
 /// </summary>
 public static class HomeRegions
 {
@@ -17,7 +22,9 @@ public static class HomeRegions
     {
         Region.NorthAmerica,
         Region.Europe,
-        Region.Asia,
+        Region.EastAsia,
+        Region.SouthWestAsia,
+        Region.AustralAsia,
         Region.SouthAmerica,
     };
 

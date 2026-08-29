@@ -8,17 +8,24 @@ public class HomeRegionsTests
     private static string CitiesDataPath => Path.Combine(AppContext.BaseDirectory, "data", "cities.json");
 
     [Fact]
-    public void All_ContainsExactlyTheFourHomeRegions()
+    public void All_ContainsExactlyTheSixHomeRegions()
     {
+        // Asia split into three (EastAsia/SouthWestAsia/AustralAsia) once
+        // its ~165 degrees of longitude sprawl made it the clear outlier
+        // among home regions - CLAUDE.md's always-4-airlines rule is about
+        // player slots, not region count, so 6 home regions for 4 slots is
+        // a real draft (see GameSetup.CreateSeats), not a contradiction.
         Assert.Equal(
-            new[] { Region.NorthAmerica, Region.Europe, Region.Asia, Region.SouthAmerica },
+            new[] { Region.NorthAmerica, Region.Europe, Region.EastAsia, Region.SouthWestAsia, Region.AustralAsia, Region.SouthAmerica },
             HomeRegions.All);
     }
 
     [Theory]
     [InlineData(Region.NorthAmerica, true)]
     [InlineData(Region.Europe, true)]
-    [InlineData(Region.Asia, true)]
+    [InlineData(Region.EastAsia, true)]
+    [InlineData(Region.SouthWestAsia, true)]
+    [InlineData(Region.AustralAsia, true)]
     [InlineData(Region.SouthAmerica, true)]
     [InlineData(Region.Africa, false)]
     public void IsHomeRegion_MatchesExpectation(Region region, bool expected)
@@ -88,12 +95,12 @@ public class HomeRegionsTests
     {
         var shuffled = new[]
         {
-            new City("zzz", "Z", Region.Asia, 0, 0, 10, false, null),
-            new City("aaa", "A", Region.Asia, 0, 0, 10, false, null),
-            new City("mmm", "M", Region.Asia, 0, 0, 10, false, null),
+            new City("zzz", "Z", Region.EastAsia, 0, 0, 10, false, null),
+            new City("aaa", "A", Region.EastAsia, 0, 0, 10, false, null),
+            new City("mmm", "M", Region.EastAsia, 0, 0, 10, false, null),
         };
 
-        var eligible = HomeRegions.EligibleStartingCities(Region.Asia, shuffled);
+        var eligible = HomeRegions.EligibleStartingCities(Region.EastAsia, shuffled);
 
         Assert.Equal(new[] { "aaa", "mmm", "zzz" }, eligible.Select(c => c.Id));
     }
@@ -106,7 +113,7 @@ public class HomeRegionsTests
             new City("home1", "Home One", Region.Europe, 0, 0, 50, false, null),
             new City("home2", "Home Two", Region.Europe, 0, 0, 40, false, null),
             new City("gate", "Gateway", Region.Europe, 0, 0, 90, true, 3),
-            new City("other", "Other Region", Region.Asia, 0, 0, 60, false, null),
+            new City("other", "Other Region", Region.EastAsia, 0, 0, 60, false, null),
         };
 
         var eligible = HomeRegions.EligibleStartingCities(Region.Europe, cities);

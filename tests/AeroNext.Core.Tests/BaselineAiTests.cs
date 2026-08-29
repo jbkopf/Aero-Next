@@ -9,10 +9,10 @@ namespace AeroNext.Core.Tests;
 public class BaselineAiTests
 {
     private static City MakeCity(string id, double lat, double lon, int weight) =>
-        new(id, id.ToUpperInvariant(), Region.Asia, lat, lon, weight, false, null);
+        new(id, id.ToUpperInvariant(), Region.EastAsia, lat, lon, weight, false, null);
 
     private static City MakeGateway(string id, double lat, double lon, int weight, int gateCapacity = 3) =>
-        new(id, id.ToUpperInvariant(), Region.Asia, lat, lon, weight, true, gateCapacity);
+        new(id, id.ToUpperInvariant(), Region.EastAsia, lat, lon, weight, true, gateCapacity);
 
     private static readonly GravityDemandModel DemandModel = new();
     private static readonly AircraftType Aircraft = new("t", "Test", Seats: 140);

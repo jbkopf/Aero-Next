@@ -4,7 +4,9 @@ public enum Region
 {
     NorthAmerica,
     Europe,
-    Asia,
+    EastAsia,
+    SouthWestAsia,
+    AustralAsia,
     SouthAmerica,
     Africa,
 }

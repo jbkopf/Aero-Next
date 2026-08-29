@@ -16,7 +16,15 @@ public class GameSetupTests
 
         Assert.Equal(4, seats.Count);
         Assert.All(seats, s => Assert.False(s.IsHuman));
-        Assert.Equal(HomeRegions.All.OrderBy(r => r), seats.Select(s => s.HomeRegion).OrderBy(r => r));
+
+        // With 6 home regions for 4 slots, an all-AI game is a real draft
+        // by RegionalEconomics.Factor - verified against the real dataset:
+        // NorthAmerica and EastAsia are the two richest (a near-exact tie,
+        // broken alphabetically), then SouthAmerica, then Europe.
+        // SouthWestAsia and AustralAsia are the two that sit out.
+        Assert.Equal(
+            new[] { Region.Europe, Region.EastAsia, Region.NorthAmerica, Region.SouthAmerica }.OrderBy(r => r),
+            seats.Select(s => s.HomeRegion).OrderBy(r => r));
     }
 
     [Fact]
@@ -29,7 +37,7 @@ public class GameSetupTests
         // (non-gateway) city in each home region.
         Assert.Equal("atl", byRegion[Region.NorthAmerica].StartingCity.Id);
         Assert.Equal("cdg", byRegion[Region.Europe].StartingCity.Id);
-        Assert.Equal("pek", byRegion[Region.Asia].StartingCity.Id);
+        Assert.Equal("pek", byRegion[Region.EastAsia].StartingCity.Id);
         Assert.Equal("gig", byRegion[Region.SouthAmerica].StartingCity.Id);
     }
 
@@ -43,8 +51,12 @@ public class GameSetupTests
     }
 
     [Fact]
-    public void CreateSeats_FourHumans_NoAiSeats_AllRegionsPlayerClaimed()
+    public void CreateSeats_FourHumans_NoAiSeats_AllFourClaimedRegionsDistinct()
     {
+        // Only 4 of the 6 home regions get claimed here (sin/Singapore is
+        // AustralAsia) - with 6 regions for 4 slots, "all regions claimed"
+        // no longer applies; what still must hold is that all 4 humans'
+        // regions are pairwise distinct and no AI seat is needed.
         var choices = new[]
         {
             new HumanPlayerChoice("Atlas Air", "ord"),
@@ -57,7 +69,9 @@ public class GameSetupTests
 
         Assert.Equal(4, seats.Count);
         Assert.All(seats, s => Assert.True(s.IsHuman));
-        Assert.Equal(HomeRegions.All.OrderBy(r => r), seats.Select(s => s.HomeRegion).OrderBy(r => r));
+        Assert.Equal(
+            new[] { Region.NorthAmerica, Region.Europe, Region.AustralAsia, Region.SouthAmerica }.OrderBy(r => r),
+            seats.Select(s => s.HomeRegion).OrderBy(r => r));
     }
 
     [Theory]

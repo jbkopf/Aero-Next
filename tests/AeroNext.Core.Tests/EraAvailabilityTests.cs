@@ -8,7 +8,7 @@ namespace AeroNext.Core.Tests;
 public class EraAvailabilityTests
 {
     private static City MakeCity(string id, double lat, double lon, int weight) =>
-        new(id, id.ToUpperInvariant(), Region.Asia, lat, lon, weight, false, null);
+        new(id, id.ToUpperInvariant(), Region.EastAsia, lat, lon, weight, false, null);
 
     private static readonly GravityDemandModel DemandModel = new();
 
@@ -69,7 +69,7 @@ public class EraAvailabilityTests
     [Fact]
     public void QuarterEngine_NonAircraftOrders_AreNeverEraGated()
     {
-        var gateway = new City("gw", "Gateway", Region.Asia, 0, 0, 50, true, 1);
+        var gateway = new City("gw", "Gateway", Region.EastAsia, 0, 0, 50, true, 1);
         var order = new NegotiationOrder(gateway, AeroNext.Core.Money.FromDollars(1));
 
         var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { (QuarterOrder)order }, new[] { gateway }, DemandModel);

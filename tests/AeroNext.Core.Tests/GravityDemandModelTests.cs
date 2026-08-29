@@ -6,7 +6,7 @@ namespace AeroNext.Core.Tests;
 public class GravityDemandModelTests
 {
     private static City MakeCity(string id, double lat, double lon, int weight, bool isGateway = false, int? gateCapacity = null) =>
-        new(id, id.ToUpperInvariant(), Region.Asia, lat, lon, weight, isGateway, gateCapacity);
+        new(id, id.ToUpperInvariant(), Region.EastAsia, lat, lon, weight, isGateway, gateCapacity);
 
     private static City MakeCity(string id, double lat, double lon, int weight, Region region) =>
         new(id, id.ToUpperInvariant(), region, lat, lon, weight, false, null);

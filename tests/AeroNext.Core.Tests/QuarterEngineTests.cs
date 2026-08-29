@@ -8,7 +8,7 @@ namespace AeroNext.Core.Tests;
 public class QuarterEngineTests
 {
     private static City MakeCity(string id, double lat, double lon, int weight) =>
-        new(id, id.ToUpperInvariant(), Region.Asia, lat, lon, weight, false, null);
+        new(id, id.ToUpperInvariant(), Region.EastAsia, lat, lon, weight, false, null);
 
     private static readonly AircraftType Aircraft = new("t", "Test", Seats: 100);
 

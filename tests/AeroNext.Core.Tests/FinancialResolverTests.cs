@@ -11,7 +11,7 @@ namespace AeroNext.Core.Tests;
 public class FinancialResolverTests
 {
     private static City MakeCity(string id, double lat, double lon, int weight) =>
-        new(id, id.ToUpperInvariant(), Region.Asia, lat, lon, weight, false, null);
+        new(id, id.ToUpperInvariant(), Region.EastAsia, lat, lon, weight, false, null);
 
     private static readonly GravityDemandModel DemandModel = new();
 

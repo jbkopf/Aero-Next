@@ -99,17 +99,16 @@ public class CityCatalogTests
         var cities = CityCatalog.LoadFile(DataPath);
         var ids = cities.Select(c => c.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
+        // Region reassigned by the later Asia split: Beijing/Taipei are
+        // EastAsia, Mumbai/Dubai are SouthWestAsia, Kuala Lumpur is
+        // AustralAsia (grouped with Southeast Asia) - this test only
+        // locks in that the cities themselves still exist.
         Assert.Contains("pek", ids);
         Assert.Contains("bom", ids);
         Assert.Contains("dxb", ids);
         Assert.Contains("kul", ids);
         Assert.Contains("tpe", ids);
-        Assert.All(new[] { "pek", "bom", "dxb", "kul", "tpe" }, id =>
-        {
-            var city = cities.Single(c => c.Id == id);
-            Assert.Equal(Region.Asia, city.Region);
-            Assert.False(city.IsGateway);
-        });
+        Assert.All(new[] { "pek", "bom", "dxb", "kul", "tpe" }, id => Assert.False(cities.Single(c => c.Id == id).IsGateway));
     }
 
     [Fact]
@@ -144,8 +143,10 @@ public class CityCatalogTests
         // (the game this project is a spiritual successor to, per
         // CLAUDE.md) and added the clearest, best-attested gaps: Moscow
         // and Berlin (Europe), Washington and Havana (NorthAmerica), and
-        // Tehran, Manila, and Sydney (Asia - tagged for lack of a finer
-        // Middle East/Oceania region, same precedent as Dubai/Istanbul).
+        // Tehran, Manila, and Sydney (added under the old single Asia
+        // region, tagged for lack of a finer Middle East/Oceania split at
+        // the time - the later Asia split moved them to SouthWestAsia,
+        // AustralAsia, and AustralAsia respectively).
         var cities = CityCatalog.LoadFile(DataPath);
         var ids = cities.Select(c => c.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
@@ -179,9 +180,9 @@ public class CityCatalogTests
             ("kie", Region.Europe),
             ("los", Region.Africa), ("alg", Region.Africa), ("nbo", Region.Africa),
             ("add", Region.Africa),
-            ("bgw", Region.Asia), ("khi", Region.Asia), ("ccu", Region.Asia),
-            ("osa", Region.Asia), ("mel", Region.Asia), ("bne", Region.Asia),
-            ("akl", Region.Asia),
+            ("bgw", Region.SouthWestAsia), ("khi", Region.SouthWestAsia), ("ccu", Region.SouthWestAsia),
+            ("osa", Region.EastAsia), ("mel", Region.AustralAsia), ("bne", Region.AustralAsia),
+            ("akl", Region.AustralAsia),
             ("sea", Region.NorthAmerica), ("phx", Region.NorthAmerica), ("phl", Region.NorthAmerica),
         };
 
@@ -207,12 +208,13 @@ public class CityCatalogTests
         // without inventing new exclusion logic, and it's still fully
         // flyable once an airline has long-enough-range aircraft (M18
         // already found QuarterEngine never gates routes to gateways).
+        // Sydney's region became AustralAsia once Asia split.
         var cities = CityCatalog.LoadFile(DataPath);
         var sydney = cities.Single(c => c.Id == "syd");
 
         Assert.True(sydney.IsGateway);
         Assert.True(sydney.GateCapacity is > 0);
-        Assert.DoesNotContain(HomeRegions.EligibleStartingCities(Region.Asia, cities), c => c.Id == "syd");
+        Assert.DoesNotContain(HomeRegions.EligibleStartingCities(Region.AustralAsia, cities), c => c.Id == "syd");
     }
 
     [Fact]
@@ -232,11 +234,11 @@ public class CityCatalogTests
             ("kin", Region.NorthAmerica),
             ("nce", Region.Europe), ("msq", Region.Europe), ("rov", Region.Europe),
             ("tun", Region.Africa), ("tip", Region.Africa),
-            ("per", Region.Asia), ("fuk", Region.Asia), ("tas", Region.Asia),
-            ("isb", Region.Asia), ("adl", Region.Asia), ("ceb", Region.Asia),
-            ("spr", Region.Asia), ("nan", Region.Asia), ("gum", Region.Asia),
-            ("khv", Region.Asia), ("nou", Region.Asia), ("ppt", Region.Asia),
-            ("spn", Region.Asia),
+            ("per", Region.AustralAsia), ("fuk", Region.EastAsia), ("tas", Region.SouthWestAsia),
+            ("isb", Region.SouthWestAsia), ("adl", Region.AustralAsia), ("ceb", Region.AustralAsia),
+            ("spr", Region.EastAsia), ("nan", Region.AustralAsia), ("gum", Region.AustralAsia),
+            ("khv", Region.EastAsia), ("nou", Region.AustralAsia), ("ppt", Region.AustralAsia),
+            ("spn", Region.AustralAsia),
         };
 
         Assert.Equal(19, expectedByRegion.Length);
@@ -246,6 +248,26 @@ public class CityCatalogTests
             Assert.Equal(entry.Region, cities.Single(c => c.Id == entry.Id).Region);
             Assert.False(cities.Single(c => c.Id == entry.Id).IsGateway);
         });
+    }
+
+    [Fact]
+    public void LoadFile_IncludesJakarta()
+    {
+        // A real gap noticed while scoping a possible Asia region split:
+        // Indonesia had zero cities in the roster despite being the
+        // world's 4th most populous country and Southeast Asia's largest
+        // aviation market for most of the campaign's timeline. Weighted
+        // alongside Bangkok/Mumbai/Osaka (65) rather than the
+        // Manila/Taipei/Kuala Lumpur tier (55), reflecting Jakarta's own
+        // real-world scale. Landed in AustralAsia once Asia split -
+        // grouped with Southeast Asia rather than Australia/Pacific alone.
+        var cities = CityCatalog.LoadFile(DataPath);
+        var jakarta = cities.Single(c => c.Id == "cgk");
+
+        Assert.Equal("Jakarta", jakarta.Name);
+        Assert.Equal(Region.AustralAsia, jakarta.Region);
+        Assert.Equal(65, jakarta.DemandWeight);
+        Assert.False(jakarta.IsGateway);
     }
 
     [Fact]
@@ -264,9 +286,9 @@ public class CityCatalogTests
     {
         const string json = """
         [
-          { "id": "zzz", "name": "Z City", "region": "Asia", "latitude": 0, "longitude": 0, "demandWeight": 10, "isGateway": false, "gateCapacity": null },
-          { "id": "aaa", "name": "A City", "region": "Asia", "latitude": 0, "longitude": 0, "demandWeight": 10, "isGateway": false, "gateCapacity": null },
-          { "id": "mmm", "name": "M City", "region": "Asia", "latitude": 0, "longitude": 0, "demandWeight": 10, "isGateway": false, "gateCapacity": null }
+          { "id": "zzz", "name": "Z City", "region": "EastAsia", "latitude": 0, "longitude": 0, "demandWeight": 10, "isGateway": false, "gateCapacity": null },
+          { "id": "aaa", "name": "A City", "region": "EastAsia", "latitude": 0, "longitude": 0, "demandWeight": 10, "isGateway": false, "gateCapacity": null },
+          { "id": "mmm", "name": "M City", "region": "EastAsia", "latitude": 0, "longitude": 0, "demandWeight": 10, "isGateway": false, "gateCapacity": null }
         ]
         """;
 
@@ -280,8 +302,8 @@ public class CityCatalogTests
     {
         const string json = """
         [
-          { "id": "dup", "name": "First", "region": "Asia", "latitude": 0, "longitude": 0, "demandWeight": 10, "isGateway": false, "gateCapacity": null },
-          { "id": "dup", "name": "Second", "region": "Asia", "latitude": 0, "longitude": 0, "demandWeight": 10, "isGateway": false, "gateCapacity": null }
+          { "id": "dup", "name": "First", "region": "EastAsia", "latitude": 0, "longitude": 0, "demandWeight": 10, "isGateway": false, "gateCapacity": null },
+          { "id": "dup", "name": "Second", "region": "EastAsia", "latitude": 0, "longitude": 0, "demandWeight": 10, "isGateway": false, "gateCapacity": null }
         ]
         """;
 
@@ -293,7 +315,7 @@ public class CityCatalogTests
     {
         const string json = """
         [
-          { "id": "bad", "name": "Bad Gateway", "region": "Asia", "latitude": 0, "longitude": 0, "demandWeight": 10, "isGateway": true, "gateCapacity": null }
+          { "id": "bad", "name": "Bad Gateway", "region": "EastAsia", "latitude": 0, "longitude": 0, "demandWeight": 10, "isGateway": true, "gateCapacity": null }
         ]
         """;
 
@@ -305,7 +327,7 @@ public class CityCatalogTests
     {
         const string json = """
         [
-          { "id": "bad", "name": "Bad Demand", "region": "Asia", "latitude": 0, "longitude": 0, "demandWeight": 0, "isGateway": false, "gateCapacity": null }
+          { "id": "bad", "name": "Bad Demand", "region": "EastAsia", "latitude": 0, "longitude": 0, "demandWeight": 0, "isGateway": false, "gateCapacity": null }
         ]
         """;
 
@@ -329,7 +351,7 @@ public class CityCatalogTests
     {
         const string json = """
         [
-          { "id": "", "name": "No Id", "region": "Asia", "latitude": 0, "longitude": 0, "demandWeight": 10, "isGateway": false, "gateCapacity": null }
+          { "id": "", "name": "No Id", "region": "EastAsia", "latitude": 0, "longitude": 0, "demandWeight": 10, "isGateway": false, "gateCapacity": null }
         ]
         """;
 
@@ -341,7 +363,7 @@ public class CityCatalogTests
     {
         const string json = """
         [
-          { "id": "bad", "name": "  ", "region": "Asia", "latitude": 0, "longitude": 0, "demandWeight": 10, "isGateway": false, "gateCapacity": null }
+          { "id": "bad", "name": "  ", "region": "EastAsia", "latitude": 0, "longitude": 0, "demandWeight": 10, "isGateway": false, "gateCapacity": null }
         ]
         """;
 

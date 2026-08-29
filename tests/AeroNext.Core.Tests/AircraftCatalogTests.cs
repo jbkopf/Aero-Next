@@ -203,13 +203,16 @@ public class AircraftCatalogTests
         // M16 could only assert this for NorthAmerica/Europe — Asia and
         // South America had no indigenous manufacturer that early in the
         // campaign. The later aircraft-catalog expansion (Embraer for
-        // SouthAmerica, 1985; COMAC for Asia, 2008) closes that gap for
-        // real: every home region now has its own manufactured type
-        // *eventually*, even though (per RegionalFleetTests) neither has
-        // one at the 1955 campaign start.
+        // SouthAmerica, 1985; COMAC for Asia/EastAsia, 2008) closes that
+        // gap for real: NorthAmerica/Europe/EastAsia/SouthAmerica each have
+        // their own manufactured type *eventually*, even though (per
+        // RegionalFleetTests) none of them has one at the 1955 campaign
+        // start. SouthWestAsia and AustralAsia (post Asia-split) have no
+        // manufacturer under current data at all — an honest reflection of
+        // real aviation history, not a gap this test expects closed.
         var fleet = AircraftCatalog.LoadFile(DataPath);
 
-        foreach (var region in HomeRegions.All)
+        foreach (var region in new[] { Region.NorthAmerica, Region.Europe, Region.EastAsia, Region.SouthAmerica })
         {
             Assert.Contains(fleet, a => a.ManufacturerRegion == region);
         }

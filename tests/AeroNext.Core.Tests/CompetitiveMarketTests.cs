@@ -11,7 +11,7 @@ public class CompetitiveMarketTests
     // scenarios where combined competitor capacity exceeds it (the regime
     // where competition actually has something to redistribute).
     private static City MakeCity(string id, double lat, double lon, int weight) =>
-        new(id, id.ToUpperInvariant(), Region.Asia, lat, lon, weight, false, null);
+        new(id, id.ToUpperInvariant(), Region.EastAsia, lat, lon, weight, false, null);
 
     [Fact]
     public void Resolve_SoleCarrier_GetsFullMonopolyCarried_UnaffectedByNonCompetitor()

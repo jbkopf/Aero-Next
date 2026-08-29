@@ -50,10 +50,10 @@ public class StartingConditionsTests
     public void Resolve_Cash_ScalesWithRegionalEconomicFactor()
     {
         var cities = RealCities;
-        var seat = new AirlineSeat("Test", IsHuman: true, Region.Asia, HomeRegions.EligibleStartingCities(Region.Asia, cities)[0]);
+        var seat = new AirlineSeat("Test", IsHuman: true, Region.EastAsia, HomeRegions.EligibleStartingCities(Region.EastAsia, cities)[0]);
 
         var conditions = StartingConditionsResolver.Resolve(seat, cities, RealFleet);
-        var expectedFactor = RegionalEconomics.Factor(Region.Asia, cities);
+        var expectedFactor = RegionalEconomics.Factor(Region.EastAsia, cities);
 
         var expectedCash = Money.FromDollars((long)Math.Round(
             StartingConditionsResolver.BaseStartingCashDollars * expectedFactor, MidpointRounding.AwayFromZero));

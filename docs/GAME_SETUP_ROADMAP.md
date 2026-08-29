@@ -86,6 +86,20 @@ The mechanism this milestone built (throwing for Africa, reading straight
 from `cities.json`) needed no changes at all — it was already
 data-driven exactly as designed.
 
+**Updated a second time, after the Asia region split** (see "Kept in mind"
+below): `HomeRegions.All` grows from 4 to 6 (NorthAmerica, Europe, EastAsia,
+SouthWestAsia, AustralAsia, SouthAmerica) — Asia's ~165° of longitude sprawl
+(Baghdad to French Polynesia) made it the clear geographic outlier among
+home regions once it was actually measured. This is the first real test of
+the "one home region per player" framing in this milestone's own opening
+paragraph: CLAUDE.md's exactly-4-airlines rule turns out to be about player
+*slots*, not region count, since `GameSetup.CreateSeats` (M17) now runs a
+genuine draft across more regions than there are seats — see M17's own
+update note. `HomeRegions.EligibleStartingCities`/`IsHomeRegion` needed zero
+logic changes; both are already fully data/enum-driven, exactly as this
+milestone's original "done" note said. Africa's exclusion is unaffected —
+still never a home region, still throws.
+
 ---
 
 ## M16 — Regional economics and region-appropriate aircraft ✅
@@ -288,6 +302,25 @@ are, again, invisible to this calculation** — same structural boundary as
 the major-tier round, holding steady as Africa keeps gaining cities every
 round without ever entering `HomeRegions.All`.
 
+**Updated an eighth time, after the Asia region split — the biggest
+structural change to this calculation since it was written, not just a new
+round of cities.** Asia's 36 cities (35 plus the just-added Jakarta) split
+into EastAsia (8 eligible, gateways Tokyo/Hong Kong), SouthWestAsia (9
+eligible, no gateway), and AustralAsia (16 eligible, gateway Sydney — this
+absorbed Southeast Asia, not just Australia/NZ/Pacific, specifically to
+keep its factor from being unplayably low; see "Kept in mind" below for the
+full reasoning). Because this is a pure repartition — same 78 eligible
+cities, same total weight, just regrouped — **the global average is
+mathematically unchanged (50.90)**, and only the six regions' own averages
+against it moved: NorthAmerica 1.117, EastAsia 1.117 (a near-exact tie with
+NorthAmerica, both computed independently from real data, not tuned to
+match), SouthAmerica 1.081, Europe 1.027, SouthWestAsia 1.004, AustralAsia
+**0.755 — the first region in this series measurably below what SouthAmerica
+or Asia ever fell to**, confirmed directly rather than assumed from the
+pre-split estimate. All six values matched the hand-computed prediction
+from planning this split exactly, verified against the real dataset via
+`AeroNext.Sim`'s M16 output, not just trusted.
+
 `AircraftType` gained `Manufacturer` (string) and `ManufacturerRegion`
 (`Region?`), both defaulting empty/null like every other generously-
 defaulted field on this record. `data/aircraft.json` now tags all 5
@@ -389,6 +422,38 @@ the AI fill-in pass ran. 22 new tests, 100% line/branch coverage on
 configurations plus one deliberate rejection (two humans both reaching for
 NorthAmerica).
 
+**Updated after the Asia region split — the one part of M15-M19 that
+actually had to change algorithmically, not just re-measure.** With 6 home
+regions and a still-hard 4-player cap, "one seat per region, always"
+(this milestone's original design) no longer makes sense — `CreateSeats`
+would try to build 6 seats. Rewritten as a genuine draft: human seats are
+validated exactly as before (region/city/name uniqueness unchanged — a
+region can still be claimed by at most one airline), then whatever slots
+remain go to the *richest unclaimed* regions by `RegionalEconomics.Factor`
+— reusing that function directly rather than inventing a second "how rich
+is this region" concept, descending, tied-broken by region name (same
+`StringComparer.Ordinal` pattern used throughout this codebase for
+determinism). The final seat list is still sorted by region name before
+returning, so output shape is stable even though not every region appears
+in every game.
+
+**Verified by hand before writing any code, then confirmed against real
+data:** in an all-AI (0-human) game, NorthAmerica and EastAsia are the two
+richest regions (a near-exact tie, 1.117 each, broken alphabetically —
+EastAsia wins), then SouthAmerica, then Europe — **SouthWestAsia and
+AustralAsia are the two that sit out.** This is a clean, sensible-feeling
+outcome: the 4 auto-filled regions are almost exactly today's original 4,
+with EastAsia standing in for old Asia's strong half. Confirmed exactly via
+`GameSetupTests.CreateSeats_ZeroHumans_AllFourSeatsAreDeterministicAi`
+against the real dataset — the hand-verified prediction from planning this
+change matched on the first run, no adjustment needed.
+
+294 tests total (region-specific `GameSetupTests`/`HomeRegionsTests`
+assertions rewritten rather than just renamed, since "all seats' regions ==
+`HomeRegions.All`" is no longer a valid invariant with 6 regions and 4
+seats), 100% line/branch coverage maintained on `GameSetup.cs`; overall
+project coverage unchanged at 99.78%/99.64%.
+
 ---
 
 ## M18 — Deriving starting conditions from starting city ✅
@@ -460,8 +525,11 @@ actually triggers) rather than trusting the real dataset alone to exercise
 that branch.
 
 **Full real-data sweep, not sampled:** the "Done when" check runs for
-every real eligible starting city across all 4 home regions (17 at the
-time; 77 now, after seven expansion rounds (SouthAmerica, Europe, Asia,
+every real eligible starting city across all home regions (17 at the
+time, across 4 regions; 78 now, across 6 — the Asia region split didn't
+change the total (it's a pure repartition of the same cities, plus the
+separately-added Jakarta), only how many regions that total is spread
+across) — after seven expansion rounds (SouthAmerica, Europe, Asia,
 NorthAmerica, the Aerobiz Supersonic cross-reference, and its major- and
 minor-tier follow-ups) — the test itself iterates
 `HomeRegions.EligibleStartingCities` directly rather than a hardcoded
@@ -626,6 +694,22 @@ byte-identical to the previous measurement — confirmed by temporarily
 reverting `cities.json` to its pre-round state and re-running the demo
 side by side, not just eyeballed. Starting *cash* moved for every seat
 regardless, following M16's factor shifts, same as every round before it.
+
+**A tenth re-measurement, after the Asia region split: every single demo
+seat's net income is byte-identical to the previous measurement, across
+all three configurations.** Beijing/Paris/Atlanta/Rio de Janeiro (the
+0-human AI picks), Toronto (the 1-human demo's hardcoded NorthAmerica
+seat), and Singapore/Paris/Chicago/Buenos Aires (the 4-human demo) all
+still have the exact same real-world neighbors they always did — the split
+only renamed which `Region` value those neighbors carry, it didn't move
+any city or change any distance, so `StartingConditionsResolver`'s
+smallest-range-first search picks identically to before. **Only starting
+cash moved, for every seat, following M16's new 6-region factor
+recalculation** — e.g. the former "Asia Air" (now "EastAsia Air") seat's
+cash rose from $17.8M to $22.1M, since EastAsia's factor (1.117) is
+meaningfully higher than old Asia's post-split-adjacent 0.903. The
+-$122K/-$234K net income range holds completely unchanged for the first
+time since the seventh re-measurement.
 
 **The `BaselineAi` non-differentiation note plays out exactly as
 predicted:** the 0-human demo's 4 AI seats now start with genuinely
@@ -1284,3 +1368,99 @@ bar at the top.
   arc**: all 43 genuine gaps found against the user-supplied complete
   89-city list are now in the roster, split major/minor exactly as the
   user directed rather than by region or all at once.
+
+- **The Asia region split: EastAsia, SouthWestAsia, AustralAsia — done,
+  a structural change rather than a city-count round, outside this
+  roadmap's own milestones.** Prompted by a direct question: how big is
+  Asia, actually? Measured, not assumed: ~165° of longitude (Baghdad to
+  French Polynesia) and a latitude range from Khabarovsk to Melbourne —
+  by far the largest and least coherent home region, mixing the Middle
+  East, South Asia, East Asia, and (for lack of an existing Oceania
+  region) all of Australia/NZ/the Pacific. Jakarta (Indonesia) was added
+  first, closing a real gap — zero Indonesian or Malaysian cities existed
+  despite Indonesia being the world's 4th most populous country — bringing
+  the pre-split total to 36 cities. `data/cities.json` retagged all 36:
+  - **EastAsia** (8 eligible + gateways Tokyo/Hong Kong): Beijing,
+    Shanghai, Seoul, Taipei, Osaka, Fukuoka, Sapporo, Khabarovsk — a
+    tight, historically coherent "Northeast Asia" bloc.
+  - **SouthWestAsia** (9 eligible, no gateway): Baghdad, Tehran, Dubai,
+    Karachi, Tashkent, Mumbai, Islamabad, Delhi, Calcutta.
+  - **AustralAsia** (16 eligible + gateway Sydney): Perth, Adelaide,
+    Melbourne, Brisbane, Auckland, Noumea, Nandi, Papeete, Guam, Saipan,
+    plus Bangkok, Kuala Lumpur, Singapore, Jakarta, Manila, Cebu —
+    Southeast Asia deliberately folded in here rather than left with
+    East Asia, specifically because an Australia/NZ/Pacific-only region
+    measured out to a near-unplayable 0.532 economic factor; with
+    Southeast Asia included it's 0.755 — still the weakest of the six,
+    knowingly shipped that way rather than papered over (see below).
+
+  **Connectivity re-checked with the same rigor the Sydney regression
+  demanded, not assumed to be fine because the old data passed.** Every
+  eligible city in all three new regions has an in-range, positive-demand
+  same-region neighbor for a real 1955 aircraft — the one genuine edge
+  case, Osaka, has a *closer* city (Tokyo, 400km) that's a gateway and so
+  doesn't count; its real nearest eligible neighbor is Fukuoka (485km),
+  still comfortably in range. Confirmed by the real test suite, not just
+  the manual distance check that found it.
+
+  **`GameSetup.CreateSeats` needed a genuine algorithm change, not just a
+  data update — the one part of this split that touches M15-M19's actual
+  mechanics.** With 6 home regions and CLAUDE.md's still-hard 4-player cap,
+  "one seat per region, always" no longer holds. Rewritten as a real draft:
+  humans claim any of the 6 regions they like; whatever slots remain go to
+  the richest *unclaimed* regions by `RegionalEconomics.Factor` (reusing
+  the existing function, not a second "richness" concept), tie-broken by
+  region name. Hand-verified before writing any code, then confirmed
+  against real data on the first run: NorthAmerica and EastAsia are a
+  near-exact tie for richest (1.117 each), then SouthAmerica (1.081), then
+  Europe (1.027) — **SouthWestAsia and AustralAsia are the two regions
+  that sit out an all-AI game**, a clean outcome since the 4 auto-filled
+  regions are almost exactly today's original 4, with EastAsia standing in
+  for old Asia's strong half.
+
+  **A real, measured consequence for `RegionalEconomics.Factor`, not
+  just a relabeling:** since this is a pure repartition (same 78 eligible
+  cities, same total weight, just regrouped), the *global* average is
+  mathematically unchanged (50.90) — only the six regions' own averages
+  against it moved. AustralAsia's 0.755 is the lowest this series has ever
+  measured for any region, shipped deliberately rather than tuned away;
+  see M16's own update note for the full arithmetic.
+
+  **150-game QA harness sweep at full scale (244 quarters) passed cleanly
+  — 150/150, 0 violations, 0 crashes — and surfaced a real, unpredicted
+  finding.** Bankruptcy went from 95-100% per region (pre-split) to a flat
+  100% across all six regions post-split — introducing more, generally
+  weaker regions into `BaselineAi`'s region-blind global demand search
+  appears to have intensified competition for everyone, not just the new
+  regions. More strikingly: **AustralAsia, the weakest-factor region,
+  posted the best average final cash of all six** (-$1.56M vs. -$2.00M to
+  -$2.80M elsewhere) and out-won Europe and SouthWestAsia on win count,
+  while **SouthAmerica — despite being drafted often (121 of 600 seats) —
+  had the worst average cash and just 2 wins out of 121.** Same
+  "loses least badly, not thrives" pattern this session already found for
+  SouthAmerica pre-split, now showing up for AustralAsia too. Not acted
+  on here — `BaselineAi` is a deliberately weak, non-strategic opponent,
+  so this is a data point about the new starting-condition asymmetry, not
+  a verdict on whether the split is "fair."
+
+  **Explicitly deferred, not forgotten:** SouthWestAsia has no gateway of
+  its own (every other home region has at least one) — Dubai is the
+  obvious real-world candidate, but designating it removes it from the
+  eligible-city average per M16's own rule, a real tradeoff not resolved
+  here. AustralAsia's 0.755 factor is shipped as-is, not tuned toward
+  parity. Both are known follow-ups, not oversights.
+
+  Test changes: `Region.Asia` retired from the enum entirely, replaced by
+  `Region.EastAsia`/`SouthWestAsia`/`AustralAsia`; every real assertion
+  about specific cities' regions updated to match (`CityCatalogTests`,
+  `HomeRegionsTests`, `GameSetupTests`, `RegionalFleetTests`,
+  `AircraftCatalogTests`), and ~30 incidental placeholder usages (tests
+  that just needed *some* valid region for a synthetic city fixture)
+  mechanically renamed to `Region.EastAsia`. `RegionalFleetTests`/
+  `AircraftCatalogTests`' "every region eventually gets its own
+  manufacturer" tests were narrowed to the four regions where that's
+  actually true (NorthAmerica, Europe, EastAsia, SouthAmerica) —
+  SouthWestAsia and AustralAsia never get one under current data, an
+  honest reflection of real aviation history, not a gap to close. 294
+  tests total, 0 failures; coverage holds at 99.78%/99.64%, no new gaps
+  from the `GameSetup.CreateSeats` rewrite.

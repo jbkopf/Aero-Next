@@ -810,6 +810,29 @@ didn't move). `AeroNext.Sim`'s checkpoint list rewritten a seventh time
 (1, 15, 34, 52, 121, 244). 150-game QA harness sweep confirms correctness
 at this scale (0 violations), same as every round before it.
 
+**Updated a ninth time, after adding Jakarta — a single-city add that
+landed more informally than a full round (added on request, verification
+explicitly deferred at the time in favor of investigating the Asia region
+split), re-measured properly here before committing.** One new 65-weight
+city in a pool this size turned out to move the trajectory more than any
+single city has before: peak **quarter 34 (1963) → quarter 25 (1961):
+$34,903,916.29**, and bankruptcy **quarter 52 (1967) → quarter 43 (1965)**,
+frozen at 53 routes, -$1,924,383.83. Both moved meaningfully earlier —
+`BaselineAi.FindBestUnservedPair` searches every city pair in the world for
+its single best move regardless of region, so one new high-enough-demand
+city can reshuffle the whole symmetric campaign's early growth curve, not
+just add a marginal option. A reminder that "just one city" isn't a safe
+assumption to skip verification on — this is exactly the scenario the
+session's own "measure every round, including small ones" rule exists for.
+`AeroNext.Sim`'s checkpoint list rewritten an eighth time (1, 15, 25, 43,
+121, 244). The Asia region split itself (EastAsia/SouthWestAsia/AustralAsia
+replacing Region.Asia) touches none of M13's own logic — this campaign
+loop uses flat, symmetric starting conditions for all 4 airlines and never
+calls `GameSetup`/`HomeRegions` at all, so region reclassification alone
+doesn't move any of these figures; only Jakarta, a genuinely new city, did.
+150-game QA harness sweep confirms correctness at this scale (150/150, 0
+violations, 0 crashes).
+
 **Chokepoint relevance shift, confirmed directly:** the campaign prints
 whether the era's longest-range available aircraft can fly JFK-LHR
 nonstop. Quarter 1 (1955): "Lockheed Constellation still needs a Gander

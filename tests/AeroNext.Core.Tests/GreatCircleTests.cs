@@ -8,7 +8,7 @@ public class GreatCircleTests
     [Fact]
     public void DistanceKm_SameCity_IsZero()
     {
-        var city = new City("a", "A", Region.Asia, 10, 20, 10, false, null);
+        var city = new City("a", "A", Region.EastAsia, 10, 20, 10, false, null);
 
         Assert.Equal(0, GreatCircle.DistanceKm(city, city), precision: 6);
     }
@@ -16,7 +16,7 @@ public class GreatCircleTests
     [Fact]
     public void DistanceKm_IsSymmetric()
     {
-        var a = new City("a", "A", Region.Asia, 40.6413, -73.7781, 10, false, null);
+        var a = new City("a", "A", Region.EastAsia, 40.6413, -73.7781, 10, false, null);
         var b = new City("b", "B", Region.Europe, 51.4700, -0.4543, 10, false, null);
 
         Assert.Equal(GreatCircle.DistanceKm(a, b), GreatCircle.DistanceKm(b, a), precision: 6);

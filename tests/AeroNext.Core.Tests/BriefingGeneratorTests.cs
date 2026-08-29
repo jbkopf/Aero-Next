@@ -9,7 +9,7 @@ namespace AeroNext.Core.Tests;
 public class BriefingGeneratorTests
 {
     private static City MakeCity(string id, double lat, double lon, int weight) =>
-        new(id, id.ToUpperInvariant(), Region.Asia, lat, lon, weight, false, null);
+        new(id, id.ToUpperInvariant(), Region.EastAsia, lat, lon, weight, false, null);
 
     private static readonly GravityDemandModel DemandModel = new();
     private static readonly AircraftType Aircraft = new("t", "Test", Seats: 100);
@@ -132,7 +132,7 @@ public class BriefingGeneratorTests
     {
         // A contested order (no aircraft, no range concept) rejected purely
         // for budget must never be mistaken for an out-of-range rejection.
-        var gateway = new City("gw", "Gateway", Region.Asia, 0, 0, 50, true, 1);
+        var gateway = new City("gw", "Gateway", Region.EastAsia, 0, 0, 50, true, 1);
         var orders = new QuarterOrder[]
         {
             new NegotiationOrder(gateway, Money.FromDollars(1)),

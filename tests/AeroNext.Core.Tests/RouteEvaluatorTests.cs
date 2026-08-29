@@ -7,7 +7,7 @@ namespace AeroNext.Core.Tests;
 public class RouteEvaluatorTests
 {
     private static City MakeCity(string id, double lat, double lon, int weight) =>
-        new(id, id.ToUpperInvariant(), Region.Asia, lat, lon, weight, false, null);
+        new(id, id.ToUpperInvariant(), Region.EastAsia, lat, lon, weight, false, null);
 
     [Fact]
     public void Route_SeatsPerQuarter_MultipliesSeatsByRoundTripsByTwoByThirteenWeeks()

@@ -550,10 +550,10 @@ string ChokepointStatus(int year)
 }
 
 // Chosen to capture the actual arc found by running this: a mild early
-// dip, a peak at quarter 34 ($34.3M, 1963), then bankruptcy at
-// quarter 52 (1967) - see docs/GAME_SETUP_ROADMAP.md's city-expansion
+// dip, a peak at quarter 25 ($34.9M, 1961), then bankruptcy at
+// quarter 43 (1965) - see docs/GAME_SETUP_ROADMAP.md's city-expansion
 // notes for how this compares to prior rounds - not evenly spaced.
-var checkpoints = new HashSet<int> { 1, 15, 34, 52, 121, campaignQuarters };
+var checkpoints = new HashSet<int> { 1, 15, 25, 43, 121, campaignQuarters };
 
 for (var q = 1; q <= campaignQuarters; q++)
 {
