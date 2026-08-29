@@ -6,9 +6,10 @@ namespace AeroNext.QaHarness;
 
 /// <summary>
 /// Generates a random-but-valid human player configuration — 0-4 seats,
-/// each with a distinct home region and an eligible starting city within
-/// it — so the QA sweep exercises the real breadth of what
-/// GameSetup.CreateSeats can be asked to validate, not just the three
+/// each with an independently-chosen home region (regions are no longer
+/// exclusive, so two seats can land in the same one — only starting city
+/// has to stay distinct) — so the QA sweep exercises the real breadth of
+/// what GameSetup.CreateSeats can be asked to validate, not just the three
 /// hand-picked configurations AeroNext.Sim's M19 demo shows. Driven by a
 /// SimRng, per CLAUDE.md's determinism rules, so a failing game is always
 /// reproducible from its seed alone.
@@ -19,19 +20,18 @@ public static class GameConfigGenerator
     {
         var humanCount = rng.Next(0, 5); // 0-4 inclusive
 
-        var shuffledRegions = HomeRegions.All
-            .Select(r => (Region: r, Key: rng.NextDouble()))
-            .OrderBy(x => x.Key)
-            .Select(x => x.Region)
-            .Take(humanCount)
-            .ToList();
-
         var choices = new List<HumanPlayerChoice>();
+        var claimedCityIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        for (var i = 0; i < shuffledRegions.Count; i++)
+        for (var i = 0; i < humanCount; i++)
         {
-            var eligible = HomeRegions.EligibleStartingCities(shuffledRegions[i], allCities);
+            var region = HomeRegions.All[rng.Next(0, HomeRegions.All.Count)];
+            var eligible = HomeRegions.EligibleStartingCities(region, allCities)
+                .Where(c => !claimedCityIds.Contains(c.Id))
+                .ToList();
+
             var city = eligible[rng.Next(0, eligible.Count)];
+            claimedCityIds.Add(city.Id);
 
             choices.Add(new HumanPlayerChoice($"QA Human {i + 1}", city.Id));
         }

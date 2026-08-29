@@ -6,14 +6,18 @@ namespace AeroNext.QaHarness;
 
 /// <summary>
 /// Builds 4 AirlineSeats with an independently random home region per seat —
-/// duplicates allowed. GameSetup.CreateSeats is the only place "each home
-/// region claimed by at most one airline" is enforced (its
-/// humanSeatsByRegion.TryAdd throws on a repeat); AirlineSeat itself carries
-/// no such invariant, so bypassing GameSetup here needs no change to
-/// AeroNext.Core at all. Exists to answer one QA question: is a region's
-/// measured disadvantage intrinsic to that region's own economics, or an
-/// artifact of always facing exactly one rival per other region? Not a
-/// configuration real gameplay (GameSetup/M15-M17) can ever produce.
+/// duplicates allowed, same as real gameplay now permits (see GameSetup's
+/// same-region change). What still makes this different from a real game:
+/// GameSetup.CreateSeats' AI-fill always avoids regions a human already
+/// claimed and picks the richest one first; this generator does neither —
+/// every one of the 4 seats is independently random, with no richness bias
+/// and no avoidance of a region (or, rarely, a city) another seat already
+/// landed on. A same-city collision is possible in principle (low odds
+/// given how few regions are small) and would be a genuine invariant
+/// violation if it happened — FullGameRunner checks for it, not this
+/// generator. Exists to answer one QA question: is a region's measured
+/// disadvantage intrinsic to that region's own economics, or an artifact
+/// of GameSetup's own richness-based AI-fill logic?
 /// </summary>
 public static class UnconstrainedSeatGenerator
 {

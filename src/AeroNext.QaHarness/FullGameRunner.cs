@@ -44,19 +44,16 @@ public static class FullGameRunner
 
     /// <param name="seats">
     /// The 4 finalized airline seats to run. Normally built via
-    /// GameConfigGenerator + GameSetup.CreateSeats (one per home region,
-    /// per M15); the unconstrained-regions QA mode builds these a different
-    /// way (see UnconstrainedSeatGenerator) — this method itself has no
-    /// opinion on how seats were produced.
-    /// </param>
-    /// <param name="distinctRegionsExpected">
-    /// Whether "each seat has a different home region" should be checked as
-    /// an invariant. True for real GameSetup-produced seats; false for the
-    /// unconstrained-regions QA mode, where duplicate regions are the point.
+    /// GameConfigGenerator + GameSetup.CreateSeats; the unconstrained-regions
+    /// QA mode builds these a different way (see UnconstrainedSeatGenerator)
+    /// — this method itself has no opinion on how seats were produced.
+    /// Regions are not required to be distinct across seats (real games
+    /// allow sharing a home region since the same-region change) — only
+    /// airline names and starting cities are checked below.
     /// </param>
     public static FullGameResult Run(
         int gameIndex, int configSeed, int campaignSeed, int quarters,
-        IReadOnlyList<AirlineSeat> seats, bool distinctRegionsExpected,
+        IReadOnlyList<AirlineSeat> seats,
         IReadOnlyList<City> cities, IReadOnlyList<AircraftType> fleetCatalog, IReadOnlyList<DemandGrowthPoint> growthSchedule)
     {
         var violations = new List<GameViolation>();
@@ -69,9 +66,9 @@ public static class FullGameRunner
             violations.Add(new GameViolation(0, "-", "Seats did not have 4 distinct airline names."));
         }
 
-        if (distinctRegionsExpected && seats.Select(s => s.HomeRegion).Distinct().Count() != 4)
+        if (seats.Select(s => s.StartingCity.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count() != seats.Count)
         {
-            violations.Add(new GameViolation(0, "-", "GameSetup did not produce 4 seats with distinct regions."));
+            violations.Add(new GameViolation(0, "-", "Seats did not have distinct starting cities."));
         }
 
         var conditionsByName = seats.ToDictionary(s => s.AirlineName, s => StartingConditionsResolver.Resolve(s, cities, fleetCatalog));

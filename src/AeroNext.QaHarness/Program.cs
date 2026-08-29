@@ -13,11 +13,15 @@ using AeroNext.QaHarness;
 //
 // Usage: dotnet run --project src/AeroNext.QaHarness [--games N] [--quarters N] [--seed N] [--unconstrained-regions]
 //
-// --unconstrained-regions swaps GameSetup.CreateSeats (which enforces "each
-// home region claimed by at most one airline") for UnconstrainedSeatGenerator
-// (independent random region per seat, duplicates allowed) - a QA-only
-// question ("is a region's disadvantage intrinsic, or just an artifact of
-// always facing exactly one same-region rival"), not a real game
+// Regions aren't exclusive in GameSetup.CreateSeats any more (a player can
+// share a home region with a rival), but its AI-fill logic still always
+// avoids regions already claimed, richest-unclaimed-first - so the normal
+// sweep never puts an AI seat in a shared region, only humans can create
+// that. --unconstrained-regions swaps GameSetup.CreateSeats entirely for
+// UnconstrainedSeatGenerator (every one of the 4 seats independently
+// random, no richness bias, no avoiding claimed regions at all) - isolates
+// "is a region's disadvantage intrinsic, or an artifact of GameSetup's own
+// richness-based AI-fill logic," a QA-only question, not a real game
 // configuration.
 var games = 100;
 var quarters = 244; // the full 1955-2015 campaign, matching M13
@@ -57,7 +61,7 @@ for (var i = 0; i < games; i++)
             ? UnconstrainedSeatGenerator.Generate(configRng, cities)
             : GameSetup.CreateSeats(GameConfigGenerator.Generate(configRng, cities), cities);
 
-        var result = FullGameRunner.Run(i, configSeed, campaignSeed, quarters, seats, distinctRegionsExpected: !unconstrainedRegions, cities, fleetCatalog, growthSchedule);
+        var result = FullGameRunner.Run(i, configSeed, campaignSeed, quarters, seats, cities, fleetCatalog, growthSchedule);
         results.Add(result);
 
         if (!result.Success)
