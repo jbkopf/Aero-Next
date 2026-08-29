@@ -778,6 +778,22 @@ way — bankruptcy still happens, just on a different schedule depending on
 what the map actually contains. 150-game QA harness sweep confirms
 correctness still holds (0 violations).
 
+**Updated a seventh time, after the user supplied Aerobiz Supersonic's
+actual, complete city list** (the sixth update above had to work from
+incomplete secondary sources, since the game's own wiki 402'd on every
+fetch attempt) **and the resulting major-tier round — 24 new cities
+across four regions at once, the biggest single round in this series by
+a wide margin.** Re-measured directly: peak **quarter 35 (1963): $34.6M**
+and bankruptcy **quarter 52 (1967)**, frozen at 52 routes and
+-$185,275.06. `AeroNext.Sim`'s checkpoint list rewritten a sixth time
+(1, 15, 35, 52, 121, 244). Both figures landed *between* the two most
+recent rounds' numbers (peak: $24.6M → $34.6M → still well below the
+four-round-streak's $82.0M high; bankruptcy: quarter 55 → 52, moving
+earlier again but not dramatically) — consistent with the "no fixed
+law" reading the previous update already settled on, not a new pattern
+worth naming. 150-game QA harness sweep confirms correctness at this
+scale (0 violations), same as every round before it.
+
 **Chokepoint relevance shift, confirmed directly:** the campaign prints
 whether the era's longest-range available aircraft can fly JFK-LHR
 nonstop. Quarter 1 (1955): "Lockheed Constellation still needs a Gander

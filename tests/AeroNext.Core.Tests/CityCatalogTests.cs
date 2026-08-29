@@ -159,6 +159,41 @@ public class CityCatalogTests
     }
 
     [Fact]
+    public void LoadFile_IncludesAerobizSupersonicMajorTierCities()
+    {
+        // The user supplied Aerobiz Supersonic's actual, complete city
+        // list (the earlier round's cross-reference had to work from
+        // incomplete secondary sources - the game's own wiki 402'd on
+        // every fetch attempt). Comparing the full list against the
+        // roster found 43 genuine gaps; this round adds the 24
+        // clearly-major ones, split from the ~19 smaller/chokepoint-tier
+        // ones by explicit user direction (major first, minor later).
+        var cities = CityCatalog.LoadFile(DataPath);
+        var ids = cities.Select(c => c.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var expectedByRegion = new (string Id, Region Region)[]
+        {
+            ("man", Region.Europe), ("bru", Region.Europe), ("mil", Region.Europe),
+            ("cph", Region.Europe), ("sto", Region.Europe), ("vie", Region.Europe),
+            ("hel", Region.Europe), ("osl", Region.Europe), ("ath", Region.Europe),
+            ("kie", Region.Europe),
+            ("los", Region.Africa), ("alg", Region.Africa), ("nbo", Region.Africa),
+            ("add", Region.Africa),
+            ("bgw", Region.Asia), ("khi", Region.Asia), ("ccu", Region.Asia),
+            ("osa", Region.Asia), ("mel", Region.Asia), ("bne", Region.Asia),
+            ("akl", Region.Asia),
+            ("sea", Region.NorthAmerica), ("phx", Region.NorthAmerica), ("phl", Region.NorthAmerica),
+        };
+
+        Assert.Equal(24, expectedByRegion.Length);
+        Assert.All(expectedByRegion, entry =>
+        {
+            Assert.Contains(entry.Id, ids);
+            Assert.Equal(entry.Region, cities.Single(c => c.Id == entry.Id).Region);
+        });
+    }
+
+    [Fact]
     public void Sydney_IsAGateway_NotEligibleStartingCity()
     {
         // A real regression this addition surfaced: Sydney is ~7,000 km
