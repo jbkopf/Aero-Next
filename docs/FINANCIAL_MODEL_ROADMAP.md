@@ -500,7 +500,21 @@ expected for a purely additive mechanism nothing yet calls.
 
 ---
 
-## M28 — Landing rights become a real cash commitment, plus relinquishing a slot
+## M28 — Landing rights become a real cash commitment, plus relinquishing a slot ✅
+
+**Reconciled against M33 (this text predates it).** When this milestone
+was first sketched, `LandingRightsBoard` tracked only a city-wide
+`SlotsGranted` total — nothing recorded which airline held what, so
+"relinquish a slot" had no real state to act on yet. M33 built exactly
+that missing piece as a side effect of gate-scarcity enforcement:
+per-airline `SlotsHeld`, and `LandingRightsBoard.AvailableSlotsByCity`
+(held minus what current routes already occupy, computed fresh from live
+`AircraftCount` every call). Relinquishment turns out to need almost none
+of its own new infrastructure — it's built almost entirely on what M33
+already shipped. The two halves of this milestone remain independent of
+each other and can ship separately if useful.
+
+### Part 1 — real cash commitment (unaffected by M33, unchanged from the original sketch)
 
 **The gap:** `NegotiationOrder.Bid` is only ever used as `Bid.Cents ×
 Standing` to rank bidders — never deducted from cash. CLAUDE.md's own
@@ -508,27 +522,124 @@ language ("commit cash + diplomatic effort," "you commit blind") clearly
 intends the bid to be a real, at-risk expenditure, not a scorekeeping
 number with no consequence.
 
-**Proposed shape:** deduct `Bid` from cash **at submission**, regardless
-of outcome — matching "you commit blind" precisely, and consistent with
-the already-built "losers get partial payoff" via rising Standing (that
+**Shape:** deduct `Bid` from cash **at submission**, regardless of
+outcome — matching "you commit blind" precisely, and consistent with the
+already-built "losers get partial payoff" via rising Standing (that
 mechanic only makes sense as compensation for a *real* sunk cost; today
-it's compensating for nothing). Per the cross-cutting rule above, a bid
-that would take cash negative is rejected outright at submission.
+it's compensating for nothing). Mechanically, this is a near-exact repeat
+of M26's `AircraftOrder` affordability pattern: `QuarterEngine` already
+has `availableCash`/`cashSpent` machinery from M26 — a `NegotiationOrder`
+just becomes a second order type gated by it (reject outright if
+`cashSpent + Bid > availableCash`, per the cross-cutting affordability
+rule everywhere else already follows). `FinancialResolver` gains a new
+`NegotiationBidCost` line (summed from `appliedOrders.OfType<NegotiationOrder>()`,
+folded into `NetIncome` and broken out on `QuarterlyStatement`, the same
+treatment `AircraftPurchaseCost` already gets) — win or lose, the bid is
+already spent by the time the negotiation resolves quarters later, so
+losing charges nothing *additional*, it just never refunds what was
+already deducted at submission.
 
-**Slot relinquishment** ("sell slots," settled shape *(proposed)*: private
-action, returns the held gate slot to the contested pool for future
-negotiation by anyone — **not** a direct sale to a specific rival airline,
-which would need a whole new bilateral-transaction mechanic this roadmap
-doesn't otherwise touch. No cash returned (you already spent the bid; this
-just stops occupying a slot you don't want anymore). Flagged explicitly
-for review since "sell" was the user's own word and a literal reading
-implies a buyer, which this proposal deliberately simplifies away from.
+### Part 2 — slot relinquishment, redesigned on top of M33's SlotsHeld/AvailableSlotsByCity
+
+**Settled shape:** private, free order (per CLAUDE.md — resolves against
+nothing, same framing `CloseRouteOrder` already uses), returns one held
+gate slot to the contested pool for future negotiation by anyone — **not**
+a direct sale to a specific rival airline, which would need a whole new
+bilateral-transaction mechanic this roadmap doesn't otherwise touch. No
+cash returned (the bid was already spent per Part 1; this just stops
+occupying a slot you don't want anymore). Still flagged for review since
+"sell" was the user's own original word and a literal reading implies a
+buyer, which this proposal deliberately simplifies away from.
+
+**The one real design question M33 settles cleanly: relinquish is gated
+by *available* balance, not raw *held* count.** A held slot currently
+backing a flown route (i.e., counted in `AvailableSlotsByCity`'s
+`inUse`) can't be relinquished directly — the airline would end up
+holding fewer slots than aircraft it's flying through that gateway, an
+inconsistent state nothing else in the sim allows. The player closes the
+route first (M27's `CloseRouteOrder`, already shipped, frees the unit and
+drops `inUse`), *then* relinquishes the now-unused slot. This wasn't
+fully resolvable before M27/M33 existed; it falls out naturally now that
+both are in place, and is a genuine sequencing win from having built the
+mechanism-first pieces before this one.
+
+**Mechanically:** new `RelinquishSlotOrder(City TargetCity)`. Gated
+inside `QuarterEngine` by the *same* `availableSlotsByCity` parameter
+M33 already added — reused, not duplicated — checked against a single
+city rather than a route's two endpoints, and drawing down the *same*
+per-quarter `slotsSpentByCity` running tracker `RouteOrder`'s gateway
+consumption already uses (a relinquish and a same-quarter route-growth
+order genuinely compete for the same available balance — only one can
+draw down the last available slot at a city in one quarter). `QuarterEngine`
+only decides eligibility, the same split `NegotiationOrder` already has:
+the actual `LandingRightsBoard` mutation — decrementing both `SlotsHeld`
+for that airline and the city-wide `SlotsGranted` (returning it to what
+`SlotsRemaining` sees as contestable) — happens in the caller, from
+`result.AppliedOrders`, via a new `LandingRightsResolver.Relinquish(board, airline, city)`,
+mirroring `Submit`'s own shape.
 
 **Done when:** submitting a `NegotiationOrder` immediately reduces cash by
-the bid amount, win or lose; a relinquished slot becomes available for the
-next negotiation cycle at that city. Tests: losing a negotiation still
-leaves the bid spent (not refunded); relinquishing a slot the airline
-doesn't hold is rejected.
+the bid amount, win or lose, and is rejected outright if it would exceed
+cash on hand; relinquishing a slot with a positive *available* balance
+returns it to the city's contestable pool immediately, visible to the
+very next negotiation resolution; relinquishing a slot that's zero,
+absent, or fully in-use (backing a live route) is rejected. Tests: losing
+a negotiation still leaves the bid spent (not refunded); relinquishing a
+slot the airline never held is rejected; relinquishing a slot that's
+currently backing a route is rejected until the route is closed first;
+a relinquish and a route-growth order for the same gateway in one batch
+correctly can't both succeed off the same last available slot.
+
+**Shipped exactly as reconciled above — one scope addition found while
+planning, not in the original sketch:** unlike M26/M27 (where `BaselineAi`
+never used the newly-gated feature at all, so it needed zero changes),
+`BaselineAi` *already* submits a `NegotiationOrder` every game with a
+fixed `$2,000,000` bid. Left cash-blind, it would have started proposing
+bids it can't afford the moment M28 shipped — exactly the "predictably
+fails" scenario avoided everywhere else. `BaselineAi.DecideOrders` gained
+one new optional `Money? availableCash = null` parameter and a single
+guard before its existing negotiation step (skip if cash on hand is below
+the bid amount) — negotiation is the only cash-consuming action it ever
+proposes, so no running "spent so far" tracker was needed the way its
+existing fleet/slot reservation trackers are. `RelinquishSlotOrder` itself
+needed no `BaselineAi` awareness — it never submits one, the same "doesn't
+use the new mechanism" precedent M26/M27 established for their own orders.
+
+**Done when:** matched exactly. `QuarterEngine.RunQuarter`'s existing
+`availableCash`/`cashSpent` machinery gates `NegotiationOrder` the same
+way it already gated `AircraftOrder`; `availableSlotsByCity`/
+`slotsSpentByCity` gates `RelinquishSlotOrder` the same way it already
+gated `RouteOrder`'s gateway consumption — both extensions to
+already-proven M26/M33 infrastructure, not new architecture.
+`LandingRightsResolver.Relinquish` mirrors `Submit`'s own shape exactly.
+
+Done. 417 tests total (21 new — 11 `QuarterEngine`, 3 `FinancialResolver`,
+4 `LandingRightsResolver`, 3 `BaselineAi`). 100% line/branch coverage on
+every touched/new class (`RelinquishSlotOrder`, `QuarterEngine`,
+`FinancialResolver`, `QuarterlyStatement`, `LandingRightsBoard`,
+`LandingRightsResolver`, `BaselineAi`). Overall project coverage
+**99.84%/99.57%**, at the established baseline (only pre-existing,
+untouched gaps remain). 150-game QA harness sweep at 244 quarters:
+150/150 clean, 0 invariant violations, 0 crashes.
+
+**Campaign trajectory shifted again, measured not assumed — and this
+time both real loops carry genuinely new behavior, not just one.**
+`AeroNext.Sim`'s M13 loop: bankruptcy moved from quarter 16 to **quarter
+11 (1957, -$891,513.07)**, found via a full checkpoint sweep. Route count
+still freezes at 2 from quarter 3 (M32's structural finding, unchanged),
+but now every quarter `BaselineAi` affords its $2M gateway bid, it pays
+it immediately whether or not the negotiation eventually wins — a real
+cash drain stacked directly on top of the lease fees (M26) and
+action-budget competition (M32/M33) already squeezing it. The QA harness
+sweep confirms this isn't M13-specific: bankruptcy now averages quarter
+4.9-7.2 across regions (down from M27/M33's 5.8-9.6 — earlier again), win
+rate holds at **0/150**. This is the fourth milestone running where a
+correct, individually-justified mechanic has made this un-tuned heuristic
+AI's campaign trajectory worse — reinforcing rather than changing the
+standing finding: `BaselineAi` needs a real rework (buy-vs-lease
+judgment, load-factor-aware growth throttling, genuine cash budgeting
+across *all* its actions rather than a single guard on the newest one)
+before M26/M32/M33/M28's mechanics can be fairly judged on campaign feel.
 
 ---
 

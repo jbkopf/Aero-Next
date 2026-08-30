@@ -1,5 +1,6 @@
 using AeroNext.Core.Airlines;
 using AeroNext.Core.Turns;
+using AeroNext.Core.World;
 
 namespace AeroNext.Core.Negotiations;
 
@@ -84,5 +85,31 @@ public static class LandingRightsResolver
             .ToList();
 
         return (resolvedBoard, sortedOutcomes);
+    }
+
+    /// <summary>
+    /// M28: returns one held slot to the contested pool — decrements both
+    /// this airline's SlotsHeld at city and the city-wide SlotsGranted
+    /// total, so SlotsRemaining sees it as contestable again immediately.
+    /// A safe no-op (returns board unchanged) if the airline holds zero
+    /// there — reachable when QuarterEngine never gated the order at all
+    /// (permissive mode, availableSlotsByCity: null), since eligibility
+    /// there is checked against *available* balance, not this board
+    /// directly.
+    /// </summary>
+    public static LandingRightsBoard Relinquish(LandingRightsBoard board, Airline airline, City city)
+    {
+        var key = (airline.Name, city.Id);
+        var currentlyHeld = board.SlotsHeldBy(airline, city);
+
+        if (currentlyHeld <= 0)
+        {
+            return board;
+        }
+
+        var slotsHeld = new Dictionary<(string, string), int>(board.SlotsHeld) { [key] = currentlyHeld - 1 };
+        var slotsGranted = new Dictionary<string, int>(board.SlotsGranted) { [city.Id] = Math.Max(0, board.SlotsGranted.GetValueOrDefault(city.Id) - 1) };
+
+        return board with { SlotsHeld = slotsHeld, SlotsGranted = slotsGranted };
     }
 }

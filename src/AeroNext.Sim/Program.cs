@@ -568,21 +568,20 @@ string ChokepointStatus(int year)
 }
 
 // Chosen to capture the actual arc found by running this: re-measured
-// after M32 made route growth cost real budget (docs/ROUTE_CAPACITY_ROADMAP.md).
-// BaselineAi now spends its 3-action budget on growing its best route
-// (idle-or-lease, 1-2 actions) before anything else - once nothing's idle
-// (every quarter after the first), that alone costs 2, leaving only 1
-// more: exactly enough for a negotiation bid, never enough for a second
-// new pair (which also needs a lease). Route COUNT freezes at 2 from
-// quarter 3 onward for exactly this reason - the AI keeps piling more
-// aircraft onto those same two routes long after demand saturates them,
-// paying real lease fees for capacity nobody's buying. Bankruptcy at
-// quarter 16 (1958, -$2.67M), frozen from there - though carried
-// passengers keep climbing after that on the frozen routes anyway, since
-// global demand keeps growing across the decades even with static
-// capacity. 121 stays in the checkpoint set as a stickiness sanity check:
-// bankrupt airlines' cash stays frozen for the ~230 quarters that follow.
-var checkpoints = new HashSet<int> { 1, 11, 15, 16, 121, campaignQuarters };
+// after M28 made NegotiationOrder bids cost real cash at submission
+// (docs/FINANCIAL_MODEL_ROADMAP.md). Route count still freezes at 2 from
+// quarter 3 onward, same structural reason M32 found (growing the best
+// route costs 2 of 3 actions once nothing's idle, leaving only 1 - just
+// enough for a negotiation bid). What moved: every quarter BaselineAi
+// affords the $2M bid, it pays it immediately, win or lose - a real,
+// recurring-feeling drain on top of everything M26/M32 already added
+// (it's actually a one-time-per-successful-quarter cost, not literally
+// recurring, but it lands most quarters here since cash starts high).
+// Bankruptcy moved from quarter 16 to quarter 11 (1957, -$891,513.07),
+// frozen from there - carried passengers keep climbing anyway on the
+// frozen routes as global demand grows across the decades. 121 stays in
+// the checkpoint set as a stickiness sanity check.
+var checkpoints = new HashSet<int> { 1, 9, 10, 11, 121, campaignQuarters };
 
 var campaignDominance = RegionalDominanceState.Empty;
 string? campaignWinner = null;
@@ -623,8 +622,11 @@ for (var q = 1; q <= campaignQuarters; q++)
         // a real LandingRightsBoard to compute a genuine balance from.
         // Gating on an always-empty board would block every gateway route
         // outright rather than leaving this demo loop's existing behavior
-        // alone.
-        var orders = BaselineAi.DecideOrders(campaignRoutes[name], campaignCaps[name], cities, yearDemandModel, availableFleet, campaignFleets[name]);
+        // alone. M28's cash-gating on NegotiationOrder bids is NOT in the
+        // same boat, though — this loop already tracks real per-airline
+        // cash, so BaselineAi's negotiation step becomes genuinely
+        // cash-aware here too.
+        var orders = BaselineAi.DecideOrders(campaignRoutes[name], campaignCaps[name], cities, yearDemandModel, availableFleet, campaignFleets[name], availableSlotsByCity: null, availableCash: campaignFinances[name].CashBalance);
         var result = QuarterEngine.RunQuarter(q, campaignRoutes[name], campaignCaps[name], orders, cities, yearDemandModel, campaignFleets[name], availableCash: campaignFinances[name].CashBalance);
         campaignRoutes[name] = result.Routes;
         campaignCaps[name] = result.ActionCap;

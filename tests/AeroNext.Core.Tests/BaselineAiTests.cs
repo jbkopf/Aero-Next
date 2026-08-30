@@ -374,4 +374,46 @@ public class BaselineAiTests
 
         Assert.Empty(result.RejectedOrders);
     }
+
+    // --- M28: cash-aware negotiation ---
+
+    [Fact]
+    public void DecideOrders_NoCashPassed_NegotiationBehaviorUnchanged()
+    {
+        var a = MakeCity("a", 0, 0, 100);
+        var gateway = MakeGateway("gw", 30, 30, 80);
+        var cities = new[] { a, gateway };
+
+        var orders = BaselineAi.DecideOrders(Array.Empty<Route>(), QuarterEngine.BaseActionCap, cities, DemandModel, new[] { Aircraft }, FleetWithAircraft);
+
+        Assert.Single(orders.OfType<NegotiationOrder>());
+    }
+
+    [Fact]
+    public void DecideOrders_CashBelowBidAmount_SkipsNegotiation()
+    {
+        var a = MakeCity("a", 0, 0, 100);
+        var gateway = MakeGateway("gw", 30, 30, 80);
+        var cities = new[] { a, gateway };
+
+        var orders = BaselineAi.DecideOrders(
+            Array.Empty<Route>(), QuarterEngine.BaseActionCap, cities, DemandModel, new[] { Aircraft }, FleetWithAircraft,
+            availableSlotsByCity: null, availableCash: Money.FromDollars(1_999_999));
+
+        Assert.Empty(orders.OfType<NegotiationOrder>());
+    }
+
+    [Fact]
+    public void DecideOrders_CashExactlyMatchingBidAmount_StillProposesNegotiation()
+    {
+        var a = MakeCity("a", 0, 0, 100);
+        var gateway = MakeGateway("gw", 30, 30, 80);
+        var cities = new[] { a, gateway };
+
+        var orders = BaselineAi.DecideOrders(
+            Array.Empty<Route>(), QuarterEngine.BaseActionCap, cities, DemandModel, new[] { Aircraft }, FleetWithAircraft,
+            availableSlotsByCity: null, availableCash: Money.FromDollars(2_000_000));
+
+        Assert.Single(orders.OfType<NegotiationOrder>());
+    }
 }

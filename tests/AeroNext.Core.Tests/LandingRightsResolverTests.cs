@@ -358,4 +358,71 @@ public class LandingRightsResolverTests
 
         Assert.Empty(available);
     }
+
+    // --- M28: relinquishing a held slot ---
+
+    [Fact]
+    public void Relinquish_ReducesSlotsHeldAndSlotsGranted_ByOne()
+    {
+        var city = MakeCity("gate", gateCapacity: 5);
+        var a = MakeAirline("A");
+        var board = LandingRightsBoard.Empty with
+        {
+            SlotsHeld = new Dictionary<(string, string), int> { [("A", "gate")] = 2 },
+            SlotsGranted = new Dictionary<string, int> { ["gate"] = 3 }, // A holds 2 of the 3 granted city-wide
+        };
+
+        var result = LandingRightsResolver.Relinquish(board, a, city);
+
+        Assert.Equal(1, result.SlotsHeldBy(a, city));
+        Assert.Equal(2, result.SlotsGranted["gate"]);
+    }
+
+    [Fact]
+    public void Relinquish_FreedSlot_IsImmediatelyVisibleToSlotsRemaining()
+    {
+        var city = MakeCity("gate", gateCapacity: 1);
+        var a = MakeAirline("A");
+        var board = LandingRightsBoard.Empty with
+        {
+            SlotsHeld = new Dictionary<(string, string), int> { [("A", "gate")] = 1 },
+            SlotsGranted = new Dictionary<string, int> { ["gate"] = 1 },
+        };
+        Assert.Equal(0, board.SlotsRemaining(city)); // fully occupied before relinquishing
+
+        var result = LandingRightsResolver.Relinquish(board, a, city);
+
+        Assert.Equal(1, result.SlotsRemaining(city)); // contestable again
+    }
+
+    [Fact]
+    public void Relinquish_AirlineHoldsZero_IsASafeNoOp_NotAThrowOrNegative()
+    {
+        var city = MakeCity("gate", gateCapacity: 5);
+        var a = MakeAirline("A");
+        var board = LandingRightsBoard.Empty;
+
+        var result = LandingRightsResolver.Relinquish(board, a, city);
+
+        Assert.Equal(0, result.SlotsHeldBy(a, city));
+        Assert.Same(board, result); // genuinely the same board, not just zero
+    }
+
+    [Fact]
+    public void Relinquish_OnlyAffectsTheRelinquishingAirline_NotOthersHoldingTheSameCity()
+    {
+        var city = MakeCity("gate", gateCapacity: 5);
+        var a = MakeAirline("A");
+        var b = MakeAirline("B");
+        var board = LandingRightsBoard.Empty with
+        {
+            SlotsHeld = new Dictionary<(string, string), int> { [("A", "gate")] = 1, [("B", "gate")] = 2 },
+            SlotsGranted = new Dictionary<string, int> { ["gate"] = 3 },
+        };
+
+        var result = LandingRightsResolver.Relinquish(board, a, city);
+
+        Assert.Equal(0, result.SlotsHeldBy(a, city));
+        Assert.Equal(2, result.SlotsHeldBy(b, city)); // untouched
+    }
 }

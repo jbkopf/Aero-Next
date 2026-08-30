@@ -17,11 +17,12 @@ namespace AeroNext.Core.Turns;
 /// spend. An order that fits within what's left of the cap is applied and
 /// consumes its cost; an order that would exceed the remaining cap is
 /// rejected — but scanning continues, so a free order (any
-/// HireExecutiveOrder/RefinanceOrder/RetireAircraftOrder/CloseRouteOrder)
-/// later in the list still goes through even after an earlier, costlier
-/// order was rejected. Only orders that don't fit get skipped, not
-/// everything after them — a hard truncate-the-rest rule would needlessly
-/// block actions that cost nothing. Every RouteOrder costs 1 action now
+/// HireExecutiveOrder/RefinanceOrder/RetireAircraftOrder/CloseRouteOrder/
+/// RelinquishSlotOrder) later in the list still goes through even after
+/// an earlier, costlier order was rejected. Only orders that don't fit
+/// get skipped, not everything after them — a hard truncate-the-rest rule
+/// would needlessly block actions that cost nothing. Every RouteOrder
+/// costs 1 action now
 /// (M32) — growing an already-served pair by assigning another aircraft is
 /// no longer free; only genuinely private actions are.
 ///
@@ -51,31 +52,37 @@ public static class QuarterEngine
     /// </param>
     /// <param name="availableCash">
     /// Null (the default) preserves fully permissive behavior — an
-    /// AircraftOrder is never rejected for cost, exactly as before this
-    /// parameter existed. Passing a real amount (quarter-start cash on
-    /// hand, before this quarter's own revenue arrives) turns on
-    /// affordability enforcement: an AircraftOrder whose Type.Cost x
-    /// Quantity would exceed what's left of it — after every
-    /// already-applied order's own cash cost this quarter — is rejected
-    /// outright, per CLAUDE.md's affordability rule: a player is never
-    /// allowed to attempt a purchase beyond cash on hand and waste the
-    /// action finding out.
+    /// AircraftOrder or NegotiationOrder is never rejected for cost,
+    /// exactly as before this parameter existed. Passing a real amount
+    /// (quarter-start cash on hand, before this quarter's own revenue
+    /// arrives) turns on affordability enforcement: an AircraftOrder whose
+    /// Type.Cost x Quantity, or a NegotiationOrder whose Bid (M28), would
+    /// exceed what's left of it — after every already-applied order's own
+    /// cash cost this quarter — is rejected outright, per CLAUDE.md's
+    /// affordability rule: a player is never allowed to attempt a
+    /// purchase or bid beyond cash on hand and waste the action finding
+    /// out.
     /// </param>
     /// <param name="availableSlotsByCity">
     /// Null (the default) preserves fully permissive behavior — a
-    /// RouteOrder is never rejected for gate scarcity, exactly as before
-    /// this parameter existed (and City.GateCapacity has never had any
-    /// mechanical effect on RouteOrder until now). Passing a real
-    /// per-city balance (this airline's held landing-rights slots minus
-    /// how many its current routes already occupy there — see
-    /// LandingRightsBoard.SlotsHeldBy) turns on gate-scarcity enforcement
-    /// (M33): a RouteOrder touching a city with a non-null GateCapacity is
-    /// rejected if this airline has no slot left there, checked
-    /// independently at both Origin and Destination — a route occupies
-    /// capacity at every gateway endpoint it touches, not just one. Cities
-    /// with a null GateCapacity are never gated, regardless of this
-    /// dictionary's contents, matching City's own "null means gate access
-    /// isn't modeled as scarce there."
+    /// RouteOrder or RelinquishSlotOrder is never rejected for gate
+    /// scarcity, exactly as before this parameter existed (and
+    /// City.GateCapacity has never had any mechanical effect on RouteOrder
+    /// until now). Passing a real per-city balance (this airline's held
+    /// landing-rights slots minus how many its current routes already
+    /// occupy there — see LandingRightsBoard.AvailableSlotsByCity) turns
+    /// on gate-scarcity enforcement (M33): a RouteOrder touching a city
+    /// with a non-null GateCapacity is rejected if this airline has no
+    /// slot left there, checked independently at both Origin and
+    /// Destination — a route occupies capacity at every gateway endpoint
+    /// it touches, not just one. A RelinquishSlotOrder (M28) draws from
+    /// the same per-city balance in the opposite direction — rejected if
+    /// there's no available (held but unused) slot left to give up; a
+    /// relinquish and a same-quarter RouteOrder at the same gateway
+    /// genuinely compete for the same last slot. Cities with a null
+    /// GateCapacity are never gated, regardless of this dictionary's
+    /// contents, matching City's own "null means gate access isn't
+    /// modeled as scarce there."
     /// </param>
     public static QuarterResult RunQuarter(
         int quarterNumber,
@@ -134,12 +141,32 @@ public static class QuarterEngine
                 }
             }
 
+            if (order is NegotiationOrder negotiationOrder && availableCash is not null)
+            {
+                if (cashSpent + negotiationOrder.Bid > availableCash.Value)
+                {
+                    rejected.Add(order);
+                    continue;
+                }
+            }
+
             if (order is RouteOrder slotOrder && availableSlotsByCity is not null)
             {
                 var blockedAtAGateway = GatewayEndpoints(slotOrder).Any(city =>
                     availableSlotsByCity.GetValueOrDefault(city.Id) - slotsSpentByCity.GetValueOrDefault(city.Id) <= 0);
 
                 if (blockedAtAGateway)
+                {
+                    rejected.Add(order);
+                    continue;
+                }
+            }
+
+            if (order is RelinquishSlotOrder relinquishOrder && availableSlotsByCity is not null)
+            {
+                var available = availableSlotsByCity.GetValueOrDefault(relinquishOrder.TargetCity.Id) - slotsSpentByCity.GetValueOrDefault(relinquishOrder.TargetCity.Id);
+
+                if (available <= 0)
                 {
                     rejected.Add(order);
                     continue;
@@ -254,12 +281,22 @@ public static class QuarterEngine
                 cashSpent += appliedAircraftOrder.Type.Cost * appliedAircraftOrder.Quantity;
             }
 
+            if (order is NegotiationOrder appliedNegotiationOrder && availableCash is not null)
+            {
+                cashSpent += appliedNegotiationOrder.Bid;
+            }
+
             if (order is RouteOrder appliedSlotOrder && availableSlotsByCity is not null)
             {
                 foreach (var city in GatewayEndpoints(appliedSlotOrder))
                 {
                     slotsSpentByCity[city.Id] = slotsSpentByCity.GetValueOrDefault(city.Id) + 1;
                 }
+            }
+
+            if (order is RelinquishSlotOrder appliedRelinquishOrder && availableSlotsByCity is not null)
+            {
+                slotsSpentByCity[appliedRelinquishOrder.TargetCity.Id] = slotsSpentByCity.GetValueOrDefault(appliedRelinquishOrder.TargetCity.Id) + 1;
             }
 
             applied.Add(order);
@@ -289,6 +326,7 @@ public static class QuarterEngine
         RefinanceOrder => 0,
         RetireAircraftOrder => 0,
         CloseRouteOrder => 0,
+        RelinquishSlotOrder => 0,
         NegotiationOrder => 1,
         AircraftOrder => 1,
         LeaseAircraftOrder => 1,

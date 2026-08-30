@@ -101,13 +101,14 @@ public static class FinancialResolver
         var purchaseCost = appliedOrders.OfType<AircraftOrder>().Aggregate(Money.Zero, (sum, o) => sum + o.Type.Cost * o.Quantity);
         var leaseFee = ComputeLeaseFee(fleet);
         var retirementProceeds = ComputeRetirementProceeds(retiredUnits);
+        var negotiationBidCost = appliedOrders.OfType<NegotiationOrder>().Aggregate(Money.Zero, (sum, o) => sum + o.Bid);
 
-        var netIncome = revenue - operatingCost - debtService - purchaseCost - leaseFee + retirementProceeds;
+        var netIncome = revenue - operatingCost - debtService - purchaseCost - leaseFee + retirementProceeds - negotiationBidCost;
         var cashAfter = state.CashBalance + borrowed + netIncome;
         var isBankrupt = cashAfter < Money.Zero || debtBalance > Money.FromDollars(DebtCeilingDollars);
 
         var newState = state with { CashBalance = cashAfter, DebtBalance = debtBalance, IsBankrupt = isBankrupt };
-        var statement = new QuarterlyStatement(revenue, operatingCost, debtService, borrowed, netIncome, cashAfter, isBankrupt, purchaseCost, leaseFee, retirementProceeds);
+        var statement = new QuarterlyStatement(revenue, operatingCost, debtService, borrowed, netIncome, cashAfter, isBankrupt, purchaseCost, leaseFee, retirementProceeds, negotiationBidCost);
 
         return (newState, statement);
     }

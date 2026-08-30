@@ -347,4 +347,53 @@ public class FinancialResolverTests
         Assert.Equal(Money.Zero, statement.LeaseFee);
         Assert.Equal(Money.Zero, statement.RetirementProceeds); // leased -> nothing either way
     }
+
+    // --- M28: NegotiationOrder bids cost real cash ---
+
+    [Fact]
+    public void Resolve_NegotiationOrder_DeductsBidCost_ReflectedInNetIncomeAndStatement()
+    {
+        var a = MakeCity("a", 0, 0, 1);
+        var gateway = MakeCity("gw", 30, 30, 1);
+        var airline = new Airline("A", Array.Empty<Route>());
+        var market = CompetitiveMarket.Resolve(new[] { airline }, new[] { a, gateway }, DemandModel);
+        var state = FinancialState.Start(Money.FromDollars(10_000_000), Money.Zero, interestRatePerQuarter: 0.0);
+        var orders = new QuarterOrder[] { new NegotiationOrder(gateway, Money.FromDollars(2_000_000)) };
+
+        var (newState, statement) = FinancialResolver.Resolve(state, airline, market, orders);
+
+        Assert.Equal(Money.FromDollars(2_000_000), statement.NegotiationBidCost);
+        Assert.Equal(state.CashBalance - Money.FromDollars(2_000_000), newState.CashBalance);
+    }
+
+    [Fact]
+    public void Resolve_NoNegotiationOrders_NegotiationBidCostIsZero()
+    {
+        var a = MakeCity("a", 0, 0, 1);
+        var airline = new Airline("A", Array.Empty<Route>());
+        var market = CompetitiveMarket.Resolve(new[] { airline }, new[] { a }, DemandModel);
+        var state = FinancialState.Start(Money.FromDollars(10_000_000), Money.Zero, interestRatePerQuarter: 0.0);
+
+        var (_, statement) = FinancialResolver.Resolve(state, airline, market, Array.Empty<QuarterOrder>());
+
+        Assert.Equal(Money.Zero, statement.NegotiationBidCost);
+    }
+
+    [Fact]
+    public void Resolve_NegotiationBid_IsChargedRegardlessOfEventualWinOrLoss()
+    {
+        // FinancialResolver has no notion of the negotiation's outcome at
+        // all - it charges purely from `appliedOrders` this quarter,
+        // 2-4 quarters before LandingRightsResolver ever decides who wins.
+        var a = MakeCity("a", 0, 0, 1);
+        var gateway = MakeCity("gw", 30, 30, 1);
+        var airline = new Airline("A", Array.Empty<Route>());
+        var market = CompetitiveMarket.Resolve(new[] { airline }, new[] { a, gateway }, DemandModel);
+        var state = FinancialState.Start(Money.FromDollars(10_000_000), Money.Zero, interestRatePerQuarter: 0.0);
+        var orders = new QuarterOrder[] { new NegotiationOrder(gateway, Money.FromDollars(500_000)) };
+
+        var (newState, _) = FinancialResolver.Resolve(state, airline, market, orders);
+
+        Assert.Equal(state.CashBalance - Money.FromDollars(500_000), newState.CashBalance);
+    }
 }

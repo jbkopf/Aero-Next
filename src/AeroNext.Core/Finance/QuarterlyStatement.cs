@@ -7,7 +7,9 @@ namespace AeroNext.Core.Finance;
 /// not just the net result of three new cost/revenue sources at once.
 /// All three default to Money.Zero so a Resolve call that never touches
 /// aircraft economics (fleet/retiredUnits both null) reads exactly as it
-/// did before this milestone.
+/// did before this milestone. M28: NegotiationBidCost gets the same
+/// treatment — every applied NegotiationOrder's Bid this quarter, charged
+/// whether or not it eventually wins (see FinancialResolver).
 /// </summary>
 public sealed record QuarterlyStatement(
     Money Revenue,
@@ -19,4 +21,5 @@ public sealed record QuarterlyStatement(
     bool IsBankrupt,
     Money AircraftPurchaseCost = default,
     Money LeaseFee = default,
-    Money RetirementProceeds = default);
+    Money RetirementProceeds = default,
+    Money NegotiationBidCost = default);

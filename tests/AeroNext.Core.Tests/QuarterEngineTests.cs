@@ -886,4 +886,155 @@ public class QuarterEngineTests
         Assert.Contains(result.Routes, r => r.Destination.Id == "c");
         Assert.Equal("a-c", result.UpdatedFleet!.Units.Single().AssignedRouteKey);
     }
+
+    // --- M28: NegotiationOrder costs real cash, RelinquishSlotOrder ---
+
+    [Fact]
+    public void RunQuarter_NoCashPassed_NegotiationOrderNeverRejectedForCost()
+    {
+        var demandModel = new GravityDemandModel();
+        var gateway = MakeGateway("gw", 0, 0, 50, gateCapacity: 5);
+        var order = new NegotiationOrder(gateway, Money.FromDollars(2_000_000));
+
+        var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, new[] { gateway }, demandModel);
+
+        Assert.Single(result.AppliedOrders);
+        Assert.Empty(result.RejectedOrders);
+    }
+
+    [Fact]
+    public void RunQuarter_NegotiationOrderExceedingAvailableCash_Rejected()
+    {
+        var demandModel = new GravityDemandModel();
+        var gateway = MakeGateway("gw", 0, 0, 50, gateCapacity: 5);
+        var order = new NegotiationOrder(gateway, Money.FromDollars(2_000_000));
+
+        var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, new[] { gateway }, demandModel, availableCash: Money.FromDollars(1_999_999));
+
+        Assert.Empty(result.AppliedOrders);
+        Assert.Single(result.RejectedOrders);
+    }
+
+    [Fact]
+    public void RunQuarter_NegotiationOrderExactlyMatchingAvailableCash_Applied()
+    {
+        var demandModel = new GravityDemandModel();
+        var gateway = MakeGateway("gw", 0, 0, 50, gateCapacity: 5);
+        var order = new NegotiationOrder(gateway, Money.FromDollars(2_000_000));
+
+        var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, new[] { gateway }, demandModel, availableCash: Money.FromDollars(2_000_000));
+
+        Assert.Single(result.AppliedOrders);
+        Assert.Empty(result.RejectedOrders);
+    }
+
+    [Fact]
+    public void RunQuarter_TwoNegotiationOrders_SecondExceedsWhatFirstLeftOfAvailableCash_Rejected()
+    {
+        var demandModel = new GravityDemandModel();
+        var gateway = MakeGateway("gw", 0, 0, 50, gateCapacity: 5);
+        var otherGateway = MakeGateway("gw2", 1, 1, 50, gateCapacity: 5);
+        var orders = new QuarterOrder[]
+        {
+            new NegotiationOrder(gateway, Money.FromDollars(2_000_000)),
+            new NegotiationOrder(otherGateway, Money.FromDollars(2_000_000)),
+        };
+
+        var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, orders, new[] { gateway, otherGateway }, demandModel, availableCash: Money.FromDollars(3_000_000));
+
+        Assert.Single(result.AppliedOrders);
+        Assert.Single(result.RejectedOrders);
+    }
+
+    [Fact]
+    public void RunQuarter_RelinquishSlotOrder_NoSlotsPassed_NeverRejectedForScarcity()
+    {
+        var demandModel = new GravityDemandModel();
+        var gateway = MakeGateway("gw", 0, 0, 50, gateCapacity: 5);
+        var order = new RelinquishSlotOrder(gateway);
+
+        var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, new[] { gateway }, demandModel);
+
+        Assert.Single(result.AppliedOrders);
+        Assert.Empty(result.RejectedOrders);
+    }
+
+    [Fact]
+    public void RunQuarter_RelinquishSlotOrder_ZeroAvailableBalance_Rejected()
+    {
+        var demandModel = new GravityDemandModel();
+        var gateway = MakeGateway("gw", 0, 0, 50, gateCapacity: 5);
+        var order = new RelinquishSlotOrder(gateway);
+        var availableSlotsByCity = new Dictionary<string, int> { ["gw"] = 0 };
+
+        var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, new[] { gateway }, demandModel, availableSlotsByCity: availableSlotsByCity);
+
+        Assert.Empty(result.AppliedOrders);
+        Assert.Single(result.RejectedOrders);
+    }
+
+    [Fact]
+    public void RunQuarter_RelinquishSlotOrder_AbsentFromBalance_Rejected()
+    {
+        var demandModel = new GravityDemandModel();
+        var gateway = MakeGateway("gw", 0, 0, 50, gateCapacity: 5);
+        var order = new RelinquishSlotOrder(gateway);
+        var availableSlotsByCity = new Dictionary<string, int>(); // "gw" never appears - never held
+
+        var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, new[] { gateway }, demandModel, availableSlotsByCity: availableSlotsByCity);
+
+        Assert.Empty(result.AppliedOrders);
+        Assert.Single(result.RejectedOrders);
+    }
+
+    [Fact]
+    public void RunQuarter_RelinquishSlotOrder_PositiveAvailableBalance_Applied()
+    {
+        var demandModel = new GravityDemandModel();
+        var gateway = MakeGateway("gw", 0, 0, 50, gateCapacity: 5);
+        var order = new RelinquishSlotOrder(gateway);
+        var availableSlotsByCity = new Dictionary<string, int> { ["gw"] = 1 };
+
+        var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, new[] { gateway }, demandModel, availableSlotsByCity: availableSlotsByCity);
+
+        Assert.Single(result.AppliedOrders);
+        Assert.Empty(result.RejectedOrders);
+    }
+
+    [Fact]
+    public void RunQuarter_TwoRelinquishSlotOrders_SameCity_SecondRejectedOnceBalanceExhausted()
+    {
+        var demandModel = new GravityDemandModel();
+        var gateway = MakeGateway("gw", 0, 0, 50, gateCapacity: 5);
+        var orders = new[] { new RelinquishSlotOrder(gateway), new RelinquishSlotOrder(gateway) };
+        var availableSlotsByCity = new Dictionary<string, int> { ["gw"] = 1 };
+
+        var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, orders, new[] { gateway }, demandModel, availableSlotsByCity: availableSlotsByCity);
+
+        Assert.Single(result.AppliedOrders);
+        Assert.Single(result.RejectedOrders);
+    }
+
+    [Fact]
+    public void RunQuarter_RelinquishAndRouteOrder_SameGateway_SameBatch_CompeteForTheLastSlot()
+    {
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 2, 2, 50);
+        var gateway = MakeGateway("gw", 0, 0, 50, gateCapacity: 5);
+        var orders = new QuarterOrder[] { new RelinquishSlotOrder(gateway), new RouteOrder(a, gateway, Aircraft) };
+        var availableSlotsByCity = new Dictionary<string, int> { ["gw"] = 1 };
+
+        var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, orders, new[] { a, gateway }, demandModel, availableSlotsByCity: availableSlotsByCity);
+
+        Assert.Single(result.AppliedOrders); // the relinquish
+        Assert.Single(result.RejectedOrders); // no slot left for the RouteOrder
+    }
+
+    [Fact]
+    public void RunQuarter_RelinquishSlotOrder_IsFreeAction()
+    {
+        var gateway = MakeGateway("gw", 0, 0, 50, gateCapacity: 5);
+
+        Assert.Equal(0, QuarterEngine.Cost(new RelinquishSlotOrder(gateway), Array.Empty<Route>()));
+    }
 }

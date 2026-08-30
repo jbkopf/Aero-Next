@@ -9,12 +9,14 @@ namespace AeroNext.Core.Ai;
 /// A simple heuristic opponent: greedily enters the single highest-demand
 /// city pair it can actually reach and doesn't already serve, if it can
 /// afford a market action; bids on the single highest-demand gateway it
-/// doesn't yet touch, if it can also afford a contested action (per
-/// CLAUDE.md — negotiations are "blind" even for a skilled human, so not
-/// checking the target's remaining gate capacity before bidding isn't a
-/// missing smarts, it's true to the mechanic); and tries to grow its own
-/// best-performing existing route by assigning it another aircraft (M32 —
-/// no longer free; competes for the same action budget as everything else).
+/// doesn't yet touch, if it can also afford a contested action *and* the
+/// bid itself (M28 — negotiations cost real cash at submission now, not
+/// just an action) (per CLAUDE.md — negotiations are "blind" even for a
+/// skilled human, so not checking the target's remaining gate capacity
+/// before bidding isn't a missing smarts, it's true to the mechanic); and
+/// tries to grow its own best-performing existing route by assigning it
+/// another aircraft (M32 — no longer free; competes for the same action
+/// budget as everything else).
 ///
 /// Not trying to play well — CLAUDE.md's game is always exactly 4 airlines,
 /// so this exists because the sim can never run a representative quarter
@@ -62,6 +64,16 @@ public static class BaselineAi
     /// gateway city it has no slot left at, the same "never attempt what
     /// will predictably fail" principle already applied to cash and fleet.
     /// </param>
+    /// <param name="availableCash">
+    /// M28: null (the default) never blocks the negotiation step, matching
+    /// QuarterEngine's own permissive default. Passing quarter-start cash
+    /// on hand skips proposing a NegotiationOrder this AI can't afford —
+    /// negotiations now cost real cash at submission (M28), and this is
+    /// the only cash-consuming action this AI ever proposes (growth/new-pair
+    /// never cost cash upfront; leasing is a recurring cost, not a
+    /// submission-time one), so no running "spent so far" tracker is
+    /// needed here the way fleet/slot reservations already need one.
+    /// </param>
     public static IReadOnlyList<QuarterOrder> DecideOrders(
         IReadOnlyList<Route> currentRoutes,
         int actionCap,
@@ -69,7 +81,8 @@ public static class BaselineAi
         GravityDemandModel demandModel,
         IReadOnlyList<AircraftType> eraAvailableTypes,
         AirlineFleet ownFleet,
-        IReadOnlyDictionary<string, int>? availableSlotsByCity = null)
+        IReadOnlyDictionary<string, int>? availableSlotsByCity = null,
+        Money? availableCash = null)
     {
         var orders = new List<QuarterOrder>();
         var spent = 0;
@@ -151,7 +164,7 @@ public static class BaselineAi
             }
         }
 
-        if (spent + 1 <= actionCap)
+        if (spent + 1 <= actionCap && (availableCash is null || availableCash.Value >= NegotiationBidAmount))
         {
             var bestGateway = FindBestUnservedGateway(currentRoutes, allCities);
             if (bestGateway is not null)
