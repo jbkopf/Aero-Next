@@ -2,6 +2,7 @@ using AeroNext.Core;
 using AeroNext.Core.Airlines;
 using AeroNext.Core.Competition;
 using AeroNext.Core.Finance;
+using AeroNext.Core.Fleet;
 using AeroNext.Core.Turns;
 using AeroNext.Core.World;
 using Xunit;
@@ -208,5 +209,139 @@ public class FinancialResolverTests
         var (_, loserStatement) = FinancialResolver.Resolve(state, loser, market, Array.Empty<QuarterOrder>());
 
         Assert.True(loserStatement.OperatingCost.Cents > 0); // still pays for its own capacity
+    }
+
+    // --- M26: aircraft purchase, lease fee, and retirement proceeds ---
+
+    private static readonly AircraftType CostlyAircraft = new("costly", "Costly", Seats: 100, Cost: Money.FromDollars(1_000_000));
+
+    [Fact]
+    public void Resolve_AircraftOrder_DeductsPurchaseCost_ReflectedInNetIncomeAndStatement()
+    {
+        var a = MakeCity("a", 0, 0, 1);
+        var airline = new Airline("A", Array.Empty<Route>());
+        var market = CompetitiveMarket.Resolve(new[] { airline }, new[] { a }, DemandModel);
+        var state = FinancialState.Start(Money.FromDollars(10_000_000), Money.Zero, interestRatePerQuarter: 0.0);
+        var orders = new QuarterOrder[] { new AircraftOrder(CostlyAircraft, Quantity: 2) };
+
+        var (newState, statement) = FinancialResolver.Resolve(state, airline, market, orders);
+
+        Assert.Equal(Money.FromDollars(2_000_000), statement.AircraftPurchaseCost);
+        Assert.Equal(state.CashBalance - Money.FromDollars(2_000_000), newState.CashBalance);
+    }
+
+    [Fact]
+    public void RunQuarter_RejectsUnaffordableAircraftOrder_BeforeFinancialResolverEverSeesItApplied()
+    {
+        // Integration through both: QuarterEngine's own affordability gate
+        // must stop an order this expensive before it ever reaches
+        // FinancialResolver, not rely on FinancialResolver to catch it.
+        var a = MakeCity("a", 0, 0, 1);
+        var airline = new Airline("A", Array.Empty<Route>());
+        var market = CompetitiveMarket.Resolve(new[] { airline }, new[] { a }, DemandModel);
+        var state = FinancialState.Start(Money.FromDollars(500_000), Money.Zero, interestRatePerQuarter: 0.0);
+        var order = new AircraftOrder(CostlyAircraft, Quantity: 1);
+
+        var quarterResult = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, new[] { a }, DemandModel, availableCash: state.CashBalance);
+        Assert.Empty(quarterResult.AppliedOrders);
+
+        var (newState, statement) = FinancialResolver.Resolve(state, airline, market, quarterResult.AppliedOrders);
+
+        Assert.Equal(Money.Zero, statement.AircraftPurchaseCost);
+        Assert.Equal(state.CashBalance, newState.CashBalance);
+    }
+
+    [Fact]
+    public void Resolve_LeaseFee_ChargedPerLeasedUnit_ScalesWithUnitCount()
+    {
+        var a = MakeCity("a", 0, 0, 1);
+        var airline = new Airline("A", Array.Empty<Route>());
+        var market = CompetitiveMarket.Resolve(new[] { airline }, new[] { a }, DemandModel);
+        var state = FinancialState.Start(Money.FromDollars(10_000_000), Money.Zero, interestRatePerQuarter: 0.0);
+        var oneLeased = FleetLedger.ApplyDelivery(AirlineFleet.Empty, CostlyAircraft, quantity: 1, FleetOwnershipMode.Leased);
+        var threeLeased = FleetLedger.ApplyDelivery(AirlineFleet.Empty, CostlyAircraft, quantity: 3, FleetOwnershipMode.Leased);
+
+        var (_, oneStatement) = FinancialResolver.Resolve(state, airline, market, Array.Empty<QuarterOrder>(), fleet: oneLeased);
+        var (_, threeStatement) = FinancialResolver.Resolve(state, airline, market, Array.Empty<QuarterOrder>(), fleet: threeLeased);
+
+        var expectedPerUnit = Money.FromDollars(40_000); // 4% of $1,000,000
+        Assert.Equal(expectedPerUnit, oneStatement.LeaseFee);
+        Assert.Equal(oneStatement.LeaseFee * 3, threeStatement.LeaseFee);
+    }
+
+    [Fact]
+    public void Resolve_NoFleetPassed_NoLeaseFeeCharged()
+    {
+        var a = MakeCity("a", 0, 0, 1);
+        var airline = new Airline("A", Array.Empty<Route>());
+        var market = CompetitiveMarket.Resolve(new[] { airline }, new[] { a }, DemandModel);
+        var state = FinancialState.Start(Money.FromDollars(10_000_000), Money.Zero, interestRatePerQuarter: 0.0);
+
+        var (_, statement) = FinancialResolver.Resolve(state, airline, market, Array.Empty<QuarterOrder>());
+
+        Assert.Equal(Money.Zero, statement.LeaseFee);
+    }
+
+    [Fact]
+    public void Resolve_OwnedFleetUnits_DoNotCarryALeaseFee()
+    {
+        var a = MakeCity("a", 0, 0, 1);
+        var airline = new Airline("A", Array.Empty<Route>());
+        var market = CompetitiveMarket.Resolve(new[] { airline }, new[] { a }, DemandModel);
+        var state = FinancialState.Start(Money.FromDollars(10_000_000), Money.Zero, interestRatePerQuarter: 0.0);
+        var owned = FleetLedger.ApplyDelivery(AirlineFleet.Empty, CostlyAircraft, quantity: 5, FleetOwnershipMode.Owned);
+
+        var (_, statement) = FinancialResolver.Resolve(state, airline, market, Array.Empty<QuarterOrder>(), fleet: owned);
+
+        Assert.Equal(Money.Zero, statement.LeaseFee);
+    }
+
+    [Fact]
+    public void Resolve_RetiringOwnedUnit_CreditsFlatResaleFraction()
+    {
+        var a = MakeCity("a", 0, 0, 1);
+        var airline = new Airline("A", Array.Empty<Route>());
+        var market = CompetitiveMarket.Resolve(new[] { airline }, new[] { a }, DemandModel);
+        var state = FinancialState.Start(Money.FromDollars(1_000_000), Money.Zero, interestRatePerQuarter: 0.0);
+        var retired = new[] { new FleetUnit(1, CostlyAircraft, FleetOwnershipMode.Owned, AssignedRouteKey: null) };
+
+        var (newState, statement) = FinancialResolver.Resolve(state, airline, market, Array.Empty<QuarterOrder>(), retiredUnits: retired);
+
+        Assert.Equal(Money.FromDollars(400_000), statement.RetirementProceeds); // 40% of $1,000,000
+        Assert.Equal(state.CashBalance + Money.FromDollars(400_000), newState.CashBalance);
+    }
+
+    [Fact]
+    public void Resolve_RetiringLeasedUnit_CreditsNothing()
+    {
+        var a = MakeCity("a", 0, 0, 1);
+        var airline = new Airline("A", Array.Empty<Route>());
+        var market = CompetitiveMarket.Resolve(new[] { airline }, new[] { a }, DemandModel);
+        var state = FinancialState.Start(Money.FromDollars(1_000_000), Money.Zero, interestRatePerQuarter: 0.0);
+        var retired = new[] { new FleetUnit(1, CostlyAircraft, FleetOwnershipMode.Leased, AssignedRouteKey: null) };
+
+        var (_, statement) = FinancialResolver.Resolve(state, airline, market, Array.Empty<QuarterOrder>(), retiredUnits: retired);
+
+        Assert.Equal(Money.Zero, statement.RetirementProceeds);
+    }
+
+    [Fact]
+    public void Resolve_UnitRetiredThisQuarter_NotInPostQuarterFleet_NotDoubleChargedLeaseFee()
+    {
+        // The `fleet` parameter is the *post*-quarter fleet, per its own
+        // documented contract — a unit retired this quarter is already
+        // gone from it, so its lease fee doesn't accrue the same quarter
+        // it stops existing.
+        var a = MakeCity("a", 0, 0, 1);
+        var airline = new Airline("A", Array.Empty<Route>());
+        var market = CompetitiveMarket.Resolve(new[] { airline }, new[] { a }, DemandModel);
+        var state = FinancialState.Start(Money.FromDollars(1_000_000), Money.Zero, interestRatePerQuarter: 0.0);
+        var postQuarterFleet = AirlineFleet.Empty; // the retired unit is already gone
+        var retired = new[] { new FleetUnit(1, CostlyAircraft, FleetOwnershipMode.Leased, AssignedRouteKey: null) };
+
+        var (_, statement) = FinancialResolver.Resolve(state, airline, market, Array.Empty<QuarterOrder>(), fleet: postQuarterFleet, retiredUnits: retired);
+
+        Assert.Equal(Money.Zero, statement.LeaseFee);
+        Assert.Equal(Money.Zero, statement.RetirementProceeds); // leased -> nothing either way
     }
 }

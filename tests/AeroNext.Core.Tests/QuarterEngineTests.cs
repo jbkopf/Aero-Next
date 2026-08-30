@@ -418,4 +418,126 @@ public class QuarterEngineTests
         Assert.Equal(lowestId, assignedUnit.Id);
         Assert.Equal(2, result.UpdatedFleet.Idle.Count());
     }
+
+    // --- M26: aircraft purchase affordability and RetireAircraftOrder ---
+
+    private static readonly AircraftType CostlyAircraft = new("costly", "Costly", Seats: 100, Cost: Money.FromDollars(1_000_000));
+
+    [Fact]
+    public void RunQuarter_NoCashPassed_AircraftOrderNeverRejectedForCost()
+    {
+        var demandModel = new GravityDemandModel();
+        var order = new AircraftOrder(CostlyAircraft, Quantity: 1);
+
+        var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, Array.Empty<City>(), demandModel);
+
+        Assert.Single(result.AppliedOrders);
+        Assert.Empty(result.RejectedOrders);
+    }
+
+    [Fact]
+    public void RunQuarter_AircraftOrderExceedingAvailableCash_Rejected()
+    {
+        var demandModel = new GravityDemandModel();
+        var order = new AircraftOrder(CostlyAircraft, Quantity: 1);
+
+        var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, Array.Empty<City>(), demandModel, availableCash: Money.FromDollars(999_999));
+
+        Assert.Empty(result.AppliedOrders);
+        Assert.Single(result.RejectedOrders);
+    }
+
+    [Fact]
+    public void RunQuarter_AircraftOrderExactlyMatchingAvailableCash_Applied()
+    {
+        var demandModel = new GravityDemandModel();
+        var order = new AircraftOrder(CostlyAircraft, Quantity: 1);
+
+        var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, Array.Empty<City>(), demandModel, availableCash: Money.FromDollars(1_000_000));
+
+        Assert.Single(result.AppliedOrders);
+        Assert.Empty(result.RejectedOrders);
+    }
+
+    [Fact]
+    public void RunQuarter_TwoAircraftOrders_SecondExceedsWhatFirstLeftOfAvailableCash_Rejected()
+    {
+        var demandModel = new GravityDemandModel();
+        var orders = new QuarterOrder[]
+        {
+            new AircraftOrder(CostlyAircraft, Quantity: 1),
+            new AircraftOrder(CostlyAircraft, Quantity: 1),
+        };
+
+        var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, orders, Array.Empty<City>(), demandModel, availableCash: Money.FromDollars(1_500_000));
+
+        Assert.Single(result.AppliedOrders);
+        Assert.Single(result.RejectedOrders);
+    }
+
+    [Fact]
+    public void RunQuarter_RetireAircraftOrder_NoFleetTracked_Rejected()
+    {
+        var demandModel = new GravityDemandModel();
+        var order = new RetireAircraftOrder(UnitId: 1);
+
+        var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, Array.Empty<City>(), demandModel);
+
+        Assert.Empty(result.AppliedOrders);
+        Assert.Single(result.RejectedOrders);
+        Assert.Empty(result.RetiredUnits!);
+    }
+
+    [Fact]
+    public void RunQuarter_RetireAircraftOrder_UnknownUnitId_Rejected()
+    {
+        var demandModel = new GravityDemandModel();
+        var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, Aircraft, quantity: 1, FleetOwnershipMode.Owned);
+        var order = new RetireAircraftOrder(UnitId: 999);
+
+        var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, Array.Empty<City>(), demandModel, fleet);
+
+        Assert.Single(result.RejectedOrders);
+        Assert.Single(result.UpdatedFleet!.Units); // untouched
+    }
+
+    [Fact]
+    public void RunQuarter_RetireAircraftOrder_UnitAssignedToRoute_Rejected()
+    {
+        var demandModel = new GravityDemandModel();
+        var withUnit = FleetLedger.ApplyDelivery(AirlineFleet.Empty, Aircraft, quantity: 1, FleetOwnershipMode.Owned);
+        var fleet = FleetLedger.Assign(withUnit, withUnit.Units.Single().Id, "a-b");
+        var order = new RetireAircraftOrder(fleet.Units.Single().Id);
+
+        var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, Array.Empty<City>(), demandModel, fleet);
+
+        Assert.Single(result.RejectedOrders);
+        Assert.Single(result.UpdatedFleet!.Units); // still there, still assigned
+        Assert.Empty(result.RetiredUnits!);
+    }
+
+    [Fact]
+    public void RunQuarter_RetireAircraftOrder_IdleUnit_Succeeds_AndAppearsInRetiredUnits()
+    {
+        var demandModel = new GravityDemandModel();
+        var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, Aircraft, quantity: 1, FleetOwnershipMode.Owned);
+        var unit = fleet.Units.Single();
+        var order = new RetireAircraftOrder(unit.Id);
+
+        var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, Array.Empty<City>(), demandModel, fleet);
+
+        Assert.Single(result.AppliedOrders);
+        Assert.Empty(result.RejectedOrders);
+        Assert.Empty(result.UpdatedFleet!.Units);
+        var retired = Assert.Single(result.RetiredUnits!);
+        Assert.Equal(unit.Id, retired.Id);
+        Assert.Equal(unit.Type, retired.Type);
+        Assert.Equal(unit.Mode, retired.Mode);
+    }
+
+    [Fact]
+    public void RunQuarter_RetireAircraftOrder_IsFreeAction()
+    {
+        Assert.Equal(0, QuarterEngine.Cost(new RetireAircraftOrder(UnitId: 1), Array.Empty<Route>()));
+    }
 }

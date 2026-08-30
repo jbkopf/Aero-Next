@@ -252,7 +252,7 @@ route-opening now being genuinely fleet-constrained, not a regression.
 
 ---
 
-## M26 — Aircraft economics: purchase, lease, and retirement all cost real cash
+## M26 — Aircraft economics: purchase, lease, and retirement all cost real cash ✅
 
 **Purchase** (`AircraftOrder`): charge `AircraftType.CostDollars × Quantity`
 in cash at the quarter the order is *submitted* — ties the cost directly to
@@ -300,6 +300,111 @@ fee inconsistently with retiring mid-quarter for a route's operating cost
 (need a consistent rule for "cost this quarter if held at any point during
 it" vs. "cost only if held at quarter start" — pick one, apply it
 everywhere in this milestone).
+
+**Turned out smaller than sketched above, once traced through:**
+`BaselineAi` never submits `AircraftOrder` (confirmed in M25b) and leasing
+has no upfront cost by design, so nothing it does was newly blocked by the
+affordability gate — zero `BaselineAi` changes needed. **One deliberate
+scope narrowing:** retiring a unit *assigned to a route* was sketched
+above as force-closing the route, reusing M27's not-yet-built detach
+logic. Reconsidered while planning — that couples an aircraft-economics
+milestone to route-management logic that doesn't exist yet. **M26's
+`RetireAircraftOrder` only retires idle units**; retiring an assigned one
+waits for M27's own close-route action. Two single-purpose actions, not
+one action implicitly doing two things.
+
+**New order, `RetireAircraftOrder(int UnitId)`** — private, free
+(`Cost() => 0`, matching `HireExecutiveOrder`/`RefinanceOrder`). Unlike
+`RouteOrder`'s fleet check (permissive when `fleet` is null), retiring
+fundamentally requires fleet awareness to mean anything: rejected outright
+whenever `fleet` is null, the unit doesn't exist, or the unit is currently
+assigned to a route.
+
+**`QuarterEngine.RunQuarter` gained `Money? availableCash = null`.** Null
+preserves fully permissive behavior for every pre-existing call site (the
+same shape `fleet` established in M25b). When provided (quarter-*start*
+cash, before this quarter's own revenue), an `AircraftOrder` whose
+`Type.Cost × Quantity` would exceed what's left of it — after every
+already-applied order's own cost this quarter — is rejected outright,
+never silently accepted to surface as a problem next quarter, per the
+user's own settled affordability rule. `QuarterResult` gained
+`IReadOnlyList<FleetUnit> RetiredUnits` — each retired unit's
+*pre-removal* record, collected because by the time `FinancialResolver`
+runs, the unit is already gone from `UpdatedFleet` and can't be looked up
+there. `QuarterEngine` deliberately doesn't compute a dollar value itself
+— that stays `FinancialResolver`'s constant to own, the same boundary
+`UpdatedFleet` already drew for fleet-vs-money separation.
+
+**`FinancialResolver.Resolve` gained two new optional parameters:**
+`AirlineFleet? fleet = null` (the *post*-quarter fleet, so a same-quarter
+lease is charged immediately and a unit retired this quarter stops
+accruing right away, not double-charged) and `IReadOnlyList<FleetUnit>?
+retiredUnits = null` (the pre-removal records). Three new computations,
+all folded into `NetIncome`, all in `QuarterlyStatement` as their own
+lines (`AircraftPurchaseCost`, `LeaseFee`, `RetirementProceeds`) rather
+than a lump delta — CLAUDE.md's legibility pillar. Purchases are expensed
+the quarter they happen, not capitalized/depreciated — kept deliberately
+simple, matching the flat resale fraction. `LeaseFeeRatePerQuarter = 0.04`
+and `RetirementResaleFraction = 0.40`, both flagged `(proposed, tunable)`
+same as their sketch above — no data yet on whether these values feel
+right, only that the wiring is correct.
+
+**Both real loops** pass `finances[name].CashBalance` as `availableCash`
+into `RunQuarter`, and the post-quarter `fleet`/`RetiredUnits` into
+`FinancialResolver.Resolve`. No `BaselineAi` changes (see above) — it
+keeps working exactly as M25b left it, just with its existing leases now
+costing something real for the first time.
+
+**Done when:** the pre-existing `RunQuarter`/`Resolve` call sites pass
+unmodified (proving the new optional parameters are genuinely backward
+compatible); dedicated tests cover affordability rejection/acceptance at
+the exact boundary, `RetireAircraftOrder`'s three rejection paths plus its
+success path, lease fees scaling with unit count, retirement crediting
+owned units and not leased ones, and no double-charge the quarter a unit
+is retired; both real loops re-verified at full scale.
+
+Done. 358 tests total (17 new — 9 `QuarterEngine`, 8 `FinancialResolver`,
+including one integration-style test driving an unaffordable
+`AircraftOrder` through `QuarterEngine` into `FinancialResolver` to prove
+the rejection happens before the resolver ever sees it applied, not as a
+resolver-side backstop). 100% line/branch coverage on every touched/new
+class (`QuarterEngine`, `QuarterResult`, `RetireAircraftOrder`,
+`FinancialResolver`, `QuarterlyStatement`). Overall project coverage
+**99.82%/99.72%**, at the established baseline. 150-game QA harness
+sweep at 244 quarters: 150/150 clean, 0 invariant violations, 0 crashes.
+
+**The campaign trajectory shifted dramatically, re-measured properly
+rather than assumed.** `AeroNext.Sim`'s M13 loop: no peak anymore — cash
+declines monotonically from quarter 1 ($19.8M) straight to bankruptcy at
+**quarter 25 (1961, -$135,587.80)**, never once rising above its starting
+figure, found via a full `Enumerable.Range(1, 244)` sweep (previously:
+peak quarter 35 at $33.7M, bankruptcy quarter 52). Checkpoint list
+rewritten to `{ 1, 12, 24, 25, 121, 244 }` — 121 kept purely as a
+stickiness sanity check (cash stays frozen for the ~220 quarters after).
+The QA harness sweep confirms this isn't an M13-only artifact: **150/150
+games had at least one airline go bankrupt before quarter 244**, and per
+region, bankruptcy is now near-universal among seats (e.g. NorthAmerica
+144/144, Europe 95/95) at an average bankruptcy quarter in the high teens
+to mid-20s across every region. Win rate dropped in count and shifted
+drastically earlier — 2/150 clean games won outright, average **quarter
+24.0** (versus M25b's 2/150 at average quarter 149) — consistent with
+wins now coming from rivals collapsing early rather than sustained
+regional leadership.
+
+**Root cause, not a bug:** `BaselineAi` leases a fresh aircraft for
+essentially every new route it opens (M25b's fallback logic), and every
+leased unit now carries a real, recurring 4%-of-cost fee every quarter
+forever. An AI that keeps opening routes every quarter accumulates leased
+aircraft — and their fees — faster than route revenue grows early in the
+campaign, so the recurring lease drag catches up with cash well before
+the campaign's growth curve does. This is the wiring working as designed,
+not a defect in it — but the practical result is that `BaselineAi`'s
+existing route-opening strategy is now essentially unsustainable long-term
+under real lease economics. Worth a deliberate look before or during the
+bankruptcy-mechanic work that follows this milestone: whether
+`LeaseFeeRatePerQuarter` needs retuning, or `BaselineAi` needs real
+buy-vs-lease judgment (a purchase has no recurring cost at all once paid
+off) — a decision for the next design pass, not resolved here.
 
 ---
 

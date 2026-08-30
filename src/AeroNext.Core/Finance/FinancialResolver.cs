@@ -1,5 +1,6 @@
 using AeroNext.Core.Airlines;
 using AeroNext.Core.Competition;
+using AeroNext.Core.Fleet;
 using AeroNext.Core.Turns;
 using AeroNext.Core.World;
 
@@ -45,12 +46,46 @@ public static class FinancialResolver
     /// </summary>
     public const long DebtCeilingDollars = 80_000_000;
 
+    /// <summary>
+    /// M26: recurring fee on every currently-leased unit, charged every
+    /// quarter for as long as it stays leased — leasing's own "instant
+    /// metal, no upfront cost" design (CLAUDE.md) means this recurring fee
+    /// is the only price it ever carries. A flat fraction of the type's
+    /// purchase Cost, not a separate lease-rate field on AircraftType —
+    /// keeps M26 from needing new aircraft data.
+    /// </summary>
+    public const double LeaseFeeRatePerQuarter = 0.04;
+
+    /// <summary>
+    /// M26: flat resale fraction credited when retiring an *owned* unit.
+    /// No depreciation/book-value tracking exists (purchases are expensed
+    /// the quarter they happen, not capitalized), so this is a flat rate
+    /// against the original purchase Cost rather than a declining one.
+    /// </summary>
+    public const double RetirementResaleFraction = 0.40;
+
+    /// <param name="fleet">
+    /// The airline's *post*-quarter fleet (QuarterResult.UpdatedFleet) —
+    /// so a unit leased this same quarter is charged its fee immediately,
+    /// consistent with leasing's own "delivers the same quarter" story,
+    /// and a unit retired this quarter stops accruing a fee right away
+    /// rather than being double-charged. Null (the default) charges no
+    /// lease fees at all, preserving every pre-M26 call site's behavior.
+    /// </param>
+    /// <param name="retiredUnits">
+    /// Pre-removal records of units retired this quarter (QuarterResult.
+    /// RetiredUnits) — needed because by the time this resolver runs,
+    /// `fleet` no longer has them to look up. Null (the default) credits
+    /// no retirement proceeds, preserving every pre-M26 call site.
+    /// </param>
     public static (FinancialState State, QuarterlyStatement Statement) Resolve(
         FinancialState state,
         Airline airline,
         CompetitiveMarketResult marketResult,
         IReadOnlyList<QuarterOrder> appliedOrders,
-        double yieldPerPassengerKm = DefaultYieldPerPassengerKm)
+        double yieldPerPassengerKm = DefaultYieldPerPassengerKm,
+        AirlineFleet? fleet = null,
+        IReadOnlyList<FleetUnit>? retiredUnits = null)
     {
         if (state.IsBankrupt)
         {
@@ -63,14 +98,52 @@ public static class FinancialResolver
         var debtBalance = state.DebtBalance + borrowed;
         var debtService = new Money((long)Math.Round(debtBalance.Cents * state.InterestRatePerQuarter, MidpointRounding.AwayFromZero));
 
-        var netIncome = revenue - operatingCost - debtService;
+        var purchaseCost = appliedOrders.OfType<AircraftOrder>().Aggregate(Money.Zero, (sum, o) => sum + o.Type.Cost * o.Quantity);
+        var leaseFee = ComputeLeaseFee(fleet);
+        var retirementProceeds = ComputeRetirementProceeds(retiredUnits);
+
+        var netIncome = revenue - operatingCost - debtService - purchaseCost - leaseFee + retirementProceeds;
         var cashAfter = state.CashBalance + borrowed + netIncome;
         var isBankrupt = cashAfter < Money.Zero || debtBalance > Money.FromDollars(DebtCeilingDollars);
 
         var newState = state with { CashBalance = cashAfter, DebtBalance = debtBalance, IsBankrupt = isBankrupt };
-        var statement = new QuarterlyStatement(revenue, operatingCost, debtService, borrowed, netIncome, cashAfter, isBankrupt);
+        var statement = new QuarterlyStatement(revenue, operatingCost, debtService, borrowed, netIncome, cashAfter, isBankrupt, purchaseCost, leaseFee, retirementProceeds);
 
         return (newState, statement);
+    }
+
+    private static Money ComputeLeaseFee(AirlineFleet? fleet)
+    {
+        if (fleet is null)
+        {
+            return Money.Zero;
+        }
+
+        var cents = 0L;
+
+        foreach (var unit in fleet.Units.Where(u => u.Mode == FleetOwnershipMode.Leased))
+        {
+            cents += (long)Math.Round(unit.Type.Cost.Cents * LeaseFeeRatePerQuarter, MidpointRounding.AwayFromZero);
+        }
+
+        return new Money(cents);
+    }
+
+    private static Money ComputeRetirementProceeds(IReadOnlyList<FleetUnit>? retiredUnits)
+    {
+        if (retiredUnits is null)
+        {
+            return Money.Zero;
+        }
+
+        var cents = 0L;
+
+        foreach (var unit in retiredUnits.Where(u => u.Mode == FleetOwnershipMode.Owned))
+        {
+            cents += (long)Math.Round(unit.Type.Cost.Cents * RetirementResaleFraction, MidpointRounding.AwayFromZero);
+        }
+
+        return new Money(cents);
     }
 
     private static Money ComputeRevenue(Airline airline, CompetitiveMarketResult marketResult, double yieldPerPassengerKm)

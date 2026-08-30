@@ -100,6 +100,7 @@ public static class FullGameRunner
             var availableFleet = Timeline.AvailableAircraft(fleetCatalog, year);
             var yearDemandModel = new GravityDemandModel(globalMultiplier: Timeline.DemandMultiplierForYear(growthSchedule, year));
             var appliedOrdersByName = new Dictionary<string, IReadOnlyList<QuarterOrder>>();
+            var retiredUnitsByName = new Dictionary<string, IReadOnlyList<FleetUnit>>();
 
             // Deliveries from orders placed in earlier quarters arrive
             // before this quarter's own route decisions are made, per
@@ -128,6 +129,7 @@ public static class FullGameRunner
                 if (wasBankruptEnteringQuarter)
                 {
                     appliedOrdersByName[name] = Array.Empty<QuarterOrder>();
+                    retiredUnitsByName[name] = Array.Empty<FleetUnit>();
                     continue;
                 }
 
@@ -145,7 +147,7 @@ public static class FullGameRunner
                     }
                     : BaselineAi.DecideOrders(routes[name], caps[name], cities, yearDemandModel, availableFleet, fleets[name]).ToArray();
 
-                var result = QuarterEngine.RunQuarter(q, routes[name], caps[name], orders, cities, yearDemandModel, fleets[name]);
+                var result = QuarterEngine.RunQuarter(q, routes[name], caps[name], orders, cities, yearDemandModel, fleets[name], availableCash: finances[name].CashBalance);
 
                 if (q == 1 && result.RejectedOrders.Count > 0)
                 {
@@ -156,6 +158,7 @@ public static class FullGameRunner
                 caps[name] = result.ActionCap;
                 fleets[name] = result.UpdatedFleet!;
                 appliedOrdersByName[name] = result.AppliedOrders;
+                retiredUnitsByName[name] = result.RetiredUnits!;
 
                 var airlineSnapshot = new Airline(name, routes[name]);
                 foreach (var negotiation in result.AppliedOrders.OfType<NegotiationOrder>())
@@ -189,7 +192,7 @@ public static class FullGameRunner
                 var name = airline.Name;
                 var wasBankruptEnteringQuarter = finances[name].IsBankrupt;
 
-                var (nextState, _) = FinancialResolver.Resolve(finances[name], airline, market, appliedOrdersByName[name]);
+                var (nextState, _) = FinancialResolver.Resolve(finances[name], airline, market, appliedOrdersByName[name], fleet: fleets[name], retiredUnits: retiredUnitsByName[name]);
                 finances[name] = nextState;
 
                 if (wasBankruptEnteringQuarter)

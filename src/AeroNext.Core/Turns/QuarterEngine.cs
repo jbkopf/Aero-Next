@@ -43,7 +43,20 @@ public static class QuarterEngine
     /// Passing a real AirlineFleet turns on ownership enforcement: a
     /// RouteOrder needing a new or different aircraft type is rejected
     /// without an idle unit of that type, matching CLAUDE.md's legibility
-    /// pillar the same way the existing range/era rejections do.
+    /// pillar the same way the existing range/era rejections do. Also
+    /// required (non-null) for RetireAircraftOrder to succeed at all.
+    /// </param>
+    /// <param name="availableCash">
+    /// Null (the default) preserves fully permissive behavior — an
+    /// AircraftOrder is never rejected for cost, exactly as before this
+    /// parameter existed. Passing a real amount (quarter-start cash on
+    /// hand, before this quarter's own revenue arrives) turns on
+    /// affordability enforcement: an AircraftOrder whose Type.Cost x
+    /// Quantity would exceed what's left of it — after every
+    /// already-applied order's own cash cost this quarter — is rejected
+    /// outright, per CLAUDE.md's affordability rule: a player is never
+    /// allowed to attempt a purchase beyond cash on hand and waste the
+    /// action finding out.
     /// </param>
     public static QuarterResult RunQuarter(
         int quarterNumber,
@@ -52,11 +65,14 @@ public static class QuarterEngine
         IReadOnlyList<QuarterOrder> orders,
         IReadOnlyList<City> cities,
         GravityDemandModel demandModel,
-        AirlineFleet? fleet = null)
+        AirlineFleet? fleet = null,
+        Money? availableCash = null)
     {
         var applied = new List<QuarterOrder>();
         var rejected = new List<QuarterOrder>();
+        var retiredUnits = new List<FleetUnit>();
         var spent = 0;
+        var cashSpent = Money.Zero;
         var year = Timeline.YearForQuarter(quarterNumber);
         var workingFleet = fleet;
 
@@ -72,6 +88,30 @@ public static class QuarterEngine
             {
                 rejected.Add(order);
                 continue;
+            }
+
+            if (order is AircraftOrder aircraftOrder && availableCash is not null)
+            {
+                var purchaseCost = aircraftOrder.Type.Cost * aircraftOrder.Quantity;
+
+                if (cashSpent + purchaseCost > availableCash.Value)
+                {
+                    rejected.Add(order);
+                    continue;
+                }
+            }
+
+            FleetUnit? unitToRetire = null;
+
+            if (order is RetireAircraftOrder retireOrder)
+            {
+                unitToRetire = workingFleet?.Units.FirstOrDefault(u => u.Id == retireOrder.UnitId);
+
+                if (unitToRetire is null || unitToRetire.AssignedRouteKey is not null)
+                {
+                    rejected.Add(order);
+                    continue;
+                }
             }
 
             FleetUnit? unitToAssign = null;
@@ -129,6 +169,17 @@ public static class QuarterEngine
                 workingFleet = FleetLedger.Assign(workingFleet, unitToAssign.Id, routeKey);
             }
 
+            if (order is RetireAircraftOrder && unitToRetire is not null && workingFleet is not null)
+            {
+                retiredUnits.Add(unitToRetire);
+                workingFleet = FleetLedger.Retire(workingFleet, unitToRetire.Id);
+            }
+
+            if (order is AircraftOrder appliedAircraftOrder && availableCash is not null)
+            {
+                cashSpent += appliedAircraftOrder.Type.Cost * appliedAircraftOrder.Quantity;
+            }
+
             applied.Add(order);
             spent += cost;
         }
@@ -137,7 +188,7 @@ public static class QuarterEngine
         var nextActionCap = currentActionCap + applied.OfType<HireExecutiveOrder>().Sum(h => h.CapIncrease);
         var plan = NetworkPlanner.Plan(routes, cities, demandModel);
 
-        return new QuarterResult(quarterNumber, routes, plan, nextActionCap, applied, rejected, workingFleet);
+        return new QuarterResult(quarterNumber, routes, plan, nextActionCap, applied, rejected, workingFleet, retiredUnits);
     }
 
     /// <summary>
@@ -157,6 +208,7 @@ public static class QuarterEngine
         RouteOrder ro => currentRoutes.Any(r => r.Origin.Id == ro.Origin.Id && r.Destination.Id == ro.Destination.Id) ? 0 : 1,
         HireExecutiveOrder => 0,
         RefinanceOrder => 0,
+        RetireAircraftOrder => 0,
         NegotiationOrder => 1,
         AircraftOrder => 1,
         LeaseAircraftOrder => 1,

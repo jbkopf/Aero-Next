@@ -567,11 +567,18 @@ string ChokepointStatus(int year)
     return direct ? $"{best.Name} flies JFK-LHR direct" : $"{best.Name} still needs a Gander stop";
 }
 
-// Chosen to capture the actual arc found by running this: a mild early
-// dip, a peak at quarter 35 ($33.7M, 1963), then bankruptcy at
-// quarter 52 (1967) - re-measured after wiring real fleet ownership into
-// this loop (see docs/FINANCIAL_MODEL_ROADMAP.md) - not evenly spaced.
-var checkpoints = new HashSet<int> { 1, 15, 35, 52, 121, campaignQuarters };
+// Chosen to capture the actual arc found by running this: re-measured
+// after M26 wired real lease fees + purchase/retirement cash into this
+// loop (see docs/FINANCIAL_MODEL_ROADMAP.md). No peak anymore - cash
+// declines monotonically from quarter 1 ($19.8M) straight to bankruptcy
+// at quarter 25 (1961, -$135.6K), never once rising above its starting
+// figure. BaselineAi leases a fresh aircraft for essentially every new
+// route (M25b), and each one now carries a real, recurring 4%-of-cost
+// fee every quarter forever - the accumulating fleet of leases outpaces
+// route revenue well before the campaign's early growth curve catches up.
+// 121 stays in the checkpoint set as a stickiness sanity check: bankrupt
+// airlines' cash stays frozen for the ~220 quarters that follow.
+var checkpoints = new HashSet<int> { 1, 12, 24, 25, 121, campaignQuarters };
 
 var campaignDominance = RegionalDominanceState.Empty;
 string? campaignWinner = null;
@@ -584,6 +591,7 @@ for (var q = 1; q <= campaignQuarters; q++)
     var availableFleet = Timeline.AvailableAircraft(fleetCatalog, year);
     var yearDemandModel = new GravityDemandModel(globalMultiplier: Timeline.DemandMultiplierForYear(growthSchedule, year));
     var appliedOrdersByAirline = new Dictionary<string, IReadOnlyList<QuarterOrder>>();
+    var retiredUnitsByAirline = new Dictionary<string, IReadOnlyList<FleetUnit>>();
 
     IReadOnlyList<AircraftDelivery> campaignDeliveries;
     (campaignAircraftOrderBoard, campaignDeliveries) = AircraftOrderResolver.ResolveQuarter(campaignAircraftOrderBoard, q);
@@ -600,15 +608,17 @@ for (var q = 1; q <= campaignQuarters; q++)
         if (campaignFinances[name].IsBankrupt)
         {
             appliedOrdersByAirline[name] = Array.Empty<QuarterOrder>();
+            retiredUnitsByAirline[name] = Array.Empty<FleetUnit>();
             continue;
         }
 
         var orders = BaselineAi.DecideOrders(campaignRoutes[name], campaignCaps[name], cities, yearDemandModel, availableFleet, campaignFleets[name]);
-        var result = QuarterEngine.RunQuarter(q, campaignRoutes[name], campaignCaps[name], orders, cities, yearDemandModel, campaignFleets[name]);
+        var result = QuarterEngine.RunQuarter(q, campaignRoutes[name], campaignCaps[name], orders, cities, yearDemandModel, campaignFleets[name], availableCash: campaignFinances[name].CashBalance);
         campaignRoutes[name] = result.Routes;
         campaignCaps[name] = result.ActionCap;
         campaignFleets[name] = result.UpdatedFleet!;
         appliedOrdersByAirline[name] = result.AppliedOrders;
+        retiredUnitsByAirline[name] = result.RetiredUnits!;
 
         var campaignAirlineSnapshot = new Airline(name, campaignRoutes[name]);
         foreach (var aircraftOrder in result.AppliedOrders.OfType<AircraftOrder>())
@@ -622,7 +632,7 @@ for (var q = 1; q <= campaignQuarters; q++)
 
     foreach (var seat in campaignLeague)
     {
-        var (nextState, _) = FinancialResolver.Resolve(campaignFinances[seat.Name], seat, campaignMarket, appliedOrdersByAirline[seat.Name]);
+        var (nextState, _) = FinancialResolver.Resolve(campaignFinances[seat.Name], seat, campaignMarket, appliedOrdersByAirline[seat.Name], fleet: campaignFleets[seat.Name], retiredUnits: retiredUnitsByAirline[seat.Name]);
         campaignFinances[seat.Name] = nextState;
     }
 
