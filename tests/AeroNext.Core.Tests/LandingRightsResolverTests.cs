@@ -209,4 +209,153 @@ public class LandingRightsResolverTests
 
         Assert.Equal(1, QuarterEngine.Cost(order, Array.Empty<Route>()));
     }
+
+    // --- M33: per-airline slot holdings ---
+
+    [Fact]
+    public void ResolveQuarter_Win_PopulatesSlotsHeld_ForTheWinningAirlineSpecifically()
+    {
+        var city = MakeCity("gate", gateCapacity: 2);
+        var a = MakeAirline("A");
+        var b = MakeAirline("B");
+        var board = LandingRightsBoard.Empty with
+        {
+            Pending = new[] { new PendingNegotiation(a, city, Money.FromDollars(1_000_000), 1, 3) },
+        };
+
+        (board, var outcomes) = LandingRightsResolver.ResolveQuarter(board, currentQuarter: 3);
+
+        Assert.True(outcomes.Single().Won);
+        Assert.Equal(1, board.SlotsHeldBy(a, city));
+        Assert.Equal(0, board.SlotsHeldBy(b, city)); // never bid, never holds anything
+    }
+
+    [Fact]
+    public void ResolveQuarter_Loss_DoesNotAddToSlotsHeld()
+    {
+        var city = MakeCity("gate", gateCapacity: 1);
+        var winner = MakeAirline("Winner");
+        var loser = MakeAirline("Loser");
+        var board = LandingRightsBoard.Empty with
+        {
+            Pending = new[]
+            {
+                new PendingNegotiation(winner, city, Money.FromDollars(1_000_000), 1, 3),
+                new PendingNegotiation(loser, city, Money.FromDollars(500_000), 1, 3),
+            },
+        };
+
+        (board, _) = LandingRightsResolver.ResolveQuarter(board, currentQuarter: 3);
+
+        Assert.Equal(1, board.SlotsHeldBy(winner, city));
+        Assert.Equal(0, board.SlotsHeldBy(loser, city));
+    }
+
+    [Fact]
+    public void ResolveQuarter_TwoSeparateWins_SameAirlineSameCity_AccumulatesSlotsHeld()
+    {
+        var city = MakeCity("gate", gateCapacity: 2);
+        var a = MakeAirline("A");
+
+        var board = LandingRightsBoard.Empty with
+        {
+            Pending = new[] { new PendingNegotiation(a, city, Money.FromDollars(1_000_000), 1, 3) },
+        };
+        (board, _) = LandingRightsResolver.ResolveQuarter(board, currentQuarter: 3);
+        Assert.Equal(1, board.SlotsHeldBy(a, city));
+
+        board = board with
+        {
+            Pending = new[] { new PendingNegotiation(a, city, Money.FromDollars(1_000_000), 4, 6) },
+        };
+        (board, _) = LandingRightsResolver.ResolveQuarter(board, currentQuarter: 6);
+
+        Assert.Equal(2, board.SlotsHeldBy(a, city)); // same airline, second win at the same city adds up
+    }
+
+    [Fact]
+    public void AvailableSlotsByCity_HeldMinusInUse_ReturnsRemainingBalance()
+    {
+        var gate = MakeCity("gate", gateCapacity: 5);
+        var elsewhere = new City("else", "Else", Region.EastAsia, 10, 10, 50, false, null);
+        var aircraft = new AircraftType("t", "Test", Seats: 100);
+        var airline = MakeAirline("A");
+        var board = LandingRightsBoard.Empty with
+        {
+            SlotsHeld = new Dictionary<(string, string), int> { [("A", "gate")] = 3 },
+        };
+        var routes = new[] { new Route(gate, elsewhere, aircraft, AircraftCount: 2) }; // 2 of the 3 held slots in use
+
+        var available = board.AvailableSlotsByCity(airline, routes);
+
+        Assert.Equal(1, available["gate"]);
+    }
+
+    [Fact]
+    public void AvailableSlotsByCity_CountsRouteAsInUse_WhenGatewayIsTheDestination_NotJustOrigin()
+    {
+        var gate = MakeCity("gate", gateCapacity: 5);
+        var elsewhere = new City("else", "Else", Region.EastAsia, 10, 10, 50, false, null);
+        var aircraft = new AircraftType("t", "Test", Seats: 100);
+        var airline = MakeAirline("A");
+        var board = LandingRightsBoard.Empty with
+        {
+            SlotsHeld = new Dictionary<(string, string), int> { [("A", "gate")] = 3 },
+        };
+        var routes = new[] { new Route(elsewhere, gate, aircraft, AircraftCount: 2) }; // gate is the destination here
+
+        var available = board.AvailableSlotsByCity(airline, routes);
+
+        Assert.Equal(1, available["gate"]);
+    }
+
+    [Fact]
+    public void AvailableSlotsByCity_NoRoutesTouchingCity_ReturnsFullHeldAmount()
+    {
+        var gate = MakeCity("gate", gateCapacity: 5);
+        var airline = MakeAirline("A");
+        var board = LandingRightsBoard.Empty with
+        {
+            SlotsHeld = new Dictionary<(string, string), int> { [("A", "gate")] = 4 },
+        };
+
+        var available = board.AvailableSlotsByCity(airline, Array.Empty<Route>());
+
+        Assert.Equal(4, available["gate"]);
+    }
+
+    [Fact]
+    public void AvailableSlotsByCity_InUseExceedsHeld_FloorsAtZero_NeverNegative()
+    {
+        // Shouldn't happen in practice (QuarterEngine won't let AircraftCount
+        // outrun held slots going forward), but must never go negative if it did.
+        var gate = MakeCity("gate", gateCapacity: 5);
+        var elsewhere = new City("else", "Else", Region.EastAsia, 10, 10, 50, false, null);
+        var aircraft = new AircraftType("t", "Test", Seats: 100);
+        var airline = MakeAirline("A");
+        var board = LandingRightsBoard.Empty with
+        {
+            SlotsHeld = new Dictionary<(string, string), int> { [("A", "gate")] = 1 },
+        };
+        var routes = new[] { new Route(gate, elsewhere, aircraft, AircraftCount: 5) };
+
+        var available = board.AvailableSlotsByCity(airline, routes);
+
+        Assert.Equal(0, available["gate"]);
+    }
+
+    [Fact]
+    public void AvailableSlotsByCity_OnlyIncludesCitiesThisAirlineHolds_NotOtherAirlines()
+    {
+        var gate = MakeCity("gate", gateCapacity: 5);
+        var a = MakeAirline("A");
+        var board = LandingRightsBoard.Empty with
+        {
+            SlotsHeld = new Dictionary<(string, string), int> { [("B", "gate")] = 3 }, // B holds it, not A
+        };
+
+        var available = board.AvailableSlotsByCity(a, Array.Empty<Route>());
+
+        Assert.Empty(available);
+    }
 }

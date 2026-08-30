@@ -196,33 +196,94 @@ design pass, not resolved here.
 
 ---
 
-## M33 — Gateway slots gate route/aircraft assignment
+## M33 — Gateway slots gate route/aircraft assignment ✅
 
-**Design already settled** (see the M32 plan this shipped from, and the
-Context section above) — not yet built:
+**`LandingRightsBoard` gained per-airline slot tracking** — `SlotsGranted`
+stayed as the city-wide total (still needed for "how many are left to
+contest"), and a new `IReadOnlyDictionary<(string AirlineName, string CityId), int> SlotsHeld`
+was added, populated by `LandingRightsResolver.ResolveQuarter` alongside
+it (the resolver already knew the winning airline via `pending.Airline` —
+it was just being discarded after the transient `NegotiationOutcome`). A
+new `SlotsHeldBy(airline, city)` reader and `AvailableSlotsByCity(airline,
+currentRoutes)` — the airline's real per-city credit balance, held minus
+in-use — landed on `LandingRightsBoard` itself, computed fresh from live
+route state (`AircraftCount` summed per gateway city touched) each call
+rather than a separately persisted ledger, so a route closing or
+shrinking frees capacity automatically with no extra bookkeeping.
 
-**`LandingRightsBoard` gains per-airline slot tracking.** Today
-`SlotsGranted` is a city-wide total only; nothing records which airline
-holds how many. Add `IReadOnlyDictionary<(string AirlineName, string CityId), int> SlotsHeld`,
-populated by `LandingRightsResolver.ResolveQuarter` alongside the existing
-`SlotsGranted` update (it already knows the winning airline via
-`pending.Airline`, currently discarded after the transient
-`NegotiationOutcome`).
+**`QuarterEngine.RunQuarter` gained `IReadOnlyDictionary<string, int>? availableSlotsByCity = null`**
+— null (the default) preserves fully permissive behavior for every
+pre-existing call site, confirmed directly (the full pre-existing suite
+passed unmodified before any new tests were added). A `RouteOrder`
+touching a city with non-null `GateCapacity` is rejected if the balance is
+spent, checked independently at **both** `Origin` and `Destination` — a
+route occupies capacity at every gateway endpoint it touches, not just
+one — tracked via a running per-quarter spend counter, the same pattern
+`cashSpent` already established.
 
-**`QuarterEngine` gains `IReadOnlyDictionary<string, int>? availableSlotsByCity = null`**
-— a per-city credit balance for the airline, computed by the caller each
-quarter as `max(0, heldSlots(airline, cityId) - inUseSlots(airline, cityId))`,
-where `inUseSlots` is summed fresh from the airline's *current* routes
-(`AircraftCount` on every route touching that city, cities with non-null
-`GateCapacity` only) — deliberately not a separately persisted ledger, so
-a route closing or shrinking automatically frees capacity with no extra
-bookkeeping. A `RouteOrder` touching a gateway (checked at **both**
-`Origin` and `Destination` independently — a route occupies capacity at
-every gateway endpoint it touches) is rejected if the balance is spent,
-tracked per-quarter the same way `cashSpent` already is.
+**`BaselineAi` became slot-aware**, mirroring the existing cash/fleet
+"never attempt what will predictably fail" principle: a growth or
+new-pair candidate touching a gateway with no available slot is skipped
+outright, not searched around for an alternative (this AI's existing
+"single best candidate, no fallback search" character, unchanged). A new
+local `slotsReservedByCity` map — the same idea as the existing
+`reservedUnitIds` set — prevents the growth step and new-pair step from
+double-spending the same city's balance within one planning pass.
 
-**`BaselineAi` becomes slot-aware** for gateway cities, same "never
-attempt what will predictably fail" principle already applied to cash and
-fleet.
+**Deliberately left permissive: `AeroNext.Sim`'s M13 loop.** That loop
+never wires `NegotiationOrder`s into `LandingRightsResolver` at all — a
+pre-existing, already-documented gap (`FullGameRunner.cs`'s own doc
+comment names it) — so it never builds a real `LandingRightsBoard` to
+compute a genuine balance from. Passing `null` there (both calls)
+preserves its existing behavior rather than gating every gateway route
+outright against an always-empty board; building the missing negotiation
+wiring for M13 specifically was judged separate, unrequested scope.
+Confirmed by re-running the full M13 sweep: byte-identical output to
+M32's, since this code path is never exercised there.
 
-**Not yet started.**
+**One real correctness wrinkle, caught before it shipped:** M18's
+guaranteed quarter-1 route has no way to pre-acquire a negotiated slot —
+nothing in the starting-conditions design grants one — so gating it by
+slots would occasionally break the "always accepted" invariant
+`FullGameRunner.cs` already checks, whenever a seat's starting or
+guaranteed-destination city happened to be a gateway. Fixed by exempting
+quarter 1's guaranteed route specifically (`availableSlotsByCity: null`
+for that one call), leaving every quarter from 2 onward genuinely gated.
+
+**Done when:** the pre-existing call sites pass unmodified; dedicated
+tests cover a won negotiation populating `SlotsHeld` for the winning
+airline specifically (not the loser, not the city-wide total alone),
+`AvailableSlotsByCity`'s held-minus-in-use arithmetic (including the
+gateway-as-destination case, not just origin, and flooring at zero rather
+than going negative), `QuarterEngine` rejecting at zero balance and
+correctly spending down a shared balance across two orders in one batch,
+a non-gateway city never gated regardless of the dictionary's contents,
+both endpoints independently gating when both are gateways, and
+`BaselineAi` never proposing what the engine would reject either for
+growth or for a new pair. `LandingRightsResolver`'s existing negotiation
+tests (bidding, standing, partial payoff) all passed unmodified,
+confirming `SlotsHeld` is genuinely additive to that system, not a
+behavior change to it.
+
+Done. 385 tests total (16 new — 7 `LandingRightsBoard`/`Resolver`, 5
+`QuarterEngine`, 4 `BaselineAi`). 100% line/branch coverage on every
+touched/new class (`QuarterEngine`, `LandingRightsBoard`,
+`LandingRightsResolver`, `BaselineAi`). Overall project coverage
+**99.83%/99.51%**, at the established baseline. 150-game QA harness
+sweep at 244 quarters: 150/150 clean, 0 invariant violations, 0 crashes.
+
+**Bankruptcy moved earlier again in the QA harness sweep — a real,
+compounding finding, not silently absorbed.** Bankruptcy now averages
+quarter 5.8-9.6 across regions (versus M32's 10.6-20.4), win rate stayed
+at **0/150**. Root cause: an un-negotiated gateway is now a genuine wall
+for `BaselineAi` — a route it could previously open or grow instantly now
+has to wait 2-4 quarters for a negotiation to land *and* spend an action
+on it, on top of every constraint M26 and M32 already added. This is the
+mechanic working exactly as designed (CLAUDE.md's own "landing slots are
+finite; taking one denies a rival" pillar finally has real teeth — winning
+a gateway negotiation now visibly matters), but it's the third milestone
+in a row where a legitimate, individually-correct mechanic has made this
+particular un-tuned heuristic AI's campaign trajectory worse. `BaselineAi`
+needs a real rework before M26/M32/M33's mechanics can be fairly judged
+on campaign feel or win-condition reachability — no longer a "maybe
+later," a clear prerequisite for the next piece of work on this game.

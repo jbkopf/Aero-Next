@@ -59,7 +59,10 @@ Actions are classified by **how they resolve under simultaneity**:
 - **Negotiate landing rights** — commit cash + diplomatic effort at a city.
   Resolves on money x relations x reputation x political alignment. Takes
   2–4 quarters to land, so you commit blind and learn late. Multiple
-  suitors drive the price up for everyone automatically.
+  suitors drive the price up for everyone automatically. A won slot is what
+  actually lets you enter or grow a route there at all — one slot per
+  aircraft operating through that gateway, so a busy chokepoint eventually
+  needs several wins, not just one.
 - **Order aircraft** — the contested resource is the *delivery position on
   the production line*, not the aircraft. Order late and you take delivery
   years later. Leasing is the expensive instant-metal escape hatch.

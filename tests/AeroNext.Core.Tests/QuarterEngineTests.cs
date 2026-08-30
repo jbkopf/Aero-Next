@@ -606,4 +606,85 @@ public class QuarterEngineTests
     {
         Assert.Equal(0, QuarterEngine.Cost(new RetireAircraftOrder(UnitId: 1), Array.Empty<Route>()));
     }
+
+    // --- M33: gateway slot gating ---
+
+    private static City MakeGateway(string id, double lat, double lon, int weight, int gateCapacity) =>
+        new(id, id.ToUpperInvariant(), Region.EastAsia, lat, lon, weight, true, gateCapacity);
+
+    [Fact]
+    public void RunQuarter_NoSlotsPassed_NeverGatesOnGateScarcity()
+    {
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 50);
+        var gateway = MakeGateway("gw", 1, 1, 50, gateCapacity: 1);
+        var order = new RouteOrder(a, gateway, Aircraft);
+
+        var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, new[] { a, gateway }, demandModel);
+
+        Assert.Single(result.AppliedOrders);
+        Assert.Empty(result.RejectedOrders);
+    }
+
+    [Fact]
+    public void RunQuarter_GatewayWithZeroAvailableSlots_Rejected()
+    {
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 50);
+        var gateway = MakeGateway("gw", 1, 1, 50, gateCapacity: 1);
+        var order = new RouteOrder(a, gateway, Aircraft);
+        var availableSlotsByCity = new Dictionary<string, int> { ["gw"] = 0 };
+
+        var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, new[] { a, gateway }, demandModel, availableSlotsByCity: availableSlotsByCity);
+
+        Assert.Empty(result.AppliedOrders);
+        Assert.Single(result.RejectedOrders);
+    }
+
+    [Fact]
+    public void RunQuarter_GatewayWithOneAvailableSlot_FirstOrderSucceeds_SecondInSameBatchRejected()
+    {
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 50);
+        var b = MakeCity("b", 2, 2, 50);
+        var gateway = MakeGateway("gw", 1, 1, 50, gateCapacity: 5);
+        var orders = new[] { new RouteOrder(a, gateway, Aircraft), new RouteOrder(b, gateway, Aircraft) };
+        var availableSlotsByCity = new Dictionary<string, int> { ["gw"] = 1 };
+
+        var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, orders, new[] { a, b, gateway }, demandModel, availableSlotsByCity: availableSlotsByCity);
+
+        Assert.Single(result.AppliedOrders);
+        Assert.Single(result.RejectedOrders);
+    }
+
+    [Fact]
+    public void RunQuarter_NonGatewayCity_NeverGated_RegardlessOfAvailableSlotsByCityContents()
+    {
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 50);
+        var b = MakeCity("b", 1, 1, 50); // GateCapacity: null - not a gateway
+        var order = new RouteOrder(a, b, Aircraft);
+        var availableSlotsByCity = new Dictionary<string, int>(); // empty - "b" never appears, would read as 0 if it were checked
+
+        var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, new[] { a, b }, demandModel, availableSlotsByCity: availableSlotsByCity);
+
+        Assert.Single(result.AppliedOrders);
+        Assert.Empty(result.RejectedOrders);
+    }
+
+    [Fact]
+    public void RunQuarter_BothEndpointsAreGateways_EachIndependentlyGates()
+    {
+        var demandModel = new GravityDemandModel();
+        var gateA = MakeGateway("ga", 0, 0, 50, gateCapacity: 5);
+        var gateB = MakeGateway("gb", 1, 1, 50, gateCapacity: 5);
+        var order = new RouteOrder(gateA, gateB, Aircraft);
+        // Slot available at ga but not at gb - order must still be rejected.
+        var availableSlotsByCity = new Dictionary<string, int> { ["ga"] = 1, ["gb"] = 0 };
+
+        var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, new[] { gateA, gateB }, demandModel, availableSlotsByCity: availableSlotsByCity);
+
+        Assert.Empty(result.AppliedOrders);
+        Assert.Single(result.RejectedOrders);
+    }
 }

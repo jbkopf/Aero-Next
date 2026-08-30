@@ -616,6 +616,14 @@ for (var q = 1; q <= campaignQuarters; q++)
             continue;
         }
 
+        // M33's gate-slot gating is deliberately left off (availableSlotsByCity: null,
+        // both calls) — this loop never wires NegotiationOrders into
+        // LandingRightsResolver at all (a pre-existing, already-documented
+        // gap; see FullGameRunner.cs's own doc comment), so it never builds
+        // a real LandingRightsBoard to compute a genuine balance from.
+        // Gating on an always-empty board would block every gateway route
+        // outright rather than leaving this demo loop's existing behavior
+        // alone.
         var orders = BaselineAi.DecideOrders(campaignRoutes[name], campaignCaps[name], cities, yearDemandModel, availableFleet, campaignFleets[name]);
         var result = QuarterEngine.RunQuarter(q, campaignRoutes[name], campaignCaps[name], orders, cities, yearDemandModel, campaignFleets[name], availableCash: campaignFinances[name].CashBalance);
         campaignRoutes[name] = result.Routes;

@@ -61,6 +61,22 @@ public static class QuarterEngine
     /// allowed to attempt a purchase beyond cash on hand and waste the
     /// action finding out.
     /// </param>
+    /// <param name="availableSlotsByCity">
+    /// Null (the default) preserves fully permissive behavior — a
+    /// RouteOrder is never rejected for gate scarcity, exactly as before
+    /// this parameter existed (and City.GateCapacity has never had any
+    /// mechanical effect on RouteOrder until now). Passing a real
+    /// per-city balance (this airline's held landing-rights slots minus
+    /// how many its current routes already occupy there — see
+    /// LandingRightsBoard.SlotsHeldBy) turns on gate-scarcity enforcement
+    /// (M33): a RouteOrder touching a city with a non-null GateCapacity is
+    /// rejected if this airline has no slot left there, checked
+    /// independently at both Origin and Destination — a route occupies
+    /// capacity at every gateway endpoint it touches, not just one. Cities
+    /// with a null GateCapacity are never gated, regardless of this
+    /// dictionary's contents, matching City's own "null means gate access
+    /// isn't modeled as scarce there."
+    /// </param>
     public static QuarterResult RunQuarter(
         int quarterNumber,
         IReadOnlyList<Route> currentRoutes,
@@ -69,13 +85,15 @@ public static class QuarterEngine
         IReadOnlyList<City> cities,
         GravityDemandModel demandModel,
         AirlineFleet? fleet = null,
-        Money? availableCash = null)
+        Money? availableCash = null,
+        IReadOnlyDictionary<string, int>? availableSlotsByCity = null)
     {
         var applied = new List<QuarterOrder>();
         var rejected = new List<QuarterOrder>();
         var retiredUnits = new List<FleetUnit>();
         var spent = 0;
         var cashSpent = Money.Zero;
+        var slotsSpentByCity = new Dictionary<string, int>();
         var year = Timeline.YearForQuarter(quarterNumber);
         var workingFleet = fleet;
 
@@ -110,6 +128,18 @@ public static class QuarterEngine
                 var purchaseCost = aircraftOrder.Type.Cost * aircraftOrder.Quantity;
 
                 if (cashSpent + purchaseCost > availableCash.Value)
+                {
+                    rejected.Add(order);
+                    continue;
+                }
+            }
+
+            if (order is RouteOrder slotOrder && availableSlotsByCity is not null)
+            {
+                var blockedAtAGateway = GatewayEndpoints(slotOrder).Any(city =>
+                    availableSlotsByCity.GetValueOrDefault(city.Id) - slotsSpentByCity.GetValueOrDefault(city.Id) <= 0);
+
+                if (blockedAtAGateway)
                 {
                     rejected.Add(order);
                     continue;
@@ -202,6 +232,14 @@ public static class QuarterEngine
                 cashSpent += appliedAircraftOrder.Type.Cost * appliedAircraftOrder.Quantity;
             }
 
+            if (order is RouteOrder appliedSlotOrder && availableSlotsByCity is not null)
+            {
+                foreach (var city in GatewayEndpoints(appliedSlotOrder))
+                {
+                    slotsSpentByCity[city.Id] = slotsSpentByCity.GetValueOrDefault(city.Id) + 1;
+                }
+            }
+
             applied.Add(order);
             spent += cost;
         }
@@ -268,6 +306,10 @@ public static class QuarterEngine
 
     /// <summary>String form of RouteKey — FleetUnit.AssignedRouteKey's format, settled here.</summary>
     private static string RouteKeyString(City origin, City destination) => $"{origin.Id}-{destination.Id}";
+
+    /// <summary>Which of a RouteOrder's two endpoints actually have gate scarcity modeled (M33) — a route occupies a slot at each one it touches.</summary>
+    private static IEnumerable<City> GatewayEndpoints(RouteOrder order) =>
+        new[] { order.Origin, order.Destination }.Where(c => c.GateCapacity is not null);
 
     private static bool IsAircraftAvailable(QuarterOrder order, int year) => order switch
     {

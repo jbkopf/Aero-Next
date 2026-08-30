@@ -53,13 +53,23 @@ public static class BaselineAi
     /// QuarterEngine's inline lease resolution to make that same-quarter
     /// use possible.
     /// </param>
+    /// <param name="availableSlotsByCity">
+    /// M33: null (the default) never blocks a candidate on gate scarcity,
+    /// matching QuarterEngine's own permissive default. Passing this
+    /// airline's real per-city balance (see QuarterEngine.RunQuarter's own
+    /// parameter of the same name) makes this AI skip — not search for an
+    /// alternative to — a growth or new-pair candidate that would touch a
+    /// gateway city it has no slot left at, the same "never attempt what
+    /// will predictably fail" principle already applied to cash and fleet.
+    /// </param>
     public static IReadOnlyList<QuarterOrder> DecideOrders(
         IReadOnlyList<Route> currentRoutes,
         int actionCap,
         IReadOnlyList<City> allCities,
         GravityDemandModel demandModel,
         IReadOnlyList<AircraftType> eraAvailableTypes,
-        AirlineFleet ownFleet)
+        AirlineFleet ownFleet,
+        IReadOnlyDictionary<string, int>? availableSlotsByCity = null)
     {
         var orders = new List<QuarterOrder>();
         var spent = 0;
@@ -71,8 +81,14 @@ public static class BaselineAi
         // reject as a wasted action.
         var reservedUnitIds = new HashSet<int>();
 
+        // Same idea for gate slots (M33): a city touched by both the
+        // growth and new-pair steps in one pass must not be treated as
+        // having two separate slots available when it only has one.
+        var slotsReservedByCity = new Dictionary<string, int>();
+
         var bestExisting = FindBestPerformingRoute(currentRoutes, demandModel);
-        if (bestExisting is not null && spent + 1 <= actionCap)
+        if (bestExisting is not null && spent + 1 <= actionCap
+            && HasSlotAtEveryGateway(bestExisting.Origin, bestExisting.Destination, availableSlotsByCity, slotsReservedByCity))
         {
             var idleUnit = ownFleet.Idle
                 .Where(u => u.Type.Id == bestExisting.Aircraft.Id)
@@ -83,6 +99,7 @@ public static class BaselineAi
             {
                 orders.Add(new RouteOrder(bestExisting.Origin, bestExisting.Destination, bestExisting.Aircraft));
                 reservedUnitIds.Add(idleUnit.Id);
+                ReserveSlots(bestExisting.Origin, bestExisting.Destination, slotsReservedByCity);
                 spent += 1;
             }
             else if (spent + 2 <= actionCap)
@@ -94,6 +111,7 @@ public static class BaselineAi
                 // already flying it - QuarterEngine rejects a mismatch.
                 orders.Add(new LeaseAircraftOrder(bestExisting.Aircraft, Quantity: 1));
                 orders.Add(new RouteOrder(bestExisting.Origin, bestExisting.Destination, bestExisting.Aircraft));
+                ReserveSlots(bestExisting.Origin, bestExisting.Destination, slotsReservedByCity);
                 spent += 2;
             }
         }
@@ -102,13 +120,14 @@ public static class BaselineAi
         {
             var idleBest = FindBestUnservedPairUsingIdleFleet(currentRoutes, allCities, demandModel, ownFleet, reservedUnitIds);
 
-            if (idleBest is not null)
+            if (idleBest is not null && HasSlotAtEveryGateway(idleBest.Value.Pair.Origin, idleBest.Value.Pair.Destination, availableSlotsByCity, slotsReservedByCity))
             {
                 var (pair, aircraft) = idleBest.Value;
                 orders.Add(new RouteOrder(pair.Origin, pair.Destination, aircraft));
+                ReserveSlots(pair.Origin, pair.Destination, slotsReservedByCity);
                 spent += 1;
             }
-            else if (spent + 2 <= actionCap)
+            else if (idleBest is null && spent + 2 <= actionCap)
             {
                 // Nothing idle can reach anywhere worth serving - lease the
                 // best available type and open a route with it in the same
@@ -121,10 +140,12 @@ public static class BaselineAi
 
                 var bestUnserved = bestAircraft is null ? null : FindBestUnservedPair(currentRoutes, allCities, demandModel, bestAircraft);
 
-                if (bestAircraft is not null && bestUnserved is not null)
+                if (bestAircraft is not null && bestUnserved is not null
+                    && HasSlotAtEveryGateway(bestUnserved.Origin, bestUnserved.Destination, availableSlotsByCity, slotsReservedByCity))
                 {
                     orders.Add(new LeaseAircraftOrder(bestAircraft, Quantity: 1));
                     orders.Add(new RouteOrder(bestUnserved.Origin, bestUnserved.Destination, bestAircraft));
+                    ReserveSlots(bestUnserved.Origin, bestUnserved.Destination, slotsReservedByCity);
                     spent += 2;
                 }
             }
@@ -201,6 +222,27 @@ public static class BaselineAi
             .ThenBy(l => l.Route.Destination.Id, StringComparer.Ordinal)
             .Select(l => l.Route)
             .FirstOrDefault();
+    }
+
+    /// <summary>M33: true when availableSlotsByCity is null (permissive), or this airline has a slot left at every gateway origin/destination touches.</summary>
+    private static bool HasSlotAtEveryGateway(City origin, City destination, IReadOnlyDictionary<string, int>? availableSlotsByCity, Dictionary<string, int> slotsReservedByCity)
+    {
+        if (availableSlotsByCity is null)
+        {
+            return true;
+        }
+
+        return new[] { origin, destination }
+            .Where(c => c.GateCapacity is not null)
+            .All(c => availableSlotsByCity.GetValueOrDefault(c.Id) - slotsReservedByCity.GetValueOrDefault(c.Id) > 0);
+    }
+
+    private static void ReserveSlots(City origin, City destination, Dictionary<string, int> slotsReservedByCity)
+    {
+        foreach (var city in new[] { origin, destination }.Where(c => c.GateCapacity is not null))
+        {
+            slotsReservedByCity[city.Id] = slotsReservedByCity.GetValueOrDefault(city.Id) + 1;
+        }
     }
 
     private static City? FindBestUnservedGateway(IReadOnlyList<Route> currentRoutes, IReadOnlyList<City> allCities)

@@ -43,6 +43,7 @@ public static class LandingRightsResolver
 
         var standing = new Dictionary<(string, string), double>(board.Standing);
         var slots = new Dictionary<string, int>(board.SlotsGranted);
+        var slotsHeld = new Dictionary<(string, string), int>(board.SlotsHeld);
         var outcomes = new List<NegotiationOutcome>();
 
         foreach (var group in due.GroupBy(p => p.TargetCity.Id).OrderBy(g => g.Key, StringComparer.Ordinal))
@@ -65,6 +66,7 @@ public static class LandingRightsResolver
                 if (won)
                 {
                     slots[city.Id] = slots.GetValueOrDefault(city.Id) + 1;
+                    slotsHeld[key] = slotsHeld.GetValueOrDefault(key) + 1;
                 }
                 else
                 {
@@ -75,7 +77,7 @@ public static class LandingRightsResolver
             }
         }
 
-        var resolvedBoard = board with { Pending = stillPending, Standing = standing, SlotsGranted = slots };
+        var resolvedBoard = board with { Pending = stillPending, Standing = standing, SlotsGranted = slots, SlotsHeld = slotsHeld };
         var sortedOutcomes = outcomes
             .OrderBy(o => o.TargetCity.Id, StringComparer.Ordinal)
             .ThenBy(o => o.Airline.Name, StringComparer.Ordinal)

@@ -314,4 +314,64 @@ public class BaselineAiTests
         Assert.Empty(orders.OfType<RouteOrder>());
         Assert.Empty(orders.OfType<LeaseAircraftOrder>());
     }
+
+    // --- M33: gate-slot awareness ---
+
+    [Fact]
+    public void DecideOrders_NewPairTouchesAGatewayWithNoAvailableSlot_SkipsIt_DoesNotAttemptAnyway()
+    {
+        var a = MakeCity("a", 0, 0, 100);
+        var gateway = MakeGateway("gw", 1, 1, 90); // the only reachable pair goes through here
+        var cities = new[] { a, gateway };
+        var availableSlotsByCity = new Dictionary<string, int> { ["gw"] = 0 };
+
+        var orders = BaselineAi.DecideOrders(Array.Empty<Route>(), QuarterEngine.BaseActionCap, cities, DemandModel, new[] { Aircraft }, FleetWithAircraft, availableSlotsByCity);
+
+        Assert.Empty(orders.OfType<RouteOrder>());
+        // Still bids on it via negotiation - that's how a slot gets won in the first place.
+        Assert.Single(orders.OfType<NegotiationOrder>());
+    }
+
+    [Fact]
+    public void DecideOrders_NewPairTouchesAGatewayWithAnAvailableSlot_StillProposesIt()
+    {
+        var a = MakeCity("a", 0, 0, 100);
+        var gateway = MakeGateway("gw", 1, 1, 90);
+        var cities = new[] { a, gateway };
+        var availableSlotsByCity = new Dictionary<string, int> { ["gw"] = 1 };
+
+        var orders = BaselineAi.DecideOrders(Array.Empty<Route>(), QuarterEngine.BaseActionCap, cities, DemandModel, new[] { Aircraft }, FleetWithAircraft, availableSlotsByCity);
+
+        var routeOrder = Assert.Single(orders.OfType<RouteOrder>());
+        Assert.Equal("gw", routeOrder.Destination.Id);
+    }
+
+    [Fact]
+    public void DecideOrders_GrowingExistingRouteAtAGatewayWithNoAvailableSlot_SkipsGrowth()
+    {
+        var a = MakeCity("a", 0, 0, 100);
+        var gateway = MakeGateway("gw", 1, 1, 90);
+        var cities = new[] { a, gateway };
+        var existing = new[] { new Route(a, gateway, Aircraft, AircraftCount: 1) };
+        var availableSlotsByCity = new Dictionary<string, int> { ["gw"] = 0 }; // this route's own unit already used the only slot
+
+        var orders = BaselineAi.DecideOrders(existing, actionCap: 1, cities, DemandModel, new[] { Aircraft }, FleetWithAircraft, availableSlotsByCity);
+
+        Assert.Empty(orders.OfType<RouteOrder>());
+    }
+
+    [Fact]
+    public void DecideOrders_ProducesLegalOrders_WhenRunThroughQuarterEngine_WithSlotGatingToo()
+    {
+        var a = MakeCity("a", 0, 0, 100);
+        var b = MakeCity("b", 1, 1, 90);
+        var gateway = MakeGateway("gw", 30, 30, 80);
+        var cities = new[] { a, b, gateway };
+        var availableSlotsByCity = new Dictionary<string, int> { ["gw"] = 1 };
+
+        var orders = BaselineAi.DecideOrders(Array.Empty<Route>(), QuarterEngine.BaseActionCap, cities, DemandModel, new[] { Aircraft }, FleetWithAircraft, availableSlotsByCity);
+        var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, orders, cities, DemandModel, FleetWithAircraft, availableSlotsByCity: availableSlotsByCity);
+
+        Assert.Empty(result.RejectedOrders);
+    }
 }

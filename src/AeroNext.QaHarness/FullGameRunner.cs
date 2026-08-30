@@ -134,6 +134,8 @@ public static class FullGameRunner
 
                 var routesBefore = routes[name];
                 var capBefore = caps[name];
+                var airlineForSlots = new Airline(name, routes[name]);
+                var availableSlotsByCity = landingBoard.AvailableSlotsByCity(airlineForSlots, routes[name]);
 
                 var orders = q == 1
                     ? new QuarterOrder[]
@@ -143,9 +145,17 @@ public static class FullGameRunner
                             conditionsByName[name].GuaranteedRouteDestination,
                             conditionsByName[name].StartingAircraft),
                     }
-                    : BaselineAi.DecideOrders(routes[name], caps[name], cities, yearDemandModel, availableFleet, fleets[name]).ToArray();
+                    : BaselineAi.DecideOrders(routes[name], caps[name], cities, yearDemandModel, availableFleet, fleets[name], availableSlotsByCity).ToArray();
 
-                var result = QuarterEngine.RunQuarter(q, routes[name], caps[name], orders, cities, yearDemandModel, fleets[name], availableCash: finances[name].CashBalance);
+                // M18's guaranteed quarter-1 route is exempt from slot
+                // gating — nothing in the starting-conditions design pre-
+                // grants a negotiated slot at a gateway home/destination
+                // city, so gating it here would break the "always
+                // accepted" guarantee the very next check relies on.
+                var result = QuarterEngine.RunQuarter(
+                    q, routes[name], caps[name], orders, cities, yearDemandModel, fleets[name],
+                    availableCash: finances[name].CashBalance,
+                    availableSlotsByCity: q == 1 ? null : availableSlotsByCity);
 
                 if (q == 1 && result.RejectedOrders.Count > 0)
                 {
