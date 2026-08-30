@@ -17,6 +17,10 @@ namespace AeroNext.Core.Finance;
 /// interest alone. ManualDebtPaydown mirrors Borrowed's own treatment: a
 /// discretionary balance-sheet swap, not an operating cost, kept outside
 /// NetIncome (see FinancialResolver) the same way Borrowed already is.
+///
+/// M30: SalaryCost is a flat, per-aircraft-unit charge (owned + leased,
+/// idle or assigned) — the same "broken out, not folded" legibility
+/// treatment, folded into NetIncome like an ordinary operating cost.
 /// </summary>
 public sealed record QuarterlyStatement(
     Money Revenue,
@@ -31,4 +35,5 @@ public sealed record QuarterlyStatement(
     Money RetirementProceeds = default,
     Money NegotiationBidCost = default,
     Money PrincipalRepayment = default,
-    Money ManualDebtPaydown = default);
+    Money ManualDebtPaydown = default,
+    Money SalaryCost = default);

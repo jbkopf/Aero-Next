@@ -495,4 +495,80 @@ public class FinancialResolverTests
         Assert.Equal(withNeither.CashBalance, withBoth.CashBalance);
         Assert.Equal(withNeither.DebtBalance, withBoth.DebtBalance);
     }
+
+    // --- M30: general salaries, a flat per-aircraft headcount cost ---
+
+    [Fact]
+    public void Resolve_NullFleet_ChargesZeroSalaryCost_PreservesEveryPreM30CallSite()
+    {
+        var a = MakeCity("a", 0, 0, 1);
+        var airline = new Airline("A", Array.Empty<Route>());
+        var market = CompetitiveMarket.Resolve(new[] { airline }, new[] { a }, DemandModel);
+        var state = FinancialState.Start(Money.FromDollars(10_000_000), Money.Zero, interestRatePerQuarter: 0.0);
+
+        var (_, statement) = FinancialResolver.Resolve(state, airline, market, Array.Empty<QuarterOrder>());
+
+        Assert.Equal(Money.Zero, statement.SalaryCost);
+    }
+
+    [Fact]
+    public void Resolve_EmptyFleet_ChargesZeroSalaryCost()
+    {
+        var a = MakeCity("a", 0, 0, 1);
+        var airline = new Airline("A", Array.Empty<Route>());
+        var market = CompetitiveMarket.Resolve(new[] { airline }, new[] { a }, DemandModel);
+        var state = FinancialState.Start(Money.FromDollars(10_000_000), Money.Zero, interestRatePerQuarter: 0.0);
+
+        var (_, statement) = FinancialResolver.Resolve(state, airline, market, Array.Empty<QuarterOrder>(), fleet: AirlineFleet.Empty);
+
+        Assert.Equal(Money.Zero, statement.SalaryCost);
+    }
+
+    [Fact]
+    public void Resolve_SalaryCost_ScalesLinearlyWithTotalFleetSize_OwnedAndLeasedMixed()
+    {
+        var a = MakeCity("a", 0, 0, 1);
+        var airline = new Airline("A", Array.Empty<Route>());
+        var market = CompetitiveMarket.Resolve(new[] { airline }, new[] { a }, DemandModel);
+        var state = FinancialState.Start(Money.FromDollars(10_000_000), Money.Zero, interestRatePerQuarter: 0.0);
+        var owned = FleetLedger.ApplyDelivery(AirlineFleet.Empty, CostlyAircraft, quantity: 2, FleetOwnershipMode.Owned);
+        var fleet = FleetLedger.ApplyDelivery(owned, CostlyAircraft, quantity: 3, FleetOwnershipMode.Leased); // 5 units total
+
+        var (_, statement) = FinancialResolver.Resolve(state, airline, market, Array.Empty<QuarterOrder>(), fleet: fleet);
+
+        Assert.Equal(FinancialResolver.SalaryCostPerAircraftPerQuarter * 5, statement.SalaryCost);
+    }
+
+    [Fact]
+    public void Resolve_SalaryCost_SameForIdleUnit_AsForOneAssignedToARoute()
+    {
+        var a = MakeCity("a", 0, 0, 1);
+        var airline = new Airline("A", Array.Empty<Route>());
+        var market = CompetitiveMarket.Resolve(new[] { airline }, new[] { a }, DemandModel);
+        var state = FinancialState.Start(Money.FromDollars(10_000_000), Money.Zero, interestRatePerQuarter: 0.0);
+        var idleFleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, CostlyAircraft, quantity: 1, FleetOwnershipMode.Owned);
+        var assignedFleet = FleetLedger.Assign(idleFleet, idleFleet.Units.Single().Id, "a-b");
+
+        var (_, idleStatement) = FinancialResolver.Resolve(state, airline, market, Array.Empty<QuarterOrder>(), fleet: idleFleet);
+        var (_, assignedStatement) = FinancialResolver.Resolve(state, airline, market, Array.Empty<QuarterOrder>(), fleet: assignedFleet);
+
+        Assert.Equal(idleStatement.SalaryCost, assignedStatement.SalaryCost);
+        Assert.True(idleStatement.SalaryCost.Cents > 0);
+    }
+
+    [Fact]
+    public void Resolve_SalaryCost_IsFoldedIntoNetIncome_ReducesCash()
+    {
+        var a = MakeCity("a", 0, 0, 1);
+        var airline = new Airline("A", Array.Empty<Route>());
+        var market = CompetitiveMarket.Resolve(new[] { airline }, new[] { a }, DemandModel);
+        var state = FinancialState.Start(Money.FromDollars(10_000_000), Money.Zero, interestRatePerQuarter: 0.0);
+        var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, CostlyAircraft, quantity: 2, FleetOwnershipMode.Owned);
+
+        var (withFleet, statement) = FinancialResolver.Resolve(state, airline, market, Array.Empty<QuarterOrder>(), fleet: fleet);
+        var (withoutFleet, _) = FinancialResolver.Resolve(state, airline, market, Array.Empty<QuarterOrder>());
+
+        Assert.Equal(FinancialResolver.SalaryCostPerAircraftPerQuarter * 2, statement.SalaryCost);
+        Assert.Equal(withoutFleet.CashBalance - statement.SalaryCost, withFleet.CashBalance);
+    }
 }

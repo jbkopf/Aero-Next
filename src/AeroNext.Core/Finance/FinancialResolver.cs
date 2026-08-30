@@ -79,6 +79,21 @@ public static class FinancialResolver
     /// </summary>
     public const double PrincipalRepaymentRatePerQuarter = 0.05;
 
+    /// <summary>
+    /// M30: flat, per-aircraft-unit quarterly staffing cost — rank-and-file
+    /// crew, maintenance, and scheduling staff, independent of
+    /// HireExecutiveOrder (which stays free and only raises the action
+    /// cap). Scaled by total fleet size (owned + leased, from M25's
+    /// ledger), not route count — a route already uses an aircraft unit
+    /// that's counted, so scaling by both would double-count the same
+    /// capacity. Charged regardless of whether a unit is idle or actively
+    /// flying a route — staff still need paying either way. Deliberately a
+    /// flat dollar rate, not scaled by the unit's own Cost or Seats the
+    /// way LeaseFee reasonably is — real staffing cost doesn't track
+    /// purchase price the way a lease payment does.
+    /// </summary>
+    public static readonly Money SalaryCostPerAircraftPerQuarter = Money.FromDollars(250_000);
+
     /// <param name="fleet">
     /// The airline's *post*-quarter fleet (QuarterResult.UpdatedFleet) —
     /// so a unit leased this same quarter is charged its fee immediately,
@@ -121,13 +136,14 @@ public static class FinancialResolver
         var leaseFee = ComputeLeaseFee(fleet);
         var retirementProceeds = ComputeRetirementProceeds(retiredUnits);
         var negotiationBidCost = appliedOrders.OfType<NegotiationOrder>().Aggregate(Money.Zero, (sum, o) => sum + o.Bid);
+        var salaryCost = ComputeSalaryCost(fleet);
 
-        var netIncome = revenue - operatingCost - debtService - purchaseCost - leaseFee + retirementProceeds - negotiationBidCost;
+        var netIncome = revenue - operatingCost - debtService - purchaseCost - leaseFee + retirementProceeds - negotiationBidCost - salaryCost;
         var cashAfter = state.CashBalance + borrowed - manualPaydown + netIncome;
         var isBankrupt = cashAfter < Money.Zero || finalDebtBalance > Money.FromDollars(DebtCeilingDollars);
 
         var newState = state with { CashBalance = cashAfter, DebtBalance = finalDebtBalance, IsBankrupt = isBankrupt };
-        var statement = new QuarterlyStatement(revenue, operatingCost, debtService, borrowed, netIncome, cashAfter, isBankrupt, purchaseCost, leaseFee, retirementProceeds, negotiationBidCost, principalRepayment, manualPaydown);
+        var statement = new QuarterlyStatement(revenue, operatingCost, debtService, borrowed, netIncome, cashAfter, isBankrupt, purchaseCost, leaseFee, retirementProceeds, negotiationBidCost, principalRepayment, manualPaydown, salaryCost);
 
         return (newState, statement);
     }
@@ -147,6 +163,16 @@ public static class FinancialResolver
         }
 
         return new Money(cents);
+    }
+
+    private static Money ComputeSalaryCost(AirlineFleet? fleet)
+    {
+        if (fleet is null)
+        {
+            return Money.Zero;
+        }
+
+        return SalaryCostPerAircraftPerQuarter * fleet.Units.Count;
     }
 
     private static Money ComputeRetirementProceeds(IReadOnlyList<FleetUnit>? retiredUnits)

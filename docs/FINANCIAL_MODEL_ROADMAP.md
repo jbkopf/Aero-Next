@@ -753,7 +753,7 @@ complete as the data can make it.
 
 ---
 
-## M30 — General salaries: a headcount/scale cost
+## M30 — General salaries: a headcount/scale cost ✅
 
 **Settled with the user:** independent of `HireExecutiveOrder` (which
 stays exactly as it is — free, raises the action cap) — a separate,
@@ -776,6 +776,84 @@ correctly with total fleet size and moving immediately when a unit is
 delivered or retired. Tests: an airline with zero aircraft pays zero
 salary cost; salary cost per unit is identical regardless of that unit's
 route-assignment status.
+
+**The smallest milestone in this sequence, genuinely.** No new order
+type, no `QuarterEngine` change, no `BaselineAi` change — a pure passive
+cost computed entirely from state `FinancialResolver` already had.
+`SalaryCostPerAircraftPerQuarter = Money.FromDollars(250_000)` — a flat
+rate, not scaled by a unit's own `Cost` or `Seats` the way `LeaseFee`
+reasonably is (real staffing cost doesn't track purchase price the way a
+lease payment does). `ComputeSalaryCost(AirlineFleet? fleet)` mirrors
+`ComputeLeaseFee`'s exact shape (null fleet → zero, same guard used by
+every pre-M30 call site), except summing **every** unit in `fleet.Units`
+regardless of `Mode` or `AssignedRouteKey` — unlike `ComputeLeaseFee`,
+which filters to `Leased` only. Folded into `NetIncome` alongside the
+existing mandatory recurring charges (`DebtService`, `LeaseFee`), not
+treated as a discretionary balance-sheet item the way `Borrowed`/
+`ManualDebtPaydown` are. `QuarterlyStatement` gained a `SalaryCost` field
+— the same "broken out, not silently folded" legibility treatment every
+prior cost line this session got. Both real loops (`AeroNext.Sim`,
+`AeroNext.QaHarness`) needed zero new wiring — they've passed `fleet:`
+into `FinancialResolver.Resolve` since M26.
+
+Done. 432 tests total (5 new, all in `FinancialResolverTests`: zero
+salary cost for a null fleet, zero for an empty fleet, linear scaling
+across a mixed owned/leased fleet, identical cost for an idle unit vs.
+one assigned to a route, and folding correctly into `NetIncome`/cash).
+100% line/branch coverage on both touched classes
+(`FinancialResolver`, `QuarterlyStatement`). Overall project coverage
+**99.85%/99.58%**, at the established baseline. 150-game QA harness
+sweep at 244 quarters: 150/150 clean, 0 invariant violations, 0 crashes.
+
+**Campaign trajectory shifted again, measured not assumed.** This
+milestone landed just after the standalone decision to zero out starting
+debt (see below) — so the "before" baseline is $0 starting debt with no
+salary cost, not the $10M-debt baseline M29's writeup used.
+`AeroNext.Sim`'s M13 loop: bankruptcy moved from quarter 11 (the $0-debt,
+pre-M30 baseline) to **quarter 7 (1956, -$1,656,820.05)** — salary cost
+alone is a bigger, faster-biting accelerant than the old $10M starting
+debt ever was, at $250,000/quarter/aircraft against a 2-aircraft starting
+fleet that grows to a frozen 2-route/2-route-worth-of-units network well
+before quarter 7. Unlike every earlier milestone's frozen post-bankruptcy
+state, carried passengers stay completely pinned too here (278,304
+pax/qtr from quarter 7 through 244, not just cash) — this run's frozen
+network happened to be fully capacity-constrained (demand growth can't
+raise carried passengers past a route's own seat ceiling) rather than
+demand-constrained, a property of this particular frozen network, not a
+bug. QA harness sweep: bankruptcy now averages quarter 4.7–6.4 across
+regions, win rate holds at **0/150** clean games region-wide (the
+per-region `Wins` column in the harness's regional-dominance breakdown —
+EastAsia 100, SouthWestAsia 18, NorthAmerica 14, AustralAsia 11, Europe
+7, SouthAmerica 0 — tracks a different, weaker "ever led that region"
+metric, not the win-condition trigger; no clean game produced an actual
+win-condition winner).
+
+This is the sixth milestone in a row (M26, M28, M29, M30, plus the
+standalone debt-zero change) where the financial model got measurably
+more realistic and the same un-tuned `BaselineAi` heuristic's campaign
+got measurably worse, not better — bankruptcy now lands in the game's
+second year almost universally, and win rate has never once moved off
+zero across any of these changes. That closes out the financial-model
+sequence proper. The pattern was never a sign any individual milestone
+was wrong — each one, checked in isolation, made the P&L more honest and
+was verified against real numbers, not tuned to produce a happier
+outcome. But six milestones deep, the case is about as complete as the
+data can make it: `BaselineAi` was calibrated against a much gentler cost
+structure than now exists, and needs a real rework — not another
+one-line constant tweak — before a further financial-model milestone (or
+M31's integration pass) can be meaningfully evaluated against it.
+
+**Standalone, alongside this milestone:** the flat $10,000,000 starting
+debt constant (`AeroNext.Sim`'s M13 campaign loop and the QA harness's
+`DefaultStartingDebt`) had no documented rationale anywhere in the
+roadmap docs, unlike starting cash (`StartingConditionsResolver`'s
+`BaseStartingCashDollars = 20_000_000`, scaled by
+`RegionalEconomics.Factor`). Measured at $0 instead: M13's bankruptcy
+quarter moved from 9 (M29's post-amortization baseline) to 11, and the
+QA harness's bankruptcy-quarter averages moved later by roughly half a
+quarter to a full quarter per region, everything else unchanged. Kept at
+$0 per the user's explicit direction, committed standalone rather than
+folded into any one milestone.
 
 ---
 

@@ -567,25 +567,20 @@ string ChokepointStatus(int year)
     return direct ? $"{best.Name} flies JFK-LHR direct" : $"{best.Name} still needs a Gander stop";
 }
 
-// Starting debt kept at $0 for now (here and in FullGameRunner.cs),
-// pending the BaselineAi work: tested by zeroing the flat, undocumented
-// $10M starting debt that had been present since M12, never revisited,
-// to isolate how much of the now-consistent early-campaign bankruptcy it
-// was actually causing versus BaselineAi's own growth pattern. Measured,
-// not assumed: cash still declines every quarter from routes/leases/
-// negotiation bids alone (no debt service at all now) - bankruptcy only
-// moved from quarter 9 to quarter 11, a 2-quarter delay, not a fix. The
-// QA harness sweep (150 games) confirmed this generalizes: bankruptcy
-// rate is still 100% of seats, win rate still 0/150, average bankruptcy
-// quarter across regions moved only slightly later (roughly +0.1 to +0.8
-// quarters), though the regional win-count *distribution* shifted more
-// substantially (e.g. EastAsia's share roughly tripled) - a real, uneven
-// effect, but not a resolution of the underlying pattern. Confirms debt
-// was a real but secondary contributor, not the root cause - that
-// remains BaselineAi's own growth/lease/negotiation behavior, the target
-// of the work planned after M30. 121 stays in the checkpoint set as a
-// stickiness sanity check.
-var checkpoints = new HashSet<int> { 1, 10, 11, 121, campaignQuarters };
+// Re-measured after M30 added a flat $250,000/quarter/aircraft salary
+// cost (docs/FINANCIAL_MODEL_ROADMAP.md) - automatic, no BaselineAi
+// action required, same as M29's principal repayment. Bankruptcy moved
+// from quarter 11 (with $0 starting debt, no salary cost) to quarter 7
+// (1956, -$1,656,820.05) - salary cost alone is a bigger, faster-biting
+// accelerant than the $10M starting debt ever was. Frozen from there;
+// unlike every earlier milestone's frozen state, carried passengers stay
+// completely pinned too (not just cash) - this run's frozen 2-route
+// network happened to be fully capacity-constrained (demand growth can't
+// raise carried passengers past a route's own seat ceiling), not a bug,
+// just a different specific network than earlier runs built before
+// freezing sooner. 121 stays in the checkpoint set as a stickiness
+// sanity check.
+var checkpoints = new HashSet<int> { 1, 6, 7, 121, campaignQuarters };
 
 var campaignDominance = RegionalDominanceState.Empty;
 string? campaignWinner = null;
