@@ -81,6 +81,10 @@ public static class FullGameRunner
         var humanCount = seats.Count(s => s.IsHuman);
 
         var landingBoard = LandingRightsBoard.Empty;
+        var dominanceState = RegionalDominanceState.Empty;
+        string? winner = null;
+        int? winQuarter = null;
+        CompetitiveMarketResult? lastMarket = null;
 
         for (var q = 1; q <= quarters; q++)
         {
@@ -184,10 +188,29 @@ public static class FullGameRunner
                     violations.Add(new GameViolation(q, name, $"Cash/debt magnitude implausible (cash={nextState.CashBalance}, debt={nextState.DebtBalance}) — possible overflow."));
                 }
             }
+
+            lastMarket = market;
+
+            var eligibleNames = names.Where(n => !finances[n].IsBankrupt).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            dominanceState = RegionalDominanceTracker.Advance(dominanceState, market, eligibleNames);
+
+            var checkedWinner = WinConditionChecker.CheckWinner(dominanceState);
+            if (checkedWinner is not null)
+            {
+                winner = checkedWinner;
+                winQuarter = q;
+                break;
+            }
         }
 
         var finalCash = names.ToDictionary(n => n, n => finances[n].CashBalance);
+        var netWorth = names.ToDictionary(n => n, n => finances[n].CashBalance - finances[n].DebtBalance);
+        var finalRanking = winner is null
+            ? CampaignRanking.Rank(dominanceState, lastMarket!, netWorth).Select(r => r.AirlineName).ToList()
+            : new List<string> { winner };
 
-        return new FullGameResult(gameIndex, configSeed, campaignSeed, humanCount, quarters, violations, finalCash, bankruptcyQuarter, homeRegionByName);
+        return new FullGameResult(
+            gameIndex, configSeed, campaignSeed, humanCount, winQuarter ?? quarters, violations,
+            finalCash, bankruptcyQuarter, homeRegionByName, winner, winQuarter, finalRanking);
     }
 }

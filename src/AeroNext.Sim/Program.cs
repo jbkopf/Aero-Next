@@ -555,6 +555,11 @@ string ChokepointStatus(int year)
 // notes for how this compares to prior rounds - not evenly spaced.
 var checkpoints = new HashSet<int> { 1, 15, 25, 43, 121, campaignQuarters };
 
+var campaignDominance = RegionalDominanceState.Empty;
+string? campaignWinner = null;
+int? campaignWinQuarter = null;
+CompetitiveMarketResult? campaignLastMarket = null;
+
 for (var q = 1; q <= campaignQuarters; q++)
 {
     var year = Timeline.YearForQuarter(q);
@@ -589,7 +594,19 @@ for (var q = 1; q <= campaignQuarters; q++)
         campaignFinances[seat.Name] = nextState;
     }
 
-    if (!checkpoints.Contains(q))
+    campaignLastMarket = campaignMarket;
+
+    var campaignEligible = campaignAirlineNames.Where(n => !campaignFinances[n].IsBankrupt).ToHashSet(StringComparer.OrdinalIgnoreCase);
+    campaignDominance = RegionalDominanceTracker.Advance(campaignDominance, campaignMarket, campaignEligible);
+
+    var checkedCampaignWinner = WinConditionChecker.CheckWinner(campaignDominance);
+    if (checkedCampaignWinner is not null)
+    {
+        campaignWinner = checkedCampaignWinner;
+        campaignWinQuarter = q;
+    }
+
+    if (!checkpoints.Contains(q) && campaignWinner is null)
     {
         continue;
     }
@@ -601,6 +618,26 @@ for (var q = 1; q <= campaignQuarters; q++)
         var finance = campaignFinances[seat.Name];
         Console.WriteLine($"  {seat.Name,-18} {campaignRoutes[seat.Name].Count,3} routes, " +
             $"{campaignMarket.TotalCarried(seat),10:N0} pax/qtr, cash {finance.CashBalance,16}, bankrupt={finance.IsBankrupt}");
+    }
+
+    if (campaignWinner is not null)
+    {
+        Console.WriteLine($"  *** {campaignWinner} WINS: led {WinConditionChecker.RequiredRegionCount}+ regions for {WinConditionChecker.RequiredStreakQuarters}+ consecutive quarters, as of quarter {campaignWinQuarter} ***");
+        break;
+    }
+}
+
+if (campaignWinner is null)
+{
+    var campaignNetWorth = campaignAirlineNames.ToDictionary(n => n, n => campaignFinances[n].CashBalance - campaignFinances[n].DebtBalance);
+    var campaignRanking = CampaignRanking.Rank(campaignDominance, campaignLastMarket!, campaignNetWorth);
+
+    Console.WriteLine();
+    Console.WriteLine("Timeline ended with no win-condition winner - final ranking:");
+    for (var i = 0; i < campaignRanking.Count; i++)
+    {
+        var r = campaignRanking[i];
+        Console.WriteLine($"  {i + 1}. {r.AirlineName,-18} regions led {r.RegionsLed}, passengers {r.TotalPassengersCarried,10:N0}, net worth {r.NetWorth}");
     }
 }
 

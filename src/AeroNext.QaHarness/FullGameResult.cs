@@ -14,7 +14,10 @@ public sealed record FullGameResult(
     IReadOnlyList<GameViolation> Violations,
     IReadOnlyDictionary<string, Money> FinalCash,
     IReadOnlyDictionary<string, int?> BankruptcyQuarter,
-    IReadOnlyDictionary<string, Region> HomeRegionByName)
+    IReadOnlyDictionary<string, Region> HomeRegionByName,
+    string? Winner,
+    int? WinQuarter,
+    IReadOnlyList<string> FinalRanking)
 {
     public bool Success => Violations.Count == 0;
 }

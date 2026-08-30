@@ -84,6 +84,39 @@ public class FinancialResolverTests
     }
 
     [Fact]
+    public void Resolve_DebtExceedsCeiling_TriggersBankruptcy_EvenWithPositiveCash()
+    {
+        // M23: closes the infinite-refinance gap - without this trigger, an
+        // airline could stay technically solvent forever by borrowing just
+        // enough cash each quarter, no matter how deep its debt hole is.
+        var a = MakeCity("a", 0, 0, 1);
+        var airline = new Airline("A", Array.Empty<Route>());
+        var market = CompetitiveMarket.Resolve(new[] { airline }, new[] { a }, DemandModel);
+        var state = FinancialState.Start(Money.FromDollars(10_000_000), Money.Zero, interestRatePerQuarter: 0.0);
+        var orders = new QuarterOrder[] { new RefinanceOrder(Money.FromDollars(FinancialResolver.DebtCeilingDollars + 1)) };
+
+        var (newState, statement) = FinancialResolver.Resolve(state, airline, market, orders);
+
+        Assert.True(newState.CashBalance > Money.Zero); // cash alone would not have triggered it
+        Assert.True(statement.IsBankrupt);
+        Assert.True(newState.IsBankrupt);
+    }
+
+    [Fact]
+    public void Resolve_DebtAtOrBelowCeiling_DoesNotTriggerBankruptcy_OnDebtAlone()
+    {
+        var a = MakeCity("a", 0, 0, 1);
+        var airline = new Airline("A", Array.Empty<Route>());
+        var market = CompetitiveMarket.Resolve(new[] { airline }, new[] { a }, DemandModel);
+        var state = FinancialState.Start(Money.FromDollars(10_000_000), Money.Zero, interestRatePerQuarter: 0.0);
+        var orders = new QuarterOrder[] { new RefinanceOrder(Money.FromDollars(FinancialResolver.DebtCeilingDollars)) };
+
+        var (newState, _) = FinancialResolver.Resolve(state, airline, market, orders);
+
+        Assert.False(newState.IsBankrupt);
+    }
+
+    [Fact]
     public void Resolve_AlreadyBankrupt_NoFurtherActivity_CashUnchanged()
     {
         var a = MakeCity("a", 0, 0, 100);

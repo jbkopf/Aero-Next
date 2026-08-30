@@ -83,6 +83,8 @@ for (var i = 0; i < games; i++)
 var passed = results.Count(r => r.Success);
 var failed = results.Count(r => !r.Success);
 var everBankrupt = results.Count(r => r.BankruptcyQuarter.Values.Any(q => q is not null));
+var cleanResults = results.Where(r => r.Success).ToList();
+var wonOutright = cleanResults.Where(r => r.Winner is not null).ToList();
 
 Console.WriteLine();
 Console.WriteLine("=== Summary ===");
@@ -90,6 +92,8 @@ Console.WriteLine($"  {passed}/{games} passed cleanly");
 Console.WriteLine($"  {failed} failed an invariant check");
 Console.WriteLine($"  {hardFailures.Count} crashed with an unhandled exception");
 Console.WriteLine($"  {everBankrupt} games had at least one airline go bankrupt before quarter {quarters}");
+Console.WriteLine($"  {wonOutright.Count}/{cleanResults.Count} clean games had a win-condition winner before the timeline ended" +
+    (wonOutright.Count > 0 ? $" (avg quarter {wonOutright.Average(r => r.WinQuarter!.Value):N1})" : ""));
 
 if (hardFailures.Count > 0)
 {

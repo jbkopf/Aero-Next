@@ -34,6 +34,17 @@ public static class FinancialResolver
 {
     public const double DefaultYieldPerPassengerKm = 0.12;
 
+    /// <summary>
+    /// M23: closes a real gap found while designing the win condition —
+    /// RefinanceOrder has no limit, so without this an airline could stay
+    /// technically solvent forever by borrowing just enough cash each
+    /// quarter, regardless of how deep its debt hole actually is. A flat
+    /// ceiling, not scaled per airline's own starting cash (which varies
+    /// by RegionalEconomics.Factor) — keeps this resolver self-contained
+    /// rather than coupling it to AeroNext.Core.Setup for one constant.
+    /// </summary>
+    public const long DebtCeilingDollars = 80_000_000;
+
     public static (FinancialState State, QuarterlyStatement Statement) Resolve(
         FinancialState state,
         Airline airline,
@@ -54,7 +65,7 @@ public static class FinancialResolver
 
         var netIncome = revenue - operatingCost - debtService;
         var cashAfter = state.CashBalance + borrowed + netIncome;
-        var isBankrupt = cashAfter < Money.Zero;
+        var isBankrupt = cashAfter < Money.Zero || debtBalance > Money.FromDollars(DebtCeilingDollars);
 
         var newState = state with { CashBalance = cashAfter, DebtBalance = debtBalance, IsBankrupt = isBankrupt };
         var statement = new QuarterlyStatement(revenue, operatingCost, debtService, borrowed, netIncome, cashAfter, isBankrupt);
