@@ -17,11 +17,18 @@ namespace AeroNext.Core.Ai;
 /// before bidding isn't a missing smarts, it's true to the mechanic); and
 /// tries to grow its own best-performing existing route by assigning it
 /// another aircraft (M32 — no longer free; competes for the same action
-/// budget as everything else); and hires an executive every quarter,
+/// budget as everything else); hires an executive every quarter,
 /// unconditionally (M31, docs/BASELINE_AI_ROADMAP.md — HireExecutiveOrder
 /// is free and never competes with anything else in the action budget,
 /// and this AI already spends its full budget every quarter, so nothing
-/// else in that roadmap has room to land without this landing first).
+/// else in that roadmap has room to land without this landing first);
+/// shrinks (never fully closes) any served route whose load factor has
+/// fallen below a floor, reactively correcting an over-built route
+/// without risking the same pair being reopened next quarter (M35); and
+/// retires any idle unit that's genuinely stranded — no served route
+/// uses its type and no unserved pair worth reaching needs it either
+/// (M35). Both M35 checks are free, so every qualifying route/unit is
+/// acted on the same quarter, not just the single best one.
 ///
 /// Not trying to play well — CLAUDE.md's game is always exactly 4 airlines,
 /// so this exists because the sim can never run a representative quarter
@@ -43,6 +50,16 @@ namespace AeroNext.Core.Ai;
 public static class BaselineAi
 {
     private static readonly Money NegotiationBidAmount = Money.FromDollars(2_000_000);
+
+    /// <summary>
+    /// M35 (proposed, tunable): below this, a served route reads as
+    /// over-built relative to its own demand, not under-served — the
+    /// reactive correction is to shrink it by one aircraft
+    /// (CloseRouteOrder), never to close it outright (see the class doc
+    /// comment's own reasoning against reopening the same pair next
+    /// quarter).
+    /// </summary>
+    private const double CloseRouteLoadFactorFloor = 0.5;
 
     /// <param name="eraAvailableTypes">
     /// The full aircraft catalog available to lease this era (e.g.
@@ -177,6 +194,34 @@ public static class BaselineAi
                 orders.Add(new NegotiationOrder(bestGateway, NegotiationBidAmount));
                 spent += 1;
             }
+        }
+
+        // M35: shrink (never fully close, see class doc comment) every
+        // served route whose load factor has fallen below the floor -
+        // free, so every qualifying route gets one shrink this quarter,
+        // not just the single worst one.
+        foreach (var overBuilt in RouteEvaluator.EvaluateNetwork(currentRoutes, demandModel)
+            .Where(load => load.Route.AircraftCount > 1 && load.LoadFactor < CloseRouteLoadFactorFloor)
+            .Select(load => load.Route))
+        {
+            orders.Add(new CloseRouteOrder(overBuilt.Origin, overBuilt.Destination));
+        }
+
+        // M35: retire every genuinely stranded idle unit - nothing to
+        // grow (no served route uses its type) and nothing new to open
+        // (no unserved, in-range pair has positive demand for its type
+        // either). Conservative on purpose: an idle unit whose type IS
+        // still useful somewhere is kept, even if this quarter's single
+        // greedy growth/new-pair pick above happened to use a different
+        // unit - it may be exactly what a future quarter wants. Free, so
+        // every stranded unit retires the same quarter, not just one.
+        foreach (var stranded in ownFleet.Idle
+            .Where(u => !reservedUnitIds.Contains(u.Id))
+            .Where(u => currentRoutes.All(r => r.Aircraft.Id != u.Type.Id))
+            .Where(u => (FindBestUnservedPair(currentRoutes, allCities, demandModel, u.Type)?.PassengersPerQuarter ?? 0) <= 0)
+            .OrderBy(u => u.Id))
+        {
+            orders.Add(new RetireAircraftOrder(stranded.Id));
         }
 
         // M31: unconditional, every quarter, regardless of cities/routes/

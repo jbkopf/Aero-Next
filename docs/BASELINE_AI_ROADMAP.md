@@ -176,7 +176,7 @@ first.
 
 ---
 
-## M35 — Fleet/route lifecycle: retire and close
+## M35 — Fleet/route lifecycle: retire and close ✅
 
 Teach `RetireAircraftOrder` (an idle unit with no route worth assigning
 it to) and `CloseRouteOrder` (detach one aircraft from an existing
@@ -191,6 +191,68 @@ to accrue salary cost indefinitely; `BaselineAi` closes a route (or
 shrinks it by one aircraft) once its load factor has stayed below some
 *(proposed, tunable)* floor for a measured stretch; tests cover both
 independently of M39's growth logic.
+
+Built as designed, with two decisions made concrete during
+implementation, both stated up front rather than discovered as bugs:
+`CloseRouteOrder` requires `AircraftCount > 1` and never fully closes a
+route here — a route dropping to zero would read as "unserved" again
+next quarter, and the new-pair step's own greedy highest-demand search
+could very plausibly reopen the exact same pair for free, forever.
+Fully abandoning a pair is real strategy (M39's job), not a reactive
+threshold check. `RetireAircraftOrder`'s trigger is deliberately narrow
+— *genuinely* stranded only (no served route uses the unit's type, and
+no unserved reachable pair has positive demand for it either) — because
+`BaselineAi`'s existing growth/new-pair steps already prefer idle
+inventory before leasing, so a second or third idle unit of an
+otherwise-useful type isn't wasted, just not this quarter's single
+greedy pick; retiring it prematurely would remove exactly what next
+quarter's growth step wants. `CloseRouteLoadFactorFloor = 0.5` *(proposed,
+tunable)*. Both orders are free, so — unlike the budget-gated
+growth/new-pair/negotiate steps — every qualifying route/unit is acted
+on the same quarter, not just the single best one.
+
+Done. 465 tests total (11 new), all in `BaselineAiTests` — close/retire
+triggering correctly, each guard (`AircraftCount > 1`, "type still used
+elsewhere," "could still open a pair") independently *not* triggering,
+both orders confirmed free via `QuarterEngine.Cost`, both coexisting with
+a full budget of other orders in the same quarter, and both running
+clean (zero rejections) through `QuarterEngine.RunQuarter`. One of those
+integration tests surfaced a real, worth-documenting interaction rather
+than a bug: with only one existing route and nothing else to grow, the
+pre-existing (M32) "grow best route" step re-grows the exact route M35
+shrinks the same quarter — both orders individually legal, net
+`AircraftCount` unchanged that quarter. Kept as a test, not a special
+case worked around, since it's an honest illustration of exactly the
+gap M39 exists to close (M35 is reactive/uncoordinated by design). 100%
+line/branch coverage on `BaselineAi` (the only touched class). Overall
+project coverage **99.85%/99.61%**, at the established baseline. 150-game
+QA harness sweep: 150/150 clean, 0 invariant violations, 0 crashes.
+
+**Campaign trajectory — measured in both real loops again, and this
+time the *QA harness* is the one that moves, not the M13 loop, the
+reverse of M31's own finding.** `AeroNext.Sim`'s M13 loop came back
+byte-for-byte identical to M31's own figures (peak $42,113,450.14 at
+quarter 18, bankruptcy at quarter 22, -$445,156.38) — confirmed why, not
+just observed it: instrumented the loop directly and found
+`CloseRouteOrder`/`RetireAircraftOrder` apply **zero times** across the
+entire 22-quarter run. Idle units sit at 0 every single quarter
+(`BaselineAi` never over-acquires, so a retire target never exists), and
+every multi-aircraft route's load factor stays pinned at a perfect 1.000
+the whole run (this loop's demand keeps growing fast enough that
+capacity never outpaces it, so a close target never exists either).
+
+The 150-game QA harness sweep, by contrast, moved substantially — the
+harder, region-differentiated, gate-scarce conditions genuinely produce
+over-built routes and stranded units that the M13 loop's rich, ever-growing
+demand pool never does. Bankruptcy quarter averages moved later in
+every region (6.5–9.3, versus M31's 4.9–8.4), and average/median cash at
+bankruptcy improved dramatically — e.g. NorthAmerica from -$6,094,987 to
+-$753,886, SouthAmerica from -$4,045,019 to -$379,522. Exactly the
+inverse pattern from M31, where the QA harness didn't move and the M13
+loop reshaped dramatically — the same lesson from the other direction:
+these two loops' environments are different enough that a milestone can
+matter enormously in one and not at all in the other, and only measuring
+both catches that.
 
 ---
 

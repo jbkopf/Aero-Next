@@ -479,4 +479,175 @@ public class BaselineAiTests
 
         Assert.Equal(QuarterEngine.BaseActionCap + 3, cap);
     }
+
+    // --- M35: fleet/route lifecycle - retire and close (docs/BASELINE_AI_ROADMAP.md) ---
+
+    [Fact]
+    public void DecideOrders_OverBuiltRoute_LoadFactorBelowFloor_MultipleAircraft_GetsShrunk()
+    {
+        var a = MakeCity("a", 0, 0, 1);
+        var b = MakeCity("b", 60, 60, 1); // far + light: negligible demand relative to capacity
+        var bigAircraft = new AircraftType("big", "Big", Seats: 400);
+        var existing = new[] { new Route(a, b, bigAircraft, AircraftCount: 2) };
+
+        var orders = BaselineAi.DecideOrders(existing, QuarterEngine.BaseActionCap, new[] { a, b }, DemandModel, new[] { bigAircraft }, AirlineFleet.Empty);
+
+        var close = Assert.Single(orders.OfType<CloseRouteOrder>());
+        Assert.Equal(("a", "b"), (close.Origin.Id, close.Destination.Id));
+    }
+
+    [Fact]
+    public void DecideOrders_OverBuiltRoute_LoadFactorBelowFloor_SingleAircraft_NeverFullyClosed()
+    {
+        // The AircraftCount > 1 guard: closing the last aircraft on a
+        // route would remove it from currentRoutes entirely, and a
+        // high-demand-but-oversupplied pair would very plausibly get
+        // reopened next quarter by the new-pair step - ping-ponging for
+        // free. This milestone only ever shrinks, never fully abandons.
+        var a = MakeCity("a", 0, 0, 1);
+        var b = MakeCity("b", 60, 60, 1);
+        var bigAircraft = new AircraftType("big", "Big", Seats: 400);
+        var existing = new[] { new Route(a, b, bigAircraft, AircraftCount: 1) };
+
+        var orders = BaselineAi.DecideOrders(existing, QuarterEngine.BaseActionCap, new[] { a, b }, DemandModel, new[] { bigAircraft }, AirlineFleet.Empty);
+
+        Assert.Empty(orders.OfType<CloseRouteOrder>());
+    }
+
+    [Fact]
+    public void DecideOrders_HealthyRoute_LoadFactorAtOrAboveFloor_NeverShrunk()
+    {
+        var a = MakeCity("a", 0, 0, 100);
+        var b = MakeCity("b", 1, 1, 90); // close + heavy: demand swamps capacity -> full load factor
+        var aircraft = new AircraftType("t", "Test", Seats: 10);
+        var existing = new[] { new Route(a, b, aircraft, AircraftCount: 2) };
+
+        var orders = BaselineAi.DecideOrders(existing, QuarterEngine.BaseActionCap, new[] { a, b }, DemandModel, new[] { aircraft }, AirlineFleet.Empty);
+
+        Assert.Empty(orders.OfType<CloseRouteOrder>());
+    }
+
+    [Fact]
+    public void DecideOrders_CloseRouteOrder_IsFreeAction()
+    {
+        var a = MakeCity("a", 0, 0, 50);
+        var b = MakeCity("b", 1, 1, 50);
+
+        Assert.Equal(0, QuarterEngine.Cost(new CloseRouteOrder(a, b), Array.Empty<Route>()));
+    }
+
+    [Fact]
+    public void DecideOrders_StrandedIdleUnit_NoRouteUsesItsType_NoUnservedPairExists_GetsRetired()
+    {
+        var a = MakeCity("a", 0, 0, 100); // only city - no pair can ever exist
+        var strandedType = new AircraftType("stranded", "Stranded", Seats: 50);
+        var fleet = FleetWithIdle(strandedType);
+
+        var orders = BaselineAi.DecideOrders(Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { a }, DemandModel, new[] { strandedType }, fleet);
+
+        var retire = Assert.Single(orders.OfType<RetireAircraftOrder>());
+        Assert.Equal(fleet.Units.Single().Id, retire.UnitId);
+    }
+
+    [Fact]
+    public void DecideOrders_IdleUnit_TypeStillUsedByAServedRoute_NotRetired()
+    {
+        var a = MakeCity("a", 0, 0, 100);
+        var b = MakeCity("b", 1, 1, 90);
+        var cities = new[] { a, b }; // no third city, so no unserved pair exists for this type either
+        var existing = new[] { new Route(a, b, Aircraft, AircraftCount: 1) }; // already uses Aircraft's type
+        var fleet = FleetWithIdle(Aircraft, quantity: 2); // one grows a-b, one genuinely spare - but its type is still in use
+
+        var orders = BaselineAi.DecideOrders(existing, QuarterEngine.BaseActionCap, cities, DemandModel, new[] { Aircraft }, fleet);
+
+        Assert.Empty(orders.OfType<RetireAircraftOrder>());
+    }
+
+    [Fact]
+    public void DecideOrders_IdleUnit_CouldStillOpenAPositiveDemandPair_NotRetired()
+    {
+        var a = MakeCity("a", 0, 0, 100);
+        var b = MakeCity("b", 1, 1, 90);
+        var c = MakeCity("c", 2, 2, 20);
+        var cities = new[] { a, b, c };
+        var otherType = new AircraftType("other", "Other", Seats: 140);
+        var fleet = FleetWithIdle(otherType, quantity: 2); // one opens the best pair (a-b), one remains idle but a-c/b-c are still open
+
+        var orders = BaselineAi.DecideOrders(Array.Empty<Route>(), QuarterEngine.BaseActionCap, cities, DemandModel, new[] { otherType }, fleet);
+
+        Assert.Empty(orders.OfType<RetireAircraftOrder>());
+    }
+
+    [Fact]
+    public void DecideOrders_RetireAircraftOrder_IsFreeAction()
+    {
+        Assert.Equal(0, QuarterEngine.Cost(new RetireAircraftOrder(1), Array.Empty<Route>()));
+    }
+
+    [Fact]
+    public void DecideOrders_CloseAndRetire_AreFree_CoexistWithAFullBudgetOfOtherOrders()
+    {
+        var a = MakeCity("a", 0, 0, 100);
+        var b = MakeCity("b", 1, 1, 90);
+        var overBuiltDest = MakeCity("far", 60, 60, 1); // over-built route target, negligible demand
+        var gateway = MakeGateway("gw", 30, 30, 80);
+        var cities = new[] { a, b, overBuiltDest, gateway };
+        var bigAircraft = new AircraftType("big", "Big", Seats: 400);
+        var existing = new[]
+        {
+            new Route(a, b, bigAircraft, AircraftCount: 1),            // healthy - highest load factor, gets grown
+            new Route(a, overBuiltDest, bigAircraft, AircraftCount: 2), // over-built - gets shrunk
+        };
+        var fleet = FleetWithIdle(bigAircraft, quantity: 2); // grows a-b AND opens a new pair without needing to lease
+
+        var orders = BaselineAi.DecideOrders(
+            existing, QuarterEngine.BaseActionCap, cities, DemandModel, new[] { bigAircraft }, fleet,
+            availableSlotsByCity: null, availableCash: Money.FromDollars(2_000_000));
+
+        Assert.Single(orders.OfType<CloseRouteOrder>()); // shrinks the over-built a-far route
+        Assert.Empty(orders.OfType<LeaseAircraftOrder>()); // two idle units cover both growth steps
+        Assert.Equal(2, orders.OfType<RouteOrder>().Count()); // grow a-b + open the best new pair
+        Assert.Single(orders.OfType<NegotiationOrder>());
+        Assert.Single(orders.OfType<HireExecutiveOrder>());
+    }
+
+    [Fact]
+    public void DecideOrders_CloseRouteOrder_ProducesLegalOrders_WhenRunThroughQuarterEngine()
+    {
+        // Worth documenting, not hiding: with only one existing route and
+        // nothing else to grow, the "grow best route" step (unchanged
+        // since M32) re-grows this exact route the same quarter the new
+        // M35 step shrinks it - a real, visible illustration of the gap
+        // M39 exists to close (M35 is reactive/uncoordinated by design).
+        // Both orders are still individually legal and both apply; the
+        // net AircraftCount is unchanged, not reduced, this quarter.
+        var a = MakeCity("a", 0, 0, 1);
+        var b = MakeCity("b", 60, 60, 1);
+        var bigAircraft = new AircraftType("big", "Big", Seats: 400);
+        var existing = new[] { new Route(a, b, bigAircraft, AircraftCount: 2) };
+        var withUnits = FleetLedger.ApplyDelivery(AirlineFleet.Empty, bigAircraft, quantity: 2, FleetOwnershipMode.Owned);
+        var fleet = FleetLedger.Assign(FleetLedger.Assign(withUnits, withUnits.Units[0].Id, "a-b"), withUnits.Units[1].Id, "a-b");
+
+        var orders = BaselineAi.DecideOrders(existing, QuarterEngine.BaseActionCap, new[] { a, b }, DemandModel, new[] { bigAircraft }, fleet);
+        var result = QuarterEngine.RunQuarter(1, existing, QuarterEngine.BaseActionCap, orders, new[] { a, b }, DemandModel, fleet);
+
+        Assert.Empty(result.RejectedOrders);
+        Assert.Contains(orders, o => o is CloseRouteOrder);
+        Assert.Single(result.Routes);
+        Assert.Equal(2, result.Routes.Single().AircraftCount); // grow (+1) and close (-1) cancel out this quarter
+    }
+
+    [Fact]
+    public void DecideOrders_RetireAircraftOrder_ProducesLegalOrders_WhenRunThroughQuarterEngine()
+    {
+        var a = MakeCity("a", 0, 0, 100);
+        var strandedType = new AircraftType("stranded", "Stranded", Seats: 50);
+        var fleet = FleetWithIdle(strandedType);
+
+        var orders = BaselineAi.DecideOrders(Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { a }, DemandModel, new[] { strandedType }, fleet);
+        var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, orders, new[] { a }, DemandModel, fleet);
+
+        Assert.Empty(result.RejectedOrders);
+        Assert.Empty(result.UpdatedFleet!.Units);
+    }
 }

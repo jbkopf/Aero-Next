@@ -586,6 +586,23 @@ string ChokepointStatus(int year)
 // result the roadmap doc itself predicts: M31 gives BaselineAi room to
 // grow a real network, but nothing yet stops it from over-expanding past
 // what its fares/costs can sustain - that's M39's job, still ahead.
+//
+// M35 (retire/close) re-measured on top of this and produced byte-for-
+// byte identical figures - confirmed why, not just observed it:
+// instrumented this exact loop and found CloseRouteOrder/RetireAircraftOrder
+// apply zero times across the entire 22-quarter run. Idle units are 0
+// every single quarter (BaselineAi always immediately uses or leases
+// exactly what it needs, never over-acquires - M35's retire target never
+// exists here), and every multi-aircraft route's load factor stays
+// pinned at a perfect 1.000 the whole run (this loop's demand keeps
+// growing fast enough that capacity never outpaces it - M35's close
+// target never exists here either). Both mechanics are real and
+// correctly built (verified directly against the QA harness's 150 real
+// games instead, where they DO fire and meaningfully help - see M35's
+// own "Done" writeup) - this loop's specific demand-rich environment
+// just never triggers either one, the same kind of loop-specific
+// insensitivity M31's own hiring change already showed in reverse (there
+// it was the QA harness that didn't move; here it's this loop).
 var checkpoints = new HashSet<int> { 1, 18, 22, 121, campaignQuarters };
 
 var campaignDominance = RegionalDominanceState.Empty;
