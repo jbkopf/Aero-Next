@@ -884,7 +884,7 @@ its own group rather than one flat multiplication.
 
 ---
 
-## M34 — Fares: a direct, per-route price the player sets
+## M34 — Fares: a direct, per-route price the player sets ✅
 
 **Numbering note:** M31 (below) and M32/M33 (already built, in
 `ROUTE_CAPACITY_ROADMAP.md`) are all already spoken for in the shared
@@ -1058,6 +1058,56 @@ allotment, 90% load factor held indefinitely, no other spending) and
 confirms cash balance never goes negative across a long run — the actual
 invariant this milestone exists to guarantee, not just the individual
 unit-level cost/revenue checks.
+
+Built exactly as designed above, with no changes to the formulas or
+constants already verified: `Route.FareOverride`/`FarePerPassenger`,
+`FareCalculator`, `SetFareOrder`, `QuarterEngine`'s rejection rule and
+`ApplyRouteOrders` fix, `FinancialResolver.ComputeRevenue`'s rewrite,
+and the M30 amendment (`IdleSalaryCostFraction`) all landed together —
+the fare mechanism and the idle-unit fix are inseparable in practice,
+since the scenario test that proves either one only passes with both in
+place. `DefaultYieldPerPassengerKm`/the `yieldPerPassengerKm` parameter
+are gone from `FinancialResolver.Resolve` entirely, confirmed dead
+before removal. No `BaselineAi` changes — `SetFareOrder` stays unused by
+the AI for now, per the roadmap's own scope boundary; teaching it to use
+fares is real follow-on work, not done here.
+
+Done. 447 tests total (15 new: 5 in `FareCalculatorTests`, 7 in
+`QuarterEngineTests` covering `SetFareOrder` acceptance/rejection and
+the fare-preservation fix, 3 in `FinancialResolverTests` — two isolating
+revenue's new per-route/per-override behavior, and the scenario test
+itself, which runs 40 straight quarters from $0 cash and asserts net
+income never goes negative even once). 100% line/branch coverage on
+every touched/new class (`Route`, `FareCalculator`, `SetFareOrder`,
+`QuarterEngine`, `FinancialResolver`). Overall project coverage
+**99.85%/99.60%**, at the established baseline — the only remaining
+gaps are the same pre-existing ones this session has confirmed multiple
+times (`BriefingGenerator`, the abstract `QuarterOrder` base record,
+`NetworkPlanner`), untouched by this milestone. 150-game QA harness
+sweep at 244 quarters: 150/150 clean, 0 invariant violations, 0 crashes.
+
+**Campaign trajectory shifted again, measured not assumed — and for the
+first time in this whole sequence, in the *other* direction.** Every
+milestone from M26 through the debt-zero change made the financial model
+more realistic and made the same un-tuned `BaselineAi` campaign's
+bankruptcy arrive sooner. M34 breaks that pattern: `AeroNext.Sim`'s M13
+loop now peaks at **$18,752,722.38 (quarter 2)** before declining —
+demand ramping up against real per-seat fares earns meaningfully more
+per passenger than the old flat $0.12/passenger-km ever did — and
+bankruptcy doesn't arrive until **quarter 17 (1959, -$4,101,673.48)**,
+more than double M30's quarter 7. It's still bankruptcy, not a fix:
+once one of the frozen network's two routes saturates its own seat
+ceiling, fixed salary/operating cost still outrun a fare that can't grow
+demand or win more competitive share (both explicitly out of scope,
+per the design above) on a network `BaselineAi` never expands. The QA
+harness sweep confirms the same shape at scale: bankruptcy quarter
+averages moved later in every region (4.9–8.5, versus M30's 4.7–6.4),
+while win rate holds at **0/150** — a materially healthier cash
+trajectory doesn't by itself produce a win, because winning needs
+network growth and regional dominance `BaselineAi` doesn't pursue.
+That's exactly the gap the user asked M34 to unblock: the mechanism
+`BaselineAi` will need in order to be taught to actually play the game,
+not a substitute for teaching it.
 
 ---
 

@@ -74,8 +74,13 @@ Actions are classified by **how they resolve under simultaneity**:
   aircraft can fly each week is derived from its real performance and the
   route's distance, not a number the player picks; growing a route's
   capacity means committing another aircraft to it, not turning a dial.
-- Fare stance, service level, marketing — free to set (they're postures, not
-  numbers; see below).
+- Fare — a direct, player-settable price per route (M34), free to set. A
+  new route opens at a computed default (cost-plus-margin over that
+  route's own operating cost and its assigned aircraft's prorated
+  salary share — see `FareCalculator`), not a flat global number.
+  Doesn't yet affect demand size or who wins a contested pair — a pure
+  revenue lever for now. Service level and marketing remain unbuilt
+  postures.
 
 ### Private (resolves against nothing)
 Refinancing, retiring aircraft, hiring executives. **These cost no action.**

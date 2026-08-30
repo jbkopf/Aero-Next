@@ -524,8 +524,12 @@ public class FinancialResolverTests
         Assert.Equal(Money.Zero, statement.SalaryCost);
     }
 
+    /// <summary>M34 amendment: an idle unit's rate, derived the same way FinancialResolver.ComputeSalaryCost computes it.</summary>
+    private static Money IdleSalaryRate() =>
+        new((long)Math.Round(FinancialResolver.SalaryCostPerAircraftPerQuarter.Cents * FinancialResolver.IdleSalaryCostFraction, MidpointRounding.AwayFromZero));
+
     [Fact]
-    public void Resolve_SalaryCost_ScalesLinearlyWithTotalFleetSize_OwnedAndLeasedMixed()
+    public void Resolve_SalaryCost_ScalesLinearlyWithFleetSize_AssignedAndIdleMixed()
     {
         var a = MakeCity("a", 0, 0, 1);
         var airline = new Airline("A", Array.Empty<Route>());
@@ -533,15 +537,22 @@ public class FinancialResolverTests
         var state = FinancialState.Start(Money.FromDollars(10_000_000), Money.Zero, interestRatePerQuarter: 0.0);
         var owned = FleetLedger.ApplyDelivery(AirlineFleet.Empty, CostlyAircraft, quantity: 2, FleetOwnershipMode.Owned);
         var fleet = FleetLedger.ApplyDelivery(owned, CostlyAircraft, quantity: 3, FleetOwnershipMode.Leased); // 5 units total
+        fleet = FleetLedger.Assign(fleet, fleet.Units[0].Id, "a-b");
+        fleet = FleetLedger.Assign(fleet, fleet.Units[1].Id, "a-b"); // 2 assigned, 3 idle
 
         var (_, statement) = FinancialResolver.Resolve(state, airline, market, Array.Empty<QuarterOrder>(), fleet: fleet);
 
-        Assert.Equal(FinancialResolver.SalaryCostPerAircraftPerQuarter * 5, statement.SalaryCost);
+        Assert.Equal(FinancialResolver.SalaryCostPerAircraftPerQuarter * 2 + IdleSalaryRate() * 3, statement.SalaryCost);
     }
 
     [Fact]
-    public void Resolve_SalaryCost_SameForIdleUnit_AsForOneAssignedToARoute()
+    public void Resolve_SalaryCost_IdleUnit_CostsLessThanAssignedUnit()
     {
+        // M34 amendment to M30: a flat rate regardless of assignment meant
+        // a starting airline that leaves one aircraft unassigned bled cash
+        // forever with no path back short of retiring it (see
+        // docs/FINANCIAL_MODEL_ROADMAP.md's M34 section) -- an idle unit
+        // now costs a fraction of a flying one, not the same amount.
         var a = MakeCity("a", 0, 0, 1);
         var airline = new Airline("A", Array.Empty<Route>());
         var market = CompetitiveMarket.Resolve(new[] { airline }, new[] { a }, DemandModel);
@@ -552,8 +563,10 @@ public class FinancialResolverTests
         var (_, idleStatement) = FinancialResolver.Resolve(state, airline, market, Array.Empty<QuarterOrder>(), fleet: idleFleet);
         var (_, assignedStatement) = FinancialResolver.Resolve(state, airline, market, Array.Empty<QuarterOrder>(), fleet: assignedFleet);
 
-        Assert.Equal(idleStatement.SalaryCost, assignedStatement.SalaryCost);
-        Assert.True(idleStatement.SalaryCost.Cents > 0);
+        Assert.Equal(IdleSalaryRate(), idleStatement.SalaryCost);
+        Assert.Equal(FinancialResolver.SalaryCostPerAircraftPerQuarter, assignedStatement.SalaryCost);
+        Assert.True(idleStatement.SalaryCost < assignedStatement.SalaryCost);
+        Assert.True(idleStatement.SalaryCost.Cents > 0); // idle still costs something, just less
     }
 
     [Fact]
@@ -564,11 +577,94 @@ public class FinancialResolverTests
         var market = CompetitiveMarket.Resolve(new[] { airline }, new[] { a }, DemandModel);
         var state = FinancialState.Start(Money.FromDollars(10_000_000), Money.Zero, interestRatePerQuarter: 0.0);
         var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, CostlyAircraft, quantity: 2, FleetOwnershipMode.Owned);
+        fleet = FleetLedger.Assign(fleet, fleet.Units[0].Id, "a-b");
+        fleet = FleetLedger.Assign(fleet, fleet.Units[1].Id, "a-b"); // both assigned, full rate applies to both
 
         var (withFleet, statement) = FinancialResolver.Resolve(state, airline, market, Array.Empty<QuarterOrder>(), fleet: fleet);
         var (withoutFleet, _) = FinancialResolver.Resolve(state, airline, market, Array.Empty<QuarterOrder>());
 
         Assert.Equal(FinancialResolver.SalaryCostPerAircraftPerQuarter * 2, statement.SalaryCost);
         Assert.Equal(withoutFleet.CashBalance - statement.SalaryCost, withFleet.CashBalance);
+    }
+
+    // --- M34: fares ---
+
+    [Fact]
+    public void Resolve_Revenue_EqualsFarePerPassengerTimesSeatsUsed_NotSeatsOffered()
+    {
+        var a = MakeCity("a", 0, 0, 1);
+        var b = MakeCity("b", 1, 1, 1);
+        var aircraft = new AircraftType("t", "Test", Seats: 400); // demand at this distance won't fill it - real load factor < 100%
+        var route = new Route(a, b, aircraft, AircraftCount: 1, FareOverride: Money.FromDollars(100));
+        var airline = new Airline("A", new[] { route });
+        var market = CompetitiveMarket.Resolve(new[] { airline }, new[] { a, b }, DemandModel);
+        var state = FinancialState.Start(Money.FromDollars(10_000_000), Money.Zero, interestRatePerQuarter: 0.0);
+        var seatsUsed = market.RouteUsage.Single().SeatsUsed;
+
+        var (_, statement) = FinancialResolver.Resolve(state, airline, market, Array.Empty<QuarterOrder>());
+
+        Assert.True(seatsUsed > 0);
+        Assert.True(seatsUsed < route.SeatsPerQuarter); // genuinely load-factor-constrained, not sold out
+        Assert.Equal(Money.FromDollars(100) * seatsUsed, statement.Revenue);
+    }
+
+    [Fact]
+    public void Resolve_Revenue_ReflectsACustomFareOverride_NotJustTheComputedDefault()
+    {
+        var a = MakeCity("a", 0, 0, 100);
+        var b = MakeCity("b", 1, 1, 100); // close + heavy: demand swamps capacity -> full, known load factor
+        var aircraft = new AircraftType("t", "Test", Seats: 10);
+        var defaultRoute = new Route(a, b, aircraft, AircraftCount: 1);
+        var expensiveRoute = new Route(a, b, aircraft, AircraftCount: 1, FareOverride: defaultRoute.FarePerPassenger * 2);
+        var defaultAirline = new Airline("Default", new[] { defaultRoute });
+        var expensiveAirline = new Airline("Expensive", new[] { expensiveRoute });
+        var defaultMarket = CompetitiveMarket.Resolve(new[] { defaultAirline }, new[] { a, b }, DemandModel);
+        var expensiveMarket = CompetitiveMarket.Resolve(new[] { expensiveAirline }, new[] { a, b }, DemandModel);
+        var state = FinancialState.Start(Money.FromDollars(10_000_000), Money.Zero, interestRatePerQuarter: 0.0);
+
+        var (_, defaultStatement) = FinancialResolver.Resolve(state, defaultAirline, defaultMarket, Array.Empty<QuarterOrder>());
+        var (_, expensiveStatement) = FinancialResolver.Resolve(state, expensiveAirline, expensiveMarket, Array.Empty<QuarterOrder>());
+
+        Assert.Equal(defaultStatement.Revenue * 2, expensiveStatement.Revenue); // same carried count both sides (both fully sold out), double the fare
+    }
+
+    [Fact]
+    public void Resolve_StartingScenario_NoBankruptcy_FullStartingFleetAssigned_90PercentLoadFactorHeldIndefinitely()
+    {
+        // The user's own invariant, verified by hand in
+        // docs/FINANCIAL_MODEL_ROADMAP.md's M34 section before this test
+        // existed: $0 starting debt, one valid route opened turn one
+        // using the real 1955 starting aircraft allotment (both units
+        // assigned), 90% load factor held indefinitely, no other
+        // spending -- the airline must never go bankrupt. Reproduced
+        // directly against the real Ilyushin Il-14's stats (data/aircraft.json)
+        // and StartingConditionsResolver.StartingAircraftQuantity (2).
+        var il14 = new AircraftType("il14", "Ilyushin Il-14", Seats: 28, RangeKm: 1600, Cost: Money.FromDollars(300_000), CostPerAvailableSeatKm: 0.13, CruiseSpeedKmh: 350);
+        var origin = MakeCity("origin", 0, 0, 100);
+        var destination = MakeCity("destination", 8, 8, 100);
+        var route = new Route(origin, destination, il14, AircraftCount: 2); // both starting aircraft on the one route
+        Assert.True(route.IsWithinRange); // sanity check this is actually a valid opening route for the Il-14
+
+        var airline = new Airline("A", new[] { route });
+        var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, il14, quantity: 2, FleetOwnershipMode.Owned);
+        fleet = FleetLedger.Assign(fleet, fleet.Units[0].Id, "origin-destination");
+        fleet = FleetLedger.Assign(fleet, fleet.Units[1].Id, "origin-destination");
+
+        var seatsUsed = (long)Math.Round(route.SeatsPerQuarter * 0.90, MidpointRounding.AwayFromZero); // 90% load factor, held every quarter below
+        var pair = new CompetitivePairResult(origin, destination, seatsUsed, new Dictionary<Airline, long> { [airline] = seatsUsed });
+        var routeUsage = new[] { new CompetitiveRouteUsage(airline, route, route.SeatsPerQuarter, seatsUsed) };
+        var market = new CompetitiveMarketResult(new[] { pair }, routeUsage);
+
+        var state = FinancialState.Start(Money.Zero, Money.Zero, interestRatePerQuarter: 0.02); // $0 starting cash -- the strictest possible check: net income alone must never go negative
+
+        for (var quarter = 1; quarter <= 40; quarter++)
+        {
+            var (newState, statement) = FinancialResolver.Resolve(state, airline, market, Array.Empty<QuarterOrder>(), fleet: fleet);
+
+            Assert.True(statement.NetIncome.Cents >= 0, $"Quarter {quarter}: net income was {statement.NetIncome}, cash was {newState.CashBalance}");
+            Assert.False(newState.IsBankrupt);
+
+            state = newState;
+        }
     }
 }

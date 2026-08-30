@@ -18,7 +18,7 @@ namespace AeroNext.Core.Turns;
 /// consumes its cost; an order that would exceed the remaining cap is
 /// rejected — but scanning continues, so a free order (any
 /// HireExecutiveOrder/RefinanceOrder/RetireAircraftOrder/CloseRouteOrder/
-/// RelinquishSlotOrder/PayDownDebtOrder) later in the list still goes
+/// RelinquishSlotOrder/PayDownDebtOrder/SetFareOrder) later in the list still goes
 /// through even after an earlier, costlier order was rejected. Only
 /// orders that don't fit get skipped, not everything after them — a hard
 /// truncate-the-rest rule would needlessly block actions that cost
@@ -204,6 +204,17 @@ public static class QuarterEngine
                 }
             }
 
+            if (order is SetFareOrder fareOrder)
+            {
+                var operatesPair = currentRoutes.Any(r => r.Origin.Id == fareOrder.Origin.Id && r.Destination.Id == fareOrder.Destination.Id);
+
+                if (!operatesPair || fareOrder.FarePerPassenger < Money.Zero)
+                {
+                    rejected.Add(order);
+                    continue;
+                }
+            }
+
             FleetUnit? unitToRetire = null;
 
             if (order is RetireAircraftOrder retireOrder)
@@ -347,7 +358,7 @@ public static class QuarterEngine
             spent += cost;
         }
 
-        var routes = ApplyRouteOrders(currentRoutes, applied.Where(o => o is RouteOrder or CloseRouteOrder));
+        var routes = ApplyRouteOrders(currentRoutes, applied.Where(o => o is RouteOrder or CloseRouteOrder or SetFareOrder));
         var nextActionCap = currentActionCap + applied.OfType<HireExecutiveOrder>().Sum(h => h.CapIncrease);
         var plan = NetworkPlanner.Plan(routes, cities, demandModel);
 
@@ -372,6 +383,7 @@ public static class QuarterEngine
         CloseRouteOrder => 0,
         RelinquishSlotOrder => 0,
         PayDownDebtOrder => 0,
+        SetFareOrder => 0,
         NegotiationOrder => 1,
         AircraftOrder => 1,
         LeaseAircraftOrder => 1,
@@ -389,6 +401,7 @@ public static class QuarterEngine
     /// Each applied CloseRouteOrder (M27) means "detach one aircraft" —
     /// AircraftCount drops by 1, and the entry is removed entirely rather
     /// than left behind as a zero-capacity ghost once it reaches zero.
+    /// Each applied SetFareOrder (M34) overrides FareOverride directly.
     /// This single fold is correct in both fleet-aware and permissive
     /// mode without needing to know which one produced `orders`.
     /// </summary>
@@ -404,7 +417,13 @@ public static class QuarterEngine
                 var sameTypeAlreadyThere = byKey.TryGetValue(key, out var existing) && existing.Aircraft.Id == routeOrder.Aircraft.Id;
                 var newCount = sameTypeAlreadyThere ? existing!.AircraftCount + 1 : 1;
 
-                byKey[key] = new Route(routeOrder.Origin, routeOrder.Destination, routeOrder.Aircraft, newCount);
+                // Preserve a customized fare (M34) when this is just
+                // another aircraft joining a pair already served — only
+                // a genuinely new pair starts back at the computed
+                // default (FareOverride: null).
+                var fareOverride = sameTypeAlreadyThere ? existing!.FareOverride : null;
+
+                byKey[key] = new Route(routeOrder.Origin, routeOrder.Destination, routeOrder.Aircraft, newCount, fareOverride);
             }
             else if (order is CloseRouteOrder closeOrder)
             {
@@ -422,6 +441,15 @@ public static class QuarterEngine
                     {
                         byKey[key] = existing with { AircraftCount = newCount };
                     }
+                }
+            }
+            else if (order is SetFareOrder fareOrder)
+            {
+                var key = (fareOrder.Origin.Id, fareOrder.Destination.Id);
+
+                if (byKey.TryGetValue(key, out var existing))
+                {
+                    byKey[key] = existing with { FareOverride = fareOrder.FarePerPassenger };
                 }
             }
         }

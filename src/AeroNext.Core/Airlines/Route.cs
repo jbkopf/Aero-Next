@@ -1,3 +1,4 @@
+using AeroNext.Core.Finance;
 using AeroNext.Core.World;
 
 namespace AeroNext.Core.Airlines;
@@ -10,8 +11,14 @@ namespace AeroNext.Core.Airlines;
 /// (<see cref="FlightPerformance"/>) times how many units are assigned.
 /// Growing a route's capacity means assigning another aircraft to it, not
 /// picking a bigger number.
+///
+/// FareOverride is null until a player sets one via SetFareOrder (M34) —
+/// FarePerPassenger falls back to FareCalculator's cost-plus-margin
+/// default in that case, so every route (new, test, or demo scenario)
+/// gets a real, non-zero fare with no migration burden on any existing
+/// call site, the same reasoning CruiseSpeedKmh's own default followed.
 /// </summary>
-public sealed record Route(City Origin, City Destination, AircraftType Aircraft, int AircraftCount)
+public sealed record Route(City Origin, City Destination, AircraftType Aircraft, int AircraftCount, Money? FareOverride = null)
 {
     private const int WeeksPerQuarter = 13;
 
@@ -27,4 +34,7 @@ public sealed record Route(City Origin, City Destination, AircraftType Aircraft,
 
     /// <summary>Whether Aircraft can physically fly this distance nonstop — M11's range constraint.</summary>
     public bool IsWithinRange => DistanceKm <= Aircraft.RangeKm;
+
+    /// <summary>Player-set fare if one exists, otherwise FareCalculator's cost-plus-margin default.</summary>
+    public Money FarePerPassenger => FareOverride ?? FareCalculator.SuggestedFarePerPassenger(this);
 }

@@ -1111,4 +1111,121 @@ public class QuarterEngineTests
     {
         Assert.Equal(0, QuarterEngine.Cost(new PayDownDebtOrder(Money.FromDollars(1_000)), Array.Empty<Route>()));
     }
+
+    // --- M34: fares (SetFareOrder, and preserving a customized fare when growing a route) ---
+
+    [Fact]
+    public void RunQuarter_SetFareOrder_AirlineOperatesThePair_Applied_OverridesTheFare()
+    {
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 50);
+        var b = MakeCity("b", 1, 1, 50);
+        var existing = new[] { new Route(a, b, Aircraft, AircraftCount: 1) };
+        var order = new SetFareOrder(a, b, Money.FromDollars(500));
+
+        var result = QuarterEngine.RunQuarter(1, existing, QuarterEngine.BaseActionCap, new[] { order }, new[] { a, b }, demandModel);
+
+        Assert.Single(result.AppliedOrders);
+        Assert.Empty(result.RejectedOrders);
+        Assert.Equal(Money.FromDollars(500), result.Routes.Single().FareOverride);
+    }
+
+    [Fact]
+    public void RunQuarter_SetFareOrder_NoRoutesAtAll_Rejected()
+    {
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 50);
+        var b = MakeCity("b", 1, 1, 50);
+        var order = new SetFareOrder(a, b, Money.FromDollars(500));
+
+        var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, new[] { a, b }, demandModel);
+
+        Assert.Empty(result.AppliedOrders);
+        Assert.Single(result.RejectedOrders);
+    }
+
+    [Fact]
+    public void RunQuarter_SetFareOrder_RouteSharingOnlyOrigin_NotMistakenForThePairBeingOperated_Rejected()
+    {
+        // Guards the && inside the operatesPair lookup: a route sharing
+        // only the origin (a-c exists, setting a fare on a-b) must not be
+        // treated as though the airline operates a-b.
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 50);
+        var b = MakeCity("b", 1, 1, 50);
+        var c = MakeCity("c", 2, 2, 50);
+        var existing = new[] { new Route(a, c, Aircraft, AircraftCount: 1) }; // a-c exists, not a-b
+        var order = new SetFareOrder(a, b, Money.FromDollars(500));
+
+        var result = QuarterEngine.RunQuarter(1, existing, QuarterEngine.BaseActionCap, new[] { order }, new[] { a, b, c }, demandModel);
+
+        Assert.Empty(result.AppliedOrders);
+        Assert.Single(result.RejectedOrders);
+    }
+
+    [Fact]
+    public void RunQuarter_SetFareOrder_ExistingRouteWithWhollyDifferentOrigin_ShortCircuitsOriginCheck_Rejected()
+    {
+        // A route sharing neither origin nor destination (x-y exists,
+        // setting a fare on a-b) must short-circuit on the origin
+        // mismatch alone - distinct from the same-origin-different-
+        // destination case above.
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 50);
+        var b = MakeCity("b", 1, 1, 50);
+        var x = MakeCity("x", 5, 5, 50);
+        var y = MakeCity("y", 6, 6, 50);
+        var existing = new[] { new Route(x, y, Aircraft, AircraftCount: 1) };
+        var order = new SetFareOrder(a, b, Money.FromDollars(500));
+
+        var result = QuarterEngine.RunQuarter(1, existing, QuarterEngine.BaseActionCap, new[] { order }, new[] { a, b, x, y }, demandModel);
+
+        Assert.Empty(result.AppliedOrders);
+        Assert.Single(result.RejectedOrders);
+    }
+
+    [Fact]
+    public void RunQuarter_SetFareOrder_NegativeFare_Rejected()
+    {
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 50);
+        var b = MakeCity("b", 1, 1, 50);
+        var existing = new[] { new Route(a, b, Aircraft, AircraftCount: 1) };
+        var order = new SetFareOrder(a, b, Money.FromDollars(-1));
+
+        var result = QuarterEngine.RunQuarter(1, existing, QuarterEngine.BaseActionCap, new[] { order }, new[] { a, b }, demandModel);
+
+        Assert.Empty(result.AppliedOrders);
+        Assert.Single(result.RejectedOrders);
+    }
+
+    [Fact]
+    public void RunQuarter_SetFareOrder_IsFreeAction()
+    {
+        var a = MakeCity("a", 0, 0, 50);
+        var b = MakeCity("b", 1, 1, 50);
+
+        Assert.Equal(0, QuarterEngine.Cost(new SetFareOrder(a, b, Money.FromDollars(500)), Array.Empty<Route>()));
+    }
+
+    [Fact]
+    public void RunQuarter_RouteOrder_AssignsAnotherAircraftToAnAlreadyFareCustomizedRoute_PreservesTheCustomFare()
+    {
+        // A necessary fix, not incidental (see M34's roadmap writeup):
+        // ApplyRouteOrders used to always construct a brand-new Route,
+        // which would silently reset a customized fare back to the
+        // computed default every time another aircraft joined the pair.
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 50);
+        var b = MakeCity("b", 1, 1, 50);
+        var existing = new[] { new Route(a, b, Aircraft, AircraftCount: 1, FareOverride: Money.FromDollars(500)) };
+        var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, Aircraft, quantity: 1, FleetOwnershipMode.Owned);
+        var order = new RouteOrder(a, b, Aircraft);
+
+        var result = QuarterEngine.RunQuarter(1, existing, QuarterEngine.BaseActionCap, new[] { order }, new[] { a, b }, demandModel, fleet);
+
+        var route = result.Routes.Single();
+        Assert.Equal(2, route.AircraftCount);
+        Assert.Equal(Money.FromDollars(500), route.FareOverride);
+    }
 }

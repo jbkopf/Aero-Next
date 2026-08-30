@@ -567,20 +567,27 @@ string ChokepointStatus(int year)
     return direct ? $"{best.Name} flies JFK-LHR direct" : $"{best.Name} still needs a Gander stop";
 }
 
-// Re-measured after M30 added a flat $250,000/quarter/aircraft salary
-// cost (docs/FINANCIAL_MODEL_ROADMAP.md) - automatic, no BaselineAi
-// action required, same as M29's principal repayment. Bankruptcy moved
-// from quarter 11 (with $0 starting debt, no salary cost) to quarter 7
-// (1956, -$1,656,820.05) - salary cost alone is a bigger, faster-biting
-// accelerant than the $10M starting debt ever was. Frozen from there;
-// unlike every earlier milestone's frozen state, carried passengers stay
-// completely pinned too (not just cash) - this run's frozen 2-route
-// network happened to be fully capacity-constrained (demand growth can't
-// raise carried passengers past a route's own seat ceiling), not a bug,
-// just a different specific network than earlier runs built before
-// freezing sooner. 121 stays in the checkpoint set as a stickiness
-// sanity check.
-var checkpoints = new HashSet<int> { 1, 6, 7, 121, campaignQuarters };
+// Re-measured after M34 replaced the flat global yield with per-route
+// fares (docs/FINANCIAL_MODEL_ROADMAP.md) - the first milestone in this
+// whole sequence to shift the trajectory the *other* direction. Cash
+// actually climbs for the first two quarters (peak $18,752,722.38 at
+// quarter 2) as demand ramps up against the same fixed 2-route network
+// and fares - now real per-seat prices, not a flat $0.12/passenger-km -
+// earn meaningfully more per passenger than before. Bankruptcy still
+// happens (quarter 17, 1959, -$4,101,673.48) once one of the two frozen
+// routes saturates its own seat ceiling (carried pax plateaus at
+// 406,963 through quarters 11-17) while salary/operating cost keep
+// accruing on both - but it took more than twice as long to arrive as
+// M30's quarter 7. Cash itself freezes exactly at bankruptcy
+// (FinancialResolver short-circuits a bankrupt airline's own quarter),
+// but carried pax keeps climbing after that (592,972 at 121, 683,904 at
+// 244) - NetworkPlanner still recomputes against real, growing demand
+// every quarter regardless of financial bankruptcy, and the *other*
+// frozen route was never itself demand-saturated, so total carried
+// keeps rising for decades even as cash cannot move again. 121 stays in
+// the checkpoint set as a stickiness sanity check on cash specifically,
+// not on pax.
+var checkpoints = new HashSet<int> { 1, 2, 17, 121, campaignQuarters };
 
 var campaignDominance = RegionalDominanceState.Empty;
 string? campaignWinner = null;

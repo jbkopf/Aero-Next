@@ -2,7 +2,6 @@ using AeroNext.Core.Airlines;
 using AeroNext.Core.Competition;
 using AeroNext.Core.Fleet;
 using AeroNext.Core.Turns;
-using AeroNext.Core.World;
 
 namespace AeroNext.Core.Finance;
 
@@ -21,10 +20,14 @@ namespace AeroNext.Core.Finance;
 /// real cash drain even before it earns anything, the same causal story
 /// M3's load factor already tells, now with financial stakes.
 ///
-/// Yield (revenue per passenger-km) is a flat global placeholder, not tied
-/// to Airline.Quality or fare stance — a richer "premium carriers charge
-/// more" model is a natural future refinement, not required for a
-/// plausible cash trajectory and a bankruptcy trigger to both work.
+/// Revenue (M34) comes from each route's own FarePerPassenger — a player
+/// override, or FareCalculator's cost-plus-margin default when none is
+/// set — multiplied by that route's SeatsUsed, mirroring exactly how
+/// operating cost is already computed per route/leg below. No more flat
+/// global yield: fare now depends on the aircraft, the distance, and
+/// whatever the player set, though it still doesn't depend on
+/// Airline.Quality or affect competitive share — see M34's roadmap
+/// writeup for what's still deliberately out of scope.
 ///
 /// Operating cost (per available seat-km) is per-aircraft, not a flat
 /// global rate — AircraftType.CostPerAvailableSeatKm, so a route's cost
@@ -33,8 +36,6 @@ namespace AeroNext.Core.Finance;
 /// </summary>
 public static class FinancialResolver
 {
-    public const double DefaultYieldPerPassengerKm = 0.12;
-
     /// <summary>
     /// M23: closes a real gap found while designing the win condition —
     /// RefinanceOrder has no limit, so without this an airline could stay
@@ -94,6 +95,21 @@ public static class FinancialResolver
     /// </summary>
     public static readonly Money SalaryCostPerAircraftPerQuarter = Money.FromDollars(250_000);
 
+    /// <summary>
+    /// M34 amendment to M30: an idle (unassigned) unit costs less than a
+    /// flying one, not the same flat rate — a flat rate with no reduced
+    /// idle tier meant a starting airline that leaves one of its two
+    /// starting aircraft unassigned (plausible first-turn play, not
+    /// misplay) bled cash forever with no path back short of retiring
+    /// it, verified directly against the 1955 starting scenario in
+    /// docs/FINANCIAL_MODEL_ROADMAP.md's M34 section. 0.15 was chosen
+    /// with margin under the worst case a distance-based fare could ever
+    /// cover (approaches ~0.17 as route distance approaches zero) — idle
+    /// capacity stays a real, felt drag (M30's actual point) without
+    /// being an unrecoverable one.
+    /// </summary>
+    public const double IdleSalaryCostFraction = 0.15;
+
     /// <param name="fleet">
     /// The airline's *post*-quarter fleet (QuarterResult.UpdatedFleet) —
     /// so a unit leased this same quarter is charged its fee immediately,
@@ -113,7 +129,6 @@ public static class FinancialResolver
         Airline airline,
         CompetitiveMarketResult marketResult,
         IReadOnlyList<QuarterOrder> appliedOrders,
-        double yieldPerPassengerKm = DefaultYieldPerPassengerKm,
         AirlineFleet? fleet = null,
         IReadOnlyList<FleetUnit>? retiredUnits = null)
     {
@@ -122,7 +137,7 @@ public static class FinancialResolver
             return (state, new QuarterlyStatement(Money.Zero, Money.Zero, Money.Zero, Money.Zero, Money.Zero, state.CashBalance, IsBankrupt: true));
         }
 
-        var revenue = ComputeRevenue(airline, marketResult, yieldPerPassengerKm);
+        var revenue = ComputeRevenue(airline, marketResult);
         var operatingCost = ComputeOperatingCost(airline, marketResult);
         var borrowed = appliedOrders.OfType<RefinanceOrder>().Aggregate(Money.Zero, (sum, o) => sum + o.AdditionalBorrowing);
         var manualPaydown = appliedOrders.OfType<PayDownDebtOrder>().Aggregate(Money.Zero, (sum, o) => sum + o.Amount);
@@ -172,7 +187,11 @@ public static class FinancialResolver
             return Money.Zero;
         }
 
-        return SalaryCostPerAircraftPerQuarter * fleet.Units.Count;
+        var idleCount = fleet.Idle.Count();
+        var assignedCount = fleet.Units.Count - idleCount;
+        var idleRateCents = (long)Math.Round(SalaryCostPerAircraftPerQuarter.Cents * IdleSalaryCostFraction, MidpointRounding.AwayFromZero);
+
+        return SalaryCostPerAircraftPerQuarter * assignedCount + new Money(idleRateCents) * idleCount;
     }
 
     private static Money ComputeRetirementProceeds(IReadOnlyList<FleetUnit>? retiredUnits)
@@ -192,23 +211,28 @@ public static class FinancialResolver
         return new Money(cents);
     }
 
-    private static Money ComputeRevenue(Airline airline, CompetitiveMarketResult marketResult, double yieldPerPassengerKm)
+    /// <summary>
+    /// M34: revenue is each route's own FarePerPassenger times how many
+    /// seats it actually carried this quarter — mirroring
+    /// ComputeOperatingCost's per-leg RouteUsage iteration exactly,
+    /// rather than the old flat-yield-times-O-D-distance calculation.
+    /// A connecting (one-stop) passenger already incurs operating cost
+    /// on both legs they fly (RouteUsage's existing behavior); revenue
+    /// now mirrors that — their fare is the sum of both legs' own fares,
+    /// reflecting the real distance flown via the hub. Pure integer
+    /// math (Money * long), no rounding needed — unlike the constant
+    /// this replaces.
+    /// </summary>
+    private static Money ComputeRevenue(Airline airline, CompetitiveMarketResult marketResult)
     {
-        var cents = 0L;
+        var revenue = Money.Zero;
 
-        foreach (var pair in marketResult.Pairs)
+        foreach (var usage in marketResult.RouteUsage.Where(u => u.Airline == airline))
         {
-            var carried = pair.CarriedByAirline.GetValueOrDefault(airline);
-            if (carried == 0)
-            {
-                continue;
-            }
-
-            var distanceKm = GreatCircle.DistanceKm(pair.Origin, pair.Destination);
-            cents += (long)Math.Round(carried * distanceKm * yieldPerPassengerKm * 100, MidpointRounding.AwayFromZero);
+            revenue += usage.Route.FarePerPassenger * usage.SeatsUsed;
         }
 
-        return new Money(cents);
+        return revenue;
     }
 
     private static Money ComputeOperatingCost(Airline airline, CompetitiveMarketResult marketResult)
