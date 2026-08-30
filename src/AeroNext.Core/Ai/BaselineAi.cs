@@ -37,7 +37,17 @@ namespace AeroNext.Core.Ai;
 /// Separately pays down debt whenever cash comfortably exceeds a buffer
 /// and debt is nonzero — never both the same quarter, since the two
 /// thresholds are spaced far enough apart that cash can't be both short
-/// of the bid and above the buffer at once (M36).
+/// of the bid and above the buffer at once (M36). Raises the fare on
+/// any served route that's essentially sold out, and separately cuts
+/// the fare on any served route below the same load-factor floor
+/// CloseRouteOrder already uses (M37). Worth stating plainly: only the
+/// raise is currently revenue-positive — fare doesn't yet affect demand
+/// size or competitive share (M34's own explicit scope), so a saturated
+/// route's capacity-capped carried volume pays more for free, while an
+/// underperforming route's cut wins no additional passengers and is a
+/// straight per-passenger loss under today's mechanics. Both are built
+/// anyway, to exercise the full mechanic and measure the real effect —
+/// see docs/BASELINE_AI_ROADMAP.md's M37 for the measured numbers.
 ///
 /// Not trying to play well — CLAUDE.md's game is always exactly 4 airlines,
 /// so this exists because the sim can never run a representative quarter
@@ -79,6 +89,15 @@ public static class BaselineAi
     /// thresholds themselves guarantee it.
     /// </summary>
     private static readonly Money PayDownCashBuffer = Money.FromDollars(10_000_000);
+
+    /// <summary>M37 (proposed, tunable): at or above this, a served route reads as essentially sold out — the reactive correction is to raise its fare toward FareRaiseFraction above the computed default.</summary>
+    private const double SaturatedLoadFactorCeiling = 0.95;
+
+    /// <summary>M37 (proposed, tunable): how far above the computed default a saturated route's fare gets raised.</summary>
+    private const double FareRaiseFraction = 0.15;
+
+    /// <summary>M37 (proposed, tunable): how far below the computed default an underperforming route's fare gets cut — see the class doc comment for why this is currently revenue-negative under today's demand model, built anyway to exercise the full mechanic.</summary>
+    private const double FareCutFraction = 0.20;
 
     /// <param name="eraAvailableTypes">
     /// The full aircraft catalog available to lease this era (e.g.
@@ -257,15 +276,57 @@ public static class BaselineAi
             }
         }
 
+        // Computed once, shared by the close/raise/cut checks below -
+        // each reads the same per-route load factor, just against a
+        // different threshold.
+        var routeLoads = RouteEvaluator.EvaluateNetwork(currentRoutes, demandModel);
+
         // M35: shrink (never fully close, see class doc comment) every
         // served route whose load factor has fallen below the floor -
         // free, so every qualifying route gets one shrink this quarter,
         // not just the single worst one.
-        foreach (var overBuilt in RouteEvaluator.EvaluateNetwork(currentRoutes, demandModel)
+        foreach (var overBuilt in routeLoads
             .Where(load => load.Route.AircraftCount > 1 && load.LoadFactor < CloseRouteLoadFactorFloor)
             .Select(load => load.Route))
         {
             orders.Add(new CloseRouteOrder(overBuilt.Origin, overBuilt.Destination));
+        }
+
+        // M37: raise the fare on every served route that's essentially
+        // sold out - free, so every qualifying route gets one this
+        // quarter. Flat against the computed default, not the current
+        // fare (non-compounding), and skipped once already at or above
+        // the target so a route that's still saturated after the raise
+        // doesn't get a pointless repeat order.
+        foreach (var saturated in routeLoads
+            .Where(load => load.LoadFactor >= SaturatedLoadFactorCeiling)
+            .Select(load => load.Route))
+        {
+            var target = RaisedFare(saturated);
+
+            if (saturated.FarePerPassenger < target)
+            {
+                orders.Add(new SetFareOrder(saturated.Origin, saturated.Destination, target));
+            }
+        }
+
+        // M37: cut the fare on every served route below the same floor
+        // CloseRouteOrder already uses - mirroring M35's own threshold
+        // logic, not inventing a separate one. See the class doc comment:
+        // this direction is currently revenue-negative under today's
+        // demand model, built anyway to exercise the full mechanic.
+        // Same flat-against-default, non-compounding, skip-if-already-there
+        // shape as the raise above.
+        foreach (var underperforming in routeLoads
+            .Where(load => load.LoadFactor < CloseRouteLoadFactorFloor)
+            .Select(load => load.Route))
+        {
+            var target = CutFare(underperforming);
+
+            if (underperforming.FarePerPassenger > target)
+            {
+                orders.Add(new SetFareOrder(underperforming.Origin, underperforming.Destination, target));
+            }
         }
 
         // M35: retire every genuinely stranded idle unit - nothing to
@@ -371,6 +432,20 @@ public static class BaselineAi
             .ThenBy(l => l.Route.Destination.Id, StringComparer.Ordinal)
             .Select(l => l.Route)
             .FirstOrDefault();
+    }
+
+    /// <summary>M37: FareCalculator's own default, grossed up by FareRaiseFraction — the standard double-then-round-once cents pattern FareCalculator itself already uses.</summary>
+    private static Money RaisedFare(Route route)
+    {
+        var cents = (long)Math.Round(FareCalculator.SuggestedFarePerPassenger(route).Cents * (1 + FareRaiseFraction), MidpointRounding.AwayFromZero);
+        return new Money(cents);
+    }
+
+    /// <summary>M37: FareCalculator's own default, cut by FareCutFraction — same rounding pattern as RaisedFare.</summary>
+    private static Money CutFare(Route route)
+    {
+        var cents = (long)Math.Round(FareCalculator.SuggestedFarePerPassenger(route).Cents * (1 - FareCutFraction), MidpointRounding.AwayFromZero);
+        return new Money(cents);
     }
 
     /// <summary>M33: true when availableSlotsByCity is null (permissive), or this airline has a slot left at every gateway origin/destination touches.</summary>

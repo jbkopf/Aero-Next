@@ -351,7 +351,7 @@ loops, expect them to diverge, and don't assume either one is more
 
 ---
 
-## M37 — Fares
+## M37 — Fares ✅
 
 `SetFareOrder`, reactively at minimum: cut the fare on a route whose load
 factor has stayed low for a measured stretch, mirroring M35's
@@ -366,6 +366,80 @@ pretended away.
 **Done when:** `BaselineAi` sets a fare below the computed default on a
 persistently underperforming route and the effect on that route's
 revenue/load factor is directly observable in a test.
+
+**Reconsidered before building, not after.** The roadmap text above said
+"cut the fare on a route whose load factor has stayed low." Re-checked
+against M34's own explicit scope first: fare has zero effect on demand
+size or competitive share today, so cutting a fare on an underperforming
+route wins no additional passengers — a straight revenue loss under
+current mechanics, not a correction. Raised directly with the user
+before writing any code; decided: **build both directions.** Raise fares
+on saturated routes (`LoadFactor >= SaturatedLoadFactorCeiling = 0.95`
+*(proposed, tunable)*, target `FareCalculator.SuggestedFarePerPassenger
+× (1 + FareRaiseFraction)`, `FareRaiseFraction = 0.15`) — sound revenue
+upside today, since a saturated route's capacity-capped carried volume
+pays more per passenger for free. Cut fares on underperforming routes
+(reuses `CloseRouteLoadFactorFloor` — M35's own constant, per the
+roadmap's own "mirroring M35's threshold logic" wording — target
+`SuggestedFarePerPassenger × (1 − FareCutFraction)`, `FareCutFraction =
+0.20`) as originally scoped, built anyway to exercise the full mechanic
+and measure its real effect honestly rather than assume it's sound.
+
+Both targets are flat against the *computed default*, not the route's
+current fare — deliberately non-compounding, so a route that stays
+saturated or underperforming across many quarters doesn't spiral its
+fare toward infinity or zero; each is skipped once the route's current
+fare is already at or past the target, avoiding a pointless repeat
+order. `RouteEvaluator.EvaluateNetwork` is now computed once per
+`DecideOrders` call and shared across the close/raise/cut checks,
+rather than three separate evaluations.
+
+Done. 483 tests total (8 new, all in `BaselineAiTests`) — raise fires
+and targets the right value on a saturated route; already-at-target
+skips a repeat; cut fires and targets the right value on an
+underperforming route; already-at-target skips a repeat; a route with a
+load factor between the two thresholds gets neither (a real,
+calibrated mid-range scenario, not just asserted); both confirmed free
+via `QuarterEngine.Cost`; both run clean (zero rejections) through
+`QuarterEngine.RunQuarter`; and a full-loop test ties the roadmap's own
+"Done when" bar together directly — the fare `BaselineAi` actually
+proposes, once applied, measurably raises `FinancialResolver` revenue
+for the identical carried-passenger count (fare still doesn't affect
+demand, so carried volume matches exactly; only revenue moves). 100%
+line/branch coverage on `BaselineAi`. Overall project coverage
+**99.86%/99.63%**, at/above the established baseline. 150-game QA
+harness sweep: 150/150 clean, 0 invariant violations, 0 crashes.
+
+**Campaign trajectory — the largest single shift measured all
+session, and it breaks the three-milestone streak of the M13 loop
+staying untouched.** Instrumented the loop directly to confirm *why*,
+not just observe it: every route there stays saturated (load factor ≥
+0.95) essentially permanently once opened — underperforming routes are
+0 every single quarter through bankruptcy — so the raise mechanic fires
+on nearly every newly-opened route while the cut mechanic never fires
+at all in this loop. Pure, uncontested upside: peak cash more than
+doubled to **$110,877,173.79 at quarter 20** (versus M36's
+$42,113,450.14), and bankruptcy was pushed from quarter 22 all the way
+to **quarter 30 (1962, -$13,225,238.57)** before the same underlying
+problem M31 first diagnosed — route count outrunning what salary and
+operating cost can sustain — finally caught up anyway.
+
+The QA harness's 150 real games told a genuinely more mixed story
+instead, consistent with the honest scope decision above: bankruptcy
+timing barely moved (6.4–9.7, versus M36's 6.5–9.6), but average cash
+at bankruptcy got *worse* in most regions — North America from
+-$638,521 to -$2,057,415, East Asia from -$333,262 to -$1,457,523,
+South West Asia from -$1,592,343 to -$3,313,977 — because these harder,
+region-differentiated games genuinely do produce underperforming routes
+the currently-revenue-negative cut mechanic acts on, unlike the M13
+loop's permanently-saturated network. This is exactly the outcome
+flagged as a live possibility when the direction was decided, now
+confirmed with real numbers rather than assumed: the cut side of this
+milestone is a measured, real cost today, worth revisiting once fare
+can actually affect demand or competitive share (M41's own scope, or a
+future revisit of M34's boundary) rather than removed pre-emptively —
+the roadmap's own phase-1 goal is mechanical completeness first, and
+this milestone delivered that honestly, cost included.
 
 ---
 

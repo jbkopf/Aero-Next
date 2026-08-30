@@ -616,7 +616,25 @@ string ChokepointStatus(int year)
 // writeup. Three milestones in a row now where this loop's specific
 // demand-rich, cash-rich environment simply never exercises the newest
 // mechanic, while the harder QA harness games do.
-var checkpoints = new HashSet<int> { 1, 18, 22, 121, campaignQuarters };
+//
+// M37 (fares) breaks that three-milestone streak decisively - the
+// biggest single trajectory shift measured all session. Instrumented
+// this loop directly: every route here stays saturated (load factor
+// >= 0.95) essentially permanently once opened - underperforming=0
+// every single quarter through bankruptcy - so the raise mechanic fires
+// on nearly every newly-opened route (one SetFareOrder/quarter, roughly
+// matching one new route/quarter) while the cut mechanic never fires
+// at all here. Pure, uncontested upside: peak cash more than doubled to
+// $110,877,173.79 (quarter 20, versus M36's $42,113,450.14), and
+// bankruptcy pushed from quarter 22 all the way to quarter 30 (1962,
+// -$13,225,238.57) before the same fundamental problem (route count
+// outrunning what salary/operating cost can sustain, M31's own finding)
+// finally catches up. Frozen at 30 routes from there. The QA harness's
+// 150 real games told a genuinely different, more mixed story instead -
+// see M37's own "Done" writeup - because those harder conditions
+// actually produce underperforming routes the cut mechanic acts on,
+// unlike this loop.
+var checkpoints = new HashSet<int> { 1, 20, 30, 121, campaignQuarters };
 
 var campaignDominance = RegionalDominanceState.Empty;
 string? campaignWinner = null;

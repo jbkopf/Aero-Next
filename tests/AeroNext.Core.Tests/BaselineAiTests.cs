@@ -1,5 +1,6 @@
 using AeroNext.Core.Ai;
 using AeroNext.Core.Airlines;
+using AeroNext.Core.Competition;
 using AeroNext.Core.Finance;
 using AeroNext.Core.Fleet;
 using AeroNext.Core.Turns;
@@ -22,6 +23,13 @@ public class BaselineAiTests
     private static readonly GravityDemandModel DemandModel = new();
     private static readonly AircraftType Aircraft = new("t", "Test", Seats: 140);
     private static readonly AirlineFleet FleetWithAircraft = FleetWithIdle(Aircraft);
+
+    /// <summary>M37: reproduces BaselineAi's own RaisedFare/CutFare rounding independently, for tests that need to construct a route already at the target rather than assert against it.</summary>
+    private static Money RaisedFareTarget(Route route) =>
+        new((long)Math.Round(FareCalculator.SuggestedFarePerPassenger(route).Cents * 1.15, MidpointRounding.AwayFromZero));
+
+    private static Money CutFareTarget(Route route) =>
+        new((long)Math.Round(FareCalculator.SuggestedFarePerPassenger(route).Cents * 0.80, MidpointRounding.AwayFromZero));
 
     [Fact]
     public void DecideOrders_EmptyNetwork_EntersSingleHighestDemandPair()
@@ -801,5 +809,140 @@ public class BaselineAiTests
             availableCash: Money.FromDollars(15_000_000), currentDebtBalance: Money.FromDollars(1_000_000));
 
         Assert.Empty(result.RejectedOrders);
+    }
+
+    // --- M37: fares, raise on saturated and cut on underperforming (docs/BASELINE_AI_ROADMAP.md) ---
+
+    [Fact]
+    public void DecideOrders_SaturatedRoute_LoadFactorAtCeiling_FareRaisedAboveDefault()
+    {
+        var a = MakeCity("a", 0, 0, 100);
+        var b = MakeCity("b", 1, 1, 90); // close + heavy: demand swamps capacity -> full load factor
+        var aircraft = new AircraftType("t", "Test", Seats: 10);
+        var existing = new[] { new Route(a, b, aircraft, AircraftCount: 1) };
+
+        var orders = BaselineAi.DecideOrders(existing, QuarterEngine.BaseActionCap, new[] { a, b }, DemandModel, new[] { aircraft }, AirlineFleet.Empty);
+
+        var fareOrder = Assert.Single(orders.OfType<SetFareOrder>());
+        Assert.Equal(("a", "b"), (fareOrder.Origin.Id, fareOrder.Destination.Id));
+        Assert.Equal(RaisedFareTarget(existing[0]), fareOrder.FarePerPassenger);
+        Assert.True(fareOrder.FarePerPassenger > FareCalculator.SuggestedFarePerPassenger(existing[0]));
+    }
+
+    [Fact]
+    public void DecideOrders_SaturatedRoute_FareAlreadyAtOrAboveRaisedTarget_NotRaisedAgain()
+    {
+        var a = MakeCity("a", 0, 0, 100);
+        var b = MakeCity("b", 1, 1, 90);
+        var aircraft = new AircraftType("t", "Test", Seats: 10);
+        var baseline = new Route(a, b, aircraft, AircraftCount: 1);
+        var existing = new[] { baseline with { FareOverride = RaisedFareTarget(baseline) } };
+
+        var orders = BaselineAi.DecideOrders(existing, QuarterEngine.BaseActionCap, new[] { a, b }, DemandModel, new[] { aircraft }, AirlineFleet.Empty);
+
+        Assert.Empty(orders.OfType<SetFareOrder>());
+    }
+
+    [Fact]
+    public void DecideOrders_UnderperformingRoute_LoadFactorBelowFloor_FareCutBelowDefault()
+    {
+        var a = MakeCity("a", 0, 0, 1);
+        var b = MakeCity("b", 60, 60, 1); // far + light: negligible demand relative to capacity
+        var bigAircraft = new AircraftType("big", "Big", Seats: 400);
+        var existing = new[] { new Route(a, b, bigAircraft, AircraftCount: 1) }; // single aircraft - never closed by M35, isolates the fare-cut behavior
+
+        var orders = BaselineAi.DecideOrders(existing, QuarterEngine.BaseActionCap, new[] { a, b }, DemandModel, new[] { bigAircraft }, AirlineFleet.Empty);
+
+        var fareOrder = Assert.Single(orders.OfType<SetFareOrder>());
+        Assert.Equal(("a", "b"), (fareOrder.Origin.Id, fareOrder.Destination.Id));
+        Assert.Equal(CutFareTarget(existing[0]), fareOrder.FarePerPassenger);
+        Assert.True(fareOrder.FarePerPassenger < FareCalculator.SuggestedFarePerPassenger(existing[0]));
+    }
+
+    [Fact]
+    public void DecideOrders_UnderperformingRoute_FareAlreadyAtOrBelowCutTarget_NotCutAgain()
+    {
+        var a = MakeCity("a", 0, 0, 1);
+        var b = MakeCity("b", 60, 60, 1);
+        var bigAircraft = new AircraftType("big", "Big", Seats: 400);
+        var baseline = new Route(a, b, bigAircraft, AircraftCount: 1);
+        var existing = new[] { baseline with { FareOverride = CutFareTarget(baseline) } };
+
+        var orders = BaselineAi.DecideOrders(existing, QuarterEngine.BaseActionCap, new[] { a, b }, DemandModel, new[] { bigAircraft }, AirlineFleet.Empty);
+
+        Assert.Empty(orders.OfType<SetFareOrder>());
+    }
+
+    [Fact]
+    public void DecideOrders_MidRangeLoadFactor_NeitherSaturatedNorUnderperforming_FareUntouched()
+    {
+        var a = MakeCity("a", 0, 0, 60);
+        var b = MakeCity("b", 3, 3, 60);
+        var aircraft = new AircraftType("t", "Test", Seats: 280);
+        var route = new Route(a, b, aircraft, AircraftCount: 1);
+        var loadFactor = RouteEvaluator.Evaluate(route, DemandModel).LoadFactor;
+        Assert.InRange(loadFactor, 0.5, 0.9499); // precondition: in the "safe zone" between the two thresholds
+
+        var orders = BaselineAi.DecideOrders(new[] { route }, QuarterEngine.BaseActionCap, new[] { a, b }, DemandModel, new[] { aircraft }, AirlineFleet.Empty);
+
+        Assert.Empty(orders.OfType<SetFareOrder>());
+    }
+
+    [Fact]
+    public void DecideOrders_FareRaiseAndCut_AreFreeActions()
+    {
+        var a = MakeCity("a", 0, 0, 50);
+        var b = MakeCity("b", 1, 1, 50);
+
+        Assert.Equal(0, QuarterEngine.Cost(new SetFareOrder(a, b, Money.FromDollars(100)), Array.Empty<Route>()));
+    }
+
+    [Fact]
+    public void DecideOrders_FareRaiseAndCut_ProduceLegalOrders_WhenRunThroughQuarterEngine()
+    {
+        var a = MakeCity("a", 0, 0, 100);
+        var b = MakeCity("b", 1, 1, 90);   // saturated
+        var c = MakeCity("c", 60, 60, 1);  // far + light -> underperforming
+        var cities = new[] { a, b, c };
+        var saturatedAircraft = new AircraftType("sat", "Saturated", Seats: 10);
+        var underperformingAircraft = new AircraftType("under", "Underperforming", Seats: 400);
+        var existing = new[]
+        {
+            new Route(a, b, saturatedAircraft, AircraftCount: 1),
+            new Route(a, c, underperformingAircraft, AircraftCount: 1),
+        };
+
+        var orders = BaselineAi.DecideOrders(existing, QuarterEngine.BaseActionCap, cities, DemandModel, new[] { saturatedAircraft, underperformingAircraft }, AirlineFleet.Empty);
+        var result = QuarterEngine.RunQuarter(1, existing, QuarterEngine.BaseActionCap, orders, cities, DemandModel);
+
+        Assert.Equal(2, orders.OfType<SetFareOrder>().Count());
+        Assert.Empty(result.RejectedOrders);
+    }
+
+    [Fact]
+    public void DecideOrders_ProposedFareRaise_WhenApplied_MeasurablyIncreasesRevenue_ForTheSameCarriedPassengers()
+    {
+        // Ties together the roadmap's own "Done when" bar: the fare
+        // BaselineAi proposes, once actually applied, has a directly
+        // observable revenue effect - same carried volume (fare doesn't
+        // affect demand, M34's own scope), strictly more revenue.
+        var a = MakeCity("a", 0, 0, 100);
+        var b = MakeCity("b", 1, 1, 90); // close + heavy -> saturated, full load factor
+        var aircraft = new AircraftType("t", "Test", Seats: 10);
+        var existing = new[] { new Route(a, b, aircraft, AircraftCount: 1) };
+        var airline = new Airline("A", existing);
+        var market = CompetitiveMarket.Resolve(new[] { airline }, new[] { a, b }, DemandModel);
+        var state = FinancialState.Start(Money.FromDollars(10_000_000), Money.Zero, interestRatePerQuarter: 0.0);
+        var (_, baselineStatement) = FinancialResolver.Resolve(state, airline, market, Array.Empty<QuarterOrder>());
+
+        var orders = BaselineAi.DecideOrders(existing, QuarterEngine.BaseActionCap, new[] { a, b }, DemandModel, new[] { aircraft }, AirlineFleet.Empty);
+        var fareOrder = Assert.Single(orders.OfType<SetFareOrder>());
+        var raisedRoutes = new[] { existing[0] with { FareOverride = fareOrder.FarePerPassenger } };
+        var raisedAirline = new Airline("A", raisedRoutes);
+        var raisedMarket = CompetitiveMarket.Resolve(new[] { raisedAirline }, new[] { a, b }, DemandModel);
+        var (_, raisedStatement) = FinancialResolver.Resolve(state, raisedAirline, raisedMarket, Array.Empty<QuarterOrder>());
+
+        Assert.Equal(market.TotalCarried(airline), raisedMarket.TotalCarried(raisedAirline)); // same carried volume
+        Assert.True(raisedStatement.Revenue > baselineStatement.Revenue);
     }
 }
