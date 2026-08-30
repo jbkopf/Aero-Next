@@ -300,13 +300,19 @@ var humanScript = new List<IReadOnlyList<QuarterOrder>>
 Console.WriteLine();
 Console.WriteLine("--- M8: baseline AI opponent — 1 human seat + 3 AI seats, always 4 airlines ---");
 
+// Illustrative only - RunQuarter below isn't called with fleet awareness in
+// this standalone demo, so this is advisory input to BaselineAi's decision,
+// not something actually consumed/enforced. A generous static pool keeps
+// the AI seats from ever needing to lease across these few demo quarters.
+var demoFleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, narrowbody, 3, FleetOwnershipMode.Owned);
+
 for (var q = 0; q < humanScript.Count; q++)
 {
     foreach (var name in leagueNames)
     {
         var orders = name == leagueNames[0]
             ? humanScript[q]
-            : BaselineAi.DecideOrders(leagueRoutes[name], leagueCaps[name], cities, demandModel, new[] { narrowbody });
+            : BaselineAi.DecideOrders(leagueRoutes[name], leagueCaps[name], cities, demandModel, new[] { narrowbody }, demoFleet);
 
         var result = QuarterEngine.RunQuarter(q + 1, leagueRoutes[name], leagueCaps[name], orders, cities, demandModel);
 
@@ -540,6 +546,18 @@ var campaignRoutes = campaignAirlineNames.ToDictionary(n => n, _ => (IReadOnlyLi
 var campaignCaps = campaignAirlineNames.ToDictionary(n => n, _ => QuarterEngine.BaseActionCap);
 var campaignFinances = campaignAirlineNames.ToDictionary(n => n, _ => FinancialState.Start(Money.FromDollars(20_000_000), Money.FromDollars(10_000_000), interestRatePerQuarter: 0.02));
 
+// M13's campaign is deliberately flat/symmetric (no GameSetup/region
+// distinction, matching its own established design) - all 4 airlines get
+// the same smallest-range 1955-available type, at M18's same starting
+// quantity (2), owned outright.
+var campaignStartingAircraft = Timeline.AvailableAircraft(fleetCatalog, Timeline.StartYear)
+    .OrderBy(a => a.RangeKm)
+    .ThenBy(a => a.Id, StringComparer.Ordinal)
+    .First();
+var campaignFleets = campaignAirlineNames.ToDictionary(n => n, n => FleetLedger.ApplyDelivery(
+    AirlineFleet.Empty, campaignStartingAircraft, StartingConditionsResolver.StartingAircraftQuantity, FleetOwnershipMode.Owned));
+var campaignAircraftOrderBoard = AircraftOrderBoard.Empty;
+
 // Reference chokepoint check: does the era's best available aircraft still
 // need Gander for JFK-LHR, or can it fly direct?
 string ChokepointStatus(int year)
@@ -550,10 +568,10 @@ string ChokepointStatus(int year)
 }
 
 // Chosen to capture the actual arc found by running this: a mild early
-// dip, a peak at quarter 25 ($34.9M, 1961), then bankruptcy at
-// quarter 43 (1965) - see docs/GAME_SETUP_ROADMAP.md's city-expansion
-// notes for how this compares to prior rounds - not evenly spaced.
-var checkpoints = new HashSet<int> { 1, 15, 25, 43, 121, campaignQuarters };
+// dip, a peak at quarter 35 ($33.7M, 1963), then bankruptcy at
+// quarter 52 (1967) - re-measured after wiring real fleet ownership into
+// this loop (see docs/FINANCIAL_MODEL_ROADMAP.md) - not evenly spaced.
+var checkpoints = new HashSet<int> { 1, 15, 35, 52, 121, campaignQuarters };
 
 var campaignDominance = RegionalDominanceState.Empty;
 string? campaignWinner = null;
@@ -567,6 +585,13 @@ for (var q = 1; q <= campaignQuarters; q++)
     var yearDemandModel = new GravityDemandModel(globalMultiplier: Timeline.DemandMultiplierForYear(growthSchedule, year));
     var appliedOrdersByAirline = new Dictionary<string, IReadOnlyList<QuarterOrder>>();
 
+    IReadOnlyList<AircraftDelivery> campaignDeliveries;
+    (campaignAircraftOrderBoard, campaignDeliveries) = AircraftOrderResolver.ResolveQuarter(campaignAircraftOrderBoard, q);
+    foreach (var delivery in campaignDeliveries)
+    {
+        campaignFleets[delivery.Airline.Name] = FleetLedger.ApplyDelivery(campaignFleets[delivery.Airline.Name], delivery, FleetOwnershipMode.Owned);
+    }
+
     foreach (var name in campaignAirlineNames)
     {
         // A bankrupt airline is out: routes and action cap freeze at
@@ -578,11 +603,18 @@ for (var q = 1; q <= campaignQuarters; q++)
             continue;
         }
 
-        var orders = BaselineAi.DecideOrders(campaignRoutes[name], campaignCaps[name], cities, yearDemandModel, availableFleet);
-        var result = QuarterEngine.RunQuarter(q, campaignRoutes[name], campaignCaps[name], orders, cities, yearDemandModel);
+        var orders = BaselineAi.DecideOrders(campaignRoutes[name], campaignCaps[name], cities, yearDemandModel, availableFleet, campaignFleets[name]);
+        var result = QuarterEngine.RunQuarter(q, campaignRoutes[name], campaignCaps[name], orders, cities, yearDemandModel, campaignFleets[name]);
         campaignRoutes[name] = result.Routes;
         campaignCaps[name] = result.ActionCap;
+        campaignFleets[name] = result.UpdatedFleet!;
         appliedOrdersByAirline[name] = result.AppliedOrders;
+
+        var campaignAirlineSnapshot = new Airline(name, campaignRoutes[name]);
+        foreach (var aircraftOrder in result.AppliedOrders.OfType<AircraftOrder>())
+        {
+            campaignAircraftOrderBoard = AircraftOrderResolver.Submit(campaignAircraftOrderBoard, campaignAirlineSnapshot, aircraftOrder, q);
+        }
     }
 
     var campaignLeague = campaignAirlineNames.Select(n => new Airline(n, campaignRoutes[n])).ToArray();

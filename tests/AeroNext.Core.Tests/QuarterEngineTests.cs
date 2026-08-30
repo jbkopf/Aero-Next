@@ -1,4 +1,5 @@
 using AeroNext.Core.Airlines;
+using AeroNext.Core.Fleet;
 using AeroNext.Core.Turns;
 using AeroNext.Core.World;
 using Xunit;
@@ -243,5 +244,178 @@ public class QuarterEngineTests
             original.Routes.Select(r => (r.Origin.Id, r.Destination.Id, r.WeeklyRoundTrips)),
             shuffled.Routes.Select(r => (r.Origin.Id, r.Destination.Id, r.WeeklyRoundTrips)));
         Assert.Equal(original.Plan.TotalCarried, shuffled.Plan.TotalCarried);
+    }
+
+    // --- Fleet-aware RouteOrder ownership checks ---
+
+    [Fact]
+    public void RunQuarter_NoFleetPassed_NewRoute_StillAppliesWithNoOwnershipCheck()
+    {
+        // The default (fleet: null) preserves today's fully permissive
+        // behavior — the 44 pre-existing call sites across this codebase
+        // never set up a fleet and must keep working unmodified.
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 50);
+        var b = MakeCity("b", 1, 1, 50);
+        var order = new RouteOrder(a, b, Aircraft, WeeklyRoundTrips: 3);
+
+        var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, new[] { a, b }, demandModel);
+
+        Assert.Single(result.AppliedOrders);
+        Assert.Null(result.UpdatedFleet);
+    }
+
+    [Fact]
+    public void RunQuarter_FleetPassed_NewRoute_NoIdleUnitOfType_Rejected()
+    {
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 50);
+        var b = MakeCity("b", 1, 1, 50);
+        var order = new RouteOrder(a, b, Aircraft, WeeklyRoundTrips: 3);
+
+        var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, new[] { a, b }, demandModel, AirlineFleet.Empty);
+
+        Assert.Empty(result.AppliedOrders);
+        Assert.Single(result.RejectedOrders);
+        Assert.Empty(result.Routes);
+    }
+
+    [Fact]
+    public void RunQuarter_FleetPassed_NewRoute_IdleUnitAvailable_AppliesAndConsumesUnit()
+    {
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 50);
+        var b = MakeCity("b", 1, 1, 50);
+        var order = new RouteOrder(a, b, Aircraft, WeeklyRoundTrips: 3);
+        var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, Aircraft, quantity: 1, FleetOwnershipMode.Owned);
+
+        var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, new[] { a, b }, demandModel, fleet);
+
+        Assert.Single(result.AppliedOrders);
+        Assert.NotNull(result.UpdatedFleet);
+        Assert.Empty(result.UpdatedFleet!.Idle); // the one unit is now assigned
+        Assert.Equal("a-b", result.UpdatedFleet.Units.Single().AssignedRouteKey);
+    }
+
+    [Fact]
+    public void RunQuarter_ExistingRoute_SameAircraftType_FrequencyBump_NoFleetCheckNeeded()
+    {
+        // A frequency-only change on an already-served pair with the same
+        // aircraft type doesn't need a new unit at all - must apply even
+        // with an empty fleet, since nothing new is being assigned.
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 50);
+        var b = MakeCity("b", 1, 1, 50);
+        var existing = new[] { new Route(a, b, Aircraft, WeeklyRoundTrips: 1) };
+        var order = new RouteOrder(a, b, Aircraft, WeeklyRoundTrips: 7);
+
+        var result = QuarterEngine.RunQuarter(2, existing, QuarterEngine.BaseActionCap, new[] { order }, new[] { a, b }, demandModel, AirlineFleet.Empty);
+
+        Assert.Single(result.AppliedOrders);
+        Assert.Equal(7, result.Routes.Single().WeeklyRoundTrips);
+    }
+
+    [Fact]
+    public void RunQuarter_ExistingRoute_AircraftTypeSwap_FreesOldUnit_AssignsNew()
+    {
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 50);
+        var b = MakeCity("b", 1, 1, 50);
+        var otherAircraft = new AircraftType("t2", "Test2", Seats: 100);
+        var existing = new[] { new Route(a, b, Aircraft, WeeklyRoundTrips: 1) };
+        var order = new RouteOrder(a, b, otherAircraft, WeeklyRoundTrips: 1);
+
+        // Seed a fleet with the OLD unit already assigned to a-b, plus one
+        // idle unit of the new type.
+        var withOld = FleetLedger.ApplyDelivery(AirlineFleet.Empty, Aircraft, quantity: 1, FleetOwnershipMode.Owned);
+        var oldAssigned = FleetLedger.Assign(withOld, withOld.Units.Single().Id, "a-b");
+        var fleet = FleetLedger.ApplyDelivery(oldAssigned, otherAircraft, quantity: 1, FleetOwnershipMode.Owned);
+
+        var result = QuarterEngine.RunQuarter(2, existing, QuarterEngine.BaseActionCap, new[] { order }, new[] { a, b }, demandModel, fleet);
+
+        Assert.Single(result.AppliedOrders);
+        var oldUnit = result.UpdatedFleet!.Units.Single(u => u.Type == Aircraft);
+        var newUnit = result.UpdatedFleet.Units.Single(u => u.Type == otherAircraft);
+        Assert.Null(oldUnit.AssignedRouteKey); // freed
+        Assert.Equal("a-b", newUnit.AssignedRouteKey); // now backs the route
+    }
+
+    [Fact]
+    public void RunQuarter_LeaseOrderEarlierInBatch_MakesUnitAvailableToLaterRouteOrder()
+    {
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 50);
+        var b = MakeCity("b", 1, 1, 50);
+        var orders = new QuarterOrder[]
+        {
+            new LeaseAircraftOrder(Aircraft, Quantity: 1),
+            new RouteOrder(a, b, Aircraft, WeeklyRoundTrips: 3),
+        };
+
+        var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), currentActionCap: 3, orders, new[] { a, b }, demandModel, AirlineFleet.Empty);
+
+        Assert.Equal(2, result.AppliedOrders.Count);
+        Assert.Empty(result.RejectedOrders);
+        Assert.Single(result.Routes);
+        Assert.Equal(FleetOwnershipMode.Leased, result.UpdatedFleet!.Units.Single().Mode);
+    }
+
+    [Fact]
+    public void RunQuarter_FleetAware_RouteSharingOnlyOrigin_NotMistakenForExistingPair_NeedsIdleUnit()
+    {
+        // Mirrors Cost_PairWithMatchingOriginButDifferentDestination, but
+        // through the fleet-aware path: a route sharing only the origin
+        // (a-c exists, not a-b) must still be treated as a brand-new pair
+        // needing its own idle unit, not silently matched to a-c's.
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 50);
+        var b = MakeCity("b", 1, 1, 50);
+        var c = MakeCity("c", 2, 2, 50);
+        var existing = new[] { new Route(a, c, Aircraft, WeeklyRoundTrips: 1) }; // a-c exists, not a-b
+        var order = new RouteOrder(a, b, Aircraft, WeeklyRoundTrips: 3);
+
+        var rejected = QuarterEngine.RunQuarter(2, existing, QuarterEngine.BaseActionCap, new[] { order }, new[] { a, b, c }, demandModel, AirlineFleet.Empty);
+        Assert.Single(rejected.RejectedOrders); // no idle unit -> rejected, not silently treated as free
+
+        var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, Aircraft, quantity: 1, FleetOwnershipMode.Owned);
+        var accepted = QuarterEngine.RunQuarter(2, existing, QuarterEngine.BaseActionCap, new[] { order }, new[] { a, b, c }, demandModel, fleet);
+        Assert.Single(accepted.AppliedOrders);
+    }
+
+    [Fact]
+    public void RunQuarter_FleetAware_ExistingRouteWithWhollyDifferentOrigin_ShortCircuitsOriginCheck_StillNeedsIdleUnit()
+    {
+        // A route sharing neither origin nor destination (x-y exists, order
+        // is for a-b) must short-circuit on the origin mismatch alone -
+        // distinct from the same-origin-different-destination case above,
+        // which only exercises the && after origin already matched.
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 50);
+        var b = MakeCity("b", 1, 1, 50);
+        var x = MakeCity("x", 5, 5, 50);
+        var y = MakeCity("y", 6, 6, 50);
+        var existing = new[] { new Route(x, y, Aircraft, WeeklyRoundTrips: 1) };
+        var order = new RouteOrder(a, b, Aircraft, WeeklyRoundTrips: 3);
+
+        var result = QuarterEngine.RunQuarter(2, existing, QuarterEngine.BaseActionCap, new[] { order }, new[] { a, b, x, y }, demandModel, AirlineFleet.Empty);
+
+        Assert.Single(result.RejectedOrders); // no idle unit -> rejected, treated as a genuinely new pair
+    }
+
+    [Fact]
+    public void RunQuarter_MultipleIdleUnitsOfSameType_AssignsLowestIdDeterministically()
+    {
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 50);
+        var b = MakeCity("b", 1, 1, 50);
+        var order = new RouteOrder(a, b, Aircraft, WeeklyRoundTrips: 3);
+        var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, Aircraft, quantity: 3, FleetOwnershipMode.Owned);
+        var lowestId = fleet.Units.Min(u => u.Id);
+
+        var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, new[] { a, b }, demandModel, fleet);
+
+        var assignedUnit = result.UpdatedFleet!.Units.Single(u => u.AssignedRouteKey is not null);
+        Assert.Equal(lowestId, assignedUnit.Id);
+        Assert.Equal(2, result.UpdatedFleet.Idle.Count());
     }
 }

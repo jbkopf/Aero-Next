@@ -1,4 +1,5 @@
 using AeroNext.Core.Airlines;
+using AeroNext.Core.Fleet;
 using AeroNext.Core.World;
 
 namespace AeroNext.Core.Turns;
@@ -35,18 +36,29 @@ public static class QuarterEngine
 {
     public const int BaseActionCap = 3;
 
+    /// <param name="fleet">
+    /// Null (the default) preserves fully permissive behavior — any
+    /// era-available, in-range aircraft type can be assigned to a route
+    /// regardless of ownership, exactly as before fleet-awareness existed.
+    /// Passing a real AirlineFleet turns on ownership enforcement: a
+    /// RouteOrder needing a new or different aircraft type is rejected
+    /// without an idle unit of that type, matching CLAUDE.md's legibility
+    /// pillar the same way the existing range/era rejections do.
+    /// </param>
     public static QuarterResult RunQuarter(
         int quarterNumber,
         IReadOnlyList<Route> currentRoutes,
         int currentActionCap,
         IReadOnlyList<QuarterOrder> orders,
         IReadOnlyList<City> cities,
-        GravityDemandModel demandModel)
+        GravityDemandModel demandModel,
+        AirlineFleet? fleet = null)
     {
         var applied = new List<QuarterOrder>();
         var rejected = new List<QuarterOrder>();
         var spent = 0;
         var year = Timeline.YearForQuarter(quarterNumber);
+        var workingFleet = fleet;
 
         foreach (var order in orders)
         {
@@ -62,12 +74,59 @@ public static class QuarterEngine
                 continue;
             }
 
+            FleetUnit? unitToAssign = null;
+
+            if (order is RouteOrder routeOrder && workingFleet is not null)
+            {
+                var existingRoute = currentRoutes.FirstOrDefault(r => r.Origin.Id == routeOrder.Origin.Id && r.Destination.Id == routeOrder.Destination.Id);
+                var needsNewUnit = existingRoute is null || existingRoute.Aircraft.Id != routeOrder.Aircraft.Id;
+
+                if (needsNewUnit)
+                {
+                    unitToAssign = workingFleet.Idle
+                        .Where(u => u.Type.Id == routeOrder.Aircraft.Id)
+                        .OrderBy(u => u.Id)
+                        .FirstOrDefault();
+
+                    if (unitToAssign is null)
+                    {
+                        rejected.Add(order);
+                        continue;
+                    }
+                }
+            }
+
             var cost = Cost(order, currentRoutes);
 
             if (spent + cost > currentActionCap)
             {
                 rejected.Add(order);
                 continue;
+            }
+
+            // Leasing bypasses the production queue entirely and delivers
+            // the same quarter it's ordered — resolved right here, inline,
+            // so a RouteOrder later in this same batch can actually use
+            // the newly-leased unit. AircraftOrder (the production-queue
+            // path) genuinely needs cross-quarter, cross-airline board
+            // state this single airline's quarter doesn't have — that
+            // stays external, submitted by the caller as before.
+            if (order is LeaseAircraftOrder leaseOrder && workingFleet is not null)
+            {
+                workingFleet = FleetLedger.ApplyDelivery(workingFleet, leaseOrder.Type, leaseOrder.Quantity, FleetOwnershipMode.Leased);
+            }
+
+            if (order is RouteOrder appliedRouteOrder && unitToAssign is not null && workingFleet is not null)
+            {
+                var routeKey = RouteKeyString(appliedRouteOrder.Origin, appliedRouteOrder.Destination);
+                var currentlyAssigned = workingFleet.Units.FirstOrDefault(u => u.AssignedRouteKey == routeKey);
+
+                if (currentlyAssigned is not null)
+                {
+                    workingFleet = FleetLedger.Unassign(workingFleet, currentlyAssigned.Id);
+                }
+
+                workingFleet = FleetLedger.Assign(workingFleet, unitToAssign.Id, routeKey);
             }
 
             applied.Add(order);
@@ -78,7 +137,7 @@ public static class QuarterEngine
         var nextActionCap = currentActionCap + applied.OfType<HireExecutiveOrder>().Sum(h => h.CapIncrease);
         var plan = NetworkPlanner.Plan(routes, cities, demandModel);
 
-        return new QuarterResult(quarterNumber, routes, plan, nextActionCap, applied, rejected);
+        return new QuarterResult(quarterNumber, routes, plan, nextActionCap, applied, rejected, workingFleet);
     }
 
     /// <summary>
@@ -122,6 +181,9 @@ public static class QuarterEngine
     }
 
     internal static (string Origin, string Destination) RouteKey(Route route) => (route.Origin.Id, route.Destination.Id);
+
+    /// <summary>String form of RouteKey — FleetUnit.AssignedRouteKey's format, settled here.</summary>
+    private static string RouteKeyString(City origin, City destination) => $"{origin.Id}-{destination.Id}";
 
     private static bool IsAircraftAvailable(QuarterOrder order, int year) => order switch
     {

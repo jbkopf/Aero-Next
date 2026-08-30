@@ -99,7 +99,11 @@ public class DeterminismRegressionTests
                     continue;
                 }
 
-                var orders = new List<QuarterOrder>(BaselineAi.DecideOrders(routes[name], caps[name], cities, demandModel, availableFleet));
+                // AirlineFleet.Empty every quarter, deliberately - this test
+                // proves reproducibility of the resolver chain, not fleet
+                // economics, so BaselineAi always taking its lease-fallback
+                // path is fine as long as it's identical across both runs.
+                var orders = new List<QuarterOrder>(BaselineAi.DecideOrders(routes[name], caps[name], cities, demandModel, availableFleet, AirlineFleet.Empty));
 
                 // Hand-scripted injections in early quarters, exercising the
                 // two resolvers BaselineAi never drives on its own.

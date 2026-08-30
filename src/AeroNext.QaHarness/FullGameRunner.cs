@@ -3,6 +3,7 @@ using AeroNext.Core.Ai;
 using AeroNext.Core.Airlines;
 using AeroNext.Core.Competition;
 using AeroNext.Core.Finance;
+using AeroNext.Core.Fleet;
 using AeroNext.Core.Negotiations;
 using AeroNext.Core.Setup;
 using AeroNext.Core.Turns;
@@ -80,6 +81,13 @@ public static class FullGameRunner
         var bankruptcyQuarter = names.ToDictionary(n => n, n => (int?)null);
         var humanCount = seats.Count(s => s.IsHuman);
 
+        // M18's AircraftQuantity (2), real data never consumed until now —
+        // becomes each airline's actual starting fleet, owned outright, the
+        // thing that backs the guaranteed quarter-1 route.
+        var fleets = names.ToDictionary(n => n, n => FleetLedger.ApplyDelivery(
+            AirlineFleet.Empty, conditionsByName[n].StartingAircraft, StartingConditionsResolver.StartingAircraftQuantity, FleetOwnershipMode.Owned));
+        var aircraftOrderBoard = AircraftOrderBoard.Empty; // shared across all 4 airlines - the production line is genuinely contested
+
         var landingBoard = LandingRightsBoard.Empty;
         var dominanceState = RegionalDominanceState.Empty;
         string? winner = null;
@@ -92,6 +100,18 @@ public static class FullGameRunner
             var availableFleet = Timeline.AvailableAircraft(fleetCatalog, year);
             var yearDemandModel = new GravityDemandModel(globalMultiplier: Timeline.DemandMultiplierForYear(growthSchedule, year));
             var appliedOrdersByName = new Dictionary<string, IReadOnlyList<QuarterOrder>>();
+
+            // Deliveries from orders placed in earlier quarters arrive
+            // before this quarter's own route decisions are made, per
+            // AircraftOrderResolver.ResolveQuarter's own eligibility rule
+            // (OrderedQuarter < currentQuarter — an order can't ship the
+            // same quarter it's placed).
+            IReadOnlyList<AircraftDelivery> deliveries;
+            (aircraftOrderBoard, deliveries) = AircraftOrderResolver.ResolveQuarter(aircraftOrderBoard, q);
+            foreach (var delivery in deliveries)
+            {
+                fleets[delivery.Airline.Name] = FleetLedger.ApplyDelivery(fleets[delivery.Airline.Name], delivery, FleetOwnershipMode.Owned);
+            }
 
             // Snapshotted before any order processing this quarter, for
             // every seat — not just non-bankrupt ones — so the freeze check
@@ -123,9 +143,9 @@ public static class FullGameRunner
                             conditionsByName[name].StartingAircraft,
                             GuaranteedRouteWeeklyRoundTrips),
                     }
-                    : BaselineAi.DecideOrders(routes[name], caps[name], cities, yearDemandModel, availableFleet).ToArray();
+                    : BaselineAi.DecideOrders(routes[name], caps[name], cities, yearDemandModel, availableFleet, fleets[name]).ToArray();
 
-                var result = QuarterEngine.RunQuarter(q, routes[name], caps[name], orders, cities, yearDemandModel);
+                var result = QuarterEngine.RunQuarter(q, routes[name], caps[name], orders, cities, yearDemandModel, fleets[name]);
 
                 if (q == 1 && result.RejectedOrders.Count > 0)
                 {
@@ -134,12 +154,18 @@ public static class FullGameRunner
 
                 routes[name] = result.Routes;
                 caps[name] = result.ActionCap;
+                fleets[name] = result.UpdatedFleet!;
                 appliedOrdersByName[name] = result.AppliedOrders;
 
                 var airlineSnapshot = new Airline(name, routes[name]);
                 foreach (var negotiation in result.AppliedOrders.OfType<NegotiationOrder>())
                 {
                     landingBoard = LandingRightsResolver.Submit(landingBoard, airlineSnapshot, negotiation, q, campaignRng);
+                }
+
+                foreach (var aircraftOrder in result.AppliedOrders.OfType<AircraftOrder>())
+                {
+                    aircraftOrderBoard = AircraftOrderResolver.Submit(aircraftOrderBoard, airlineSnapshot, aircraftOrder, q);
                 }
 
                 if (routesBefore.Count > result.Routes.Count)

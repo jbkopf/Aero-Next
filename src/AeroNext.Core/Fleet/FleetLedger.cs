@@ -6,11 +6,9 @@ namespace AeroNext.Core.Fleet;
 /// M25: the fleet inventory foundation — a real, queryable record of what
 /// aircraft an airline owns, since nothing tracked this before (Route.
 /// Aircraft references a type, not a specific unit, and AircraftOrderResolver's
-/// deliveries previously vanished into nothing once produced). Deliberately
-/// not yet wired into QuarterEngine or either real quarter loop — ordering
-/// or leasing an aircraft still has no effect on what a RouteOrder can do
-/// until a later milestone makes that connection real. This milestone only
-/// makes the ledger itself correct and testable in isolation.
+/// deliveries previously vanished into nothing once produced). Now wired
+/// into QuarterEngine (fleet-aware RouteOrder ownership checks) and both
+/// real quarter loops.
 /// </summary>
 public static class FleetLedger
 {
@@ -21,16 +19,25 @@ public static class FleetLedger
     /// for leases), so the caller supplies it here rather than this ledger
     /// trying to infer it.
     /// </param>
-    public static AirlineFleet ApplyDelivery(AirlineFleet fleet, AircraftDelivery delivery, FleetOwnershipMode mode)
+    public static AirlineFleet ApplyDelivery(AirlineFleet fleet, AircraftDelivery delivery, FleetOwnershipMode mode) =>
+        ApplyDelivery(fleet, delivery.Type, delivery.Quantity, mode);
+
+    /// <summary>
+    /// Same as the AircraftDelivery overload, without needing a full
+    /// delivery record — used where there's no natural Airline reference
+    /// to build one from (QuarterEngine's inline lease resolution, which
+    /// only knows the fleet it's updating, not the Airline record).
+    /// </summary>
+    public static AirlineFleet ApplyDelivery(AirlineFleet fleet, AircraftType type, int quantity, FleetOwnershipMode mode)
     {
-        var newUnits = Enumerable.Range(0, delivery.Quantity)
-            .Select(i => new FleetUnit(fleet.NextUnitId + i, delivery.Type, mode, AssignedRouteKey: null))
+        var newUnits = Enumerable.Range(0, quantity)
+            .Select(i => new FleetUnit(fleet.NextUnitId + i, type, mode, AssignedRouteKey: null))
             .ToList();
 
         return fleet with
         {
             Units = fleet.Units.Concat(newUnits).ToList(),
-            NextUnitId = fleet.NextUnitId + delivery.Quantity,
+            NextUnitId = fleet.NextUnitId + quantity,
         };
     }
 

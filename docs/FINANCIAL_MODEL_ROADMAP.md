@@ -152,6 +152,106 @@ zero regression risk to check for.
 
 ---
 
+## M25b — Wiring fleet ownership into the real campaign ✅
+
+Closes the two gaps M25 flagged and deliberately left open, done before
+M26 at the user's request rather than after: `AircraftOrderResolver` now
+actually feeds the fleet ledger in both real quarter loops, and
+`RouteOrder` now genuinely requires an owned or leased idle unit of the
+aircraft type it names — not just an era-available, in-range one. Turning
+ownership enforcement on for real required more than the ledger existing:
+`BaselineAi` never submitted `AircraftOrder`/`LeaseAircraftOrder` at all,
+so with a fixed 2-unit starting fleet it would have opened at most 2
+routes ever, then been permanently stuck. Fixed as part of the same pass,
+not left broken.
+
+**`QuarterEngine.RunQuarter` gained one new optional parameter,
+`AirlineFleet? fleet = null`.** `null` (the default) preserves the fully
+permissive behavior every pre-existing call site relies on — confirmed
+directly: all **44 existing call sites** across 8 test files needed zero
+changes, proving the backward-compatible default actually holds, not just
+assumed to. Passing a real fleet turns on enforcement: a `RouteOrder`
+needing a new or different aircraft type is rejected without an idle unit
+of it, the same rejection list range/era failures already use.
+`LeaseAircraftOrder` resolves *inline*, immediately, updating the engine's
+working fleet mid-batch — deliberate, since leasing's whole documented
+point is same-quarter delivery, and a `RouteOrder` later in the same
+order list needs to actually see that unit. `AircraftOrder` (the
+production queue) stays external — it genuinely needs cross-quarter,
+cross-airline board state a single airline's `RunQuarter` call doesn't
+have. `QuarterResult` gained `AirlineFleet? UpdatedFleet` to carry the new
+state forward, the same shape `Routes`/`ActionCap` already carry.
+`FleetUnit.AssignedRouteKey`'s format (left open in M25) is settled:
+`"{OriginId}-{DestinationId}"`.
+
+**Both real loops** (`AeroNext.Sim`'s M13 loop, `FullGameRunner.cs`) gained
+a per-airline `Dictionary<string, AirlineFleet>` (keyed by name, not the
+`Airline` record — M24's already-hit bug class, avoided deliberately this
+time) and one shared `AircraftOrderBoard` (the production line is
+genuinely cross-airline/contested). Each airline's starting fleet is
+seeded from M18's `AircraftQuantity` (2, real data never consumed until
+now) via `FleetLedger.ApplyDelivery` — the thing that actually backs the
+guaranteed quarter-1 route now, not an unchecked assumption. M13's own
+campaign has no per-seat starting-aircraft concept (it's deliberately flat
+and symmetric, no `GameSetup`/region distinction) — all 4 airlines get the
+same smallest-range 1955-available type, at the same M18 quantity, keeping
+that symmetry intact rather than inventing a per-seat distinction M13 was
+never designed to have.
+
+**`BaselineAi` gained minimal acquisition logic, not a redesign.** Renamed
+the old `availableFleet` parameter to `eraAvailableTypes` (a real naming
+collision with the new concept — it's the era-available *catalog*, not
+this airline's own holdings). New logic for opening a route: search for
+the best unserved pair reachable using a type it has **idle right now**
+first (free, always preferred); only if nothing idle can reach anywhere
+worth serving does it lease the longest-range era-available type *and*
+propose a route for it in the same order batch — relying on
+`QuarterEngine`'s inline lease resolution to make that same-quarter use
+possible. Deliberately never uses `AircraftOrder` (the production-queue
+path) — leasing alone is enough to stay unstuck, and avoids teaching it
+to reason about queue contention, real AI-strategy work out of scope here.
+Embodies the same "never attempt what will predictably fail" principle
+already settled for cash: a dedicated adversarial test drives it to
+depletion and confirms it never once proposes an order the fleet check
+would have to reject.
+
+**The M13 campaign trajectory moved again, re-measured properly rather
+than assumed unaffected** — real fleet constraints now shape route timing,
+not just an unconstrained pick. New peak **quarter 35 (1963):
+$33,671,545.43**, bankruptcy **quarter 52 (1967): -$477,460.18**, both
+re-found via a full `Enumerable.Range(1, 80)` sweep, not guessed from the
+previous round's checkpoints. `AeroNext.Sim`'s checkpoint list rewritten
+accordingly (1, 15, 35, 52, 121, 244). M13 still never produces a win —
+correct, not a gap: it's still perfectly symmetric, so every region ties
+every quarter, and ties never extend a leadership streak (M24's own rule),
+confirming that rule holds even under the scenario most likely to expose
+a flaw in it.
+
+**Done when:** the 44 pre-existing `RunQuarter` call sites pass unmodified
+(proving the default truly is backward compatible); dedicated
+`QuarterEngine`/`BaselineAi` tests cover fleet-aware rejection, acceptance
+and consumption, aircraft-type swaps freeing the old unit, same-quarter
+lease-then-route, deterministic tie-breaks among multiple idle units, and
+the AI never proposing what the engine would reject; both real loops
+re-verified at full scale.
+
+Done. 341 tests total (21 new — 9 `QuarterEngine`, 3 net new `BaselineAi`,
+plus rewriting the 16 pre-existing `BaselineAi` tests that needed a
+matching idle fleet to keep their original intent, not just compile).
+100% line/branch coverage on every touched class, including a real branch
+gap `QuarterEngine`'s coverage report caught (the existing-route lookup's
+short-circuit on origin mismatch alone, distinct from same-origin-
+different-destination) — closed with a dedicated test, not waived.
+Overall project coverage **99.81%/99.70%**, above the established
+baseline. 150-game QA harness sweep at 244 quarters: 150/150 clean, 0
+invariant violations — win rate held at 2/150 (avg quarter 149, unchanged,
+since the win-condition mechanism itself wasn't touched), regional win
+*distribution* shifted some (EastAsia's win count roughly doubled,
+NorthAmerica's roughly a third of before) — an expected consequence of
+route-opening now being genuinely fleet-constrained, not a regression.
+
+---
+
 ## M26 — Aircraft economics: purchase, lease, and retirement all cost real cash
 
 **Purchase** (`AircraftOrder`): charge `AircraftType.CostDollars × Quantity`
