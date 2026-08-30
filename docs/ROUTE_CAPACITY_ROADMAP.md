@@ -1,8 +1,9 @@
 # Route Capacity Roadmap
 
 Continues the shared milestone numbering from `FINANCIAL_MODEL_ROADMAP.md`
-(M25-M31, the highest issued so far — M31 itself not yet built). Picks up at
-M32.
+(M25-M31 issued at the time). Picks up at M32. (M31 was later retired from
+`FINANCIAL_MODEL_ROADMAP.md` and rebuilt as `docs/BASELINE_AI_ROADMAP.md`,
+which continues the sequence through M42 — the current highest issued.)
 
 **Origin:** the user asked directly for three connected changes to how a
 route's capacity works: (1) a route's aircraft must come from the real

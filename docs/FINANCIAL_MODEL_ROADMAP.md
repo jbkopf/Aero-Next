@@ -841,7 +841,8 @@ outcome. But six milestones deep, the case is about as complete as the
 data can make it: `BaselineAi` was calibrated against a much gentler cost
 structure than now exists, and needs a real rework — not another
 one-line constant tweak — before a further financial-model milestone (or
-M31's integration pass) can be meaningfully evaluated against it.
+`docs/BASELINE_AI_ROADMAP.md`'s own integration work) can be
+meaningfully evaluated against it.
 
 **Standalone, alongside this milestone:** the flat $10,000,000 starting
 debt constant (`AeroNext.Sim`'s M13 campaign loop and the QA harness's
@@ -886,14 +887,17 @@ its own group rather than one flat multiplication.
 
 ## M34 — Fares: a direct, per-route price the player sets ✅
 
-**Numbering note:** M31 (below) and M32/M33 (already built, in
-`ROUTE_CAPACITY_ROADMAP.md`) are all already spoken for in the shared
-milestone sequence, so this becomes M34 — the next fresh number. It's
-placed here in the *document*, directly before M31, rather than after
-it: fares should exist before M31's `BaselineAi` integration/rework
-pass tries to account for every mechanic at once, the same reasoning
-`M25b` set precedent for — a between-milestone section numbered out of
-strict document order for a real sequencing reason, not a typo.
+**Numbering note:** at the time this was written, M31 (this doc's own,
+not-yet-built "Campaign integration and re-verification") and M32/M33
+(already built, in `ROUTE_CAPACITY_ROADMAP.md`) were all already spoken
+for in the shared milestone sequence, so this became M34 — the next
+fresh number, placed directly before M31 in the document since fares
+needed to exist before that integration pass tried to account for every
+mechanic at once. M31 has since been retired from this document
+entirely and rebuilt as `docs/BASELINE_AI_ROADMAP.md` (see "Kept in
+mind, not scheduled" below) — this note is left as the historical record
+of why M34 landed at this number and in this position, not a claim about
+the document's current structure.
 
 **Origin:** investigated how ticket revenue currently works, and it
 turns out there is no fare at all. `FinancialResolver.ComputeRevenue`
@@ -1111,55 +1115,27 @@ not a substitute for teaching it.
 
 ---
 
-## M31 — Campaign integration and re-verification
-
-Wire every milestone above into the two real consumers — `AeroNext.Sim`'s
-M13 loop and `AeroNext.QaHarness/FullGameRunner.cs` — replacing the flat
-scripted `BaselineAi` behavior (which currently never leases, retires,
-closes a route, pays down debt, or manages a fleet beyond "route exists or
-doesn't") with whatever minimal decision logic lets it exercise these new
-costs realistically, without overreaching into the deeper AI-fleshout work
-this roadmap explicitly isn't trying to do.
-
-**The affordability question is settled, and settled as a hard
-requirement, not routine behavior to design around:** a player (or AI)
-must never be able to even *attempt* an order it can't afford — not
-"attempt and get rejected harmlessly," which is not good enough on its
-own. Verified directly against `QuarterEngine.RunQuarter` before writing
-this: a rejected order today (range, era-availability, action-cap) is
-skipped *before* `spent` is incremented, so it costs nothing, not even the
-action slot — but "costs nothing" is beside the point. Because quarters
-resolve simultaneously, an order that fails at resolution time still
-consumed the *turn's opportunity* to have chosen something else, and
-nobody finds out until it's too late to fix. `BaselineAi`'s new decision
-logic must call the shared `CanAfford` check (see the cross-cutting rule
-above) before it ever constructs an `AircraftOrder`, `NegotiationOrder`,
-or paydown — filtering its own candidate moves down to ones it can
-actually pay for, the same way it already filters candidate routes down
-to ones within aircraft range, rather than proposing its first choice
-blind and hoping. **Done when:** a dedicated test drives `BaselineAi`
-with an airline down to near-zero cash and confirms it never once
-proposes an order the resolver's backstop would have to reject — the
-backstop should be provably unreachable in every real game the QA harness
-runs, not just theoretically present.
-
-This is expected to legitimately move every already-recorded campaign
-figure from `SIM_CORE_ROADMAP.md` and `WIN_CONDITIONS_ROADMAP.md` — the
-same way every city-expansion round and the Asia split each did — since
-real cash costs on aircraft/leasing/negotiation/salaries change the whole
-trajectory, not just add a footnote. Full re-measurement against real
-data required, not assumed to still hold.
-
----
-
 ## Kept in mind, not scheduled
 
-- **Fare stance / service level / marketing "postures"** — CLAUDE.md
-  describes these as free dials that should affect competitiveness and
-  revenue; today `Airline.Quality` is a single placeholder knob and
-  `DefaultYieldPerPassengerKm` is a flat global rate, both pre-existing
-  gaps unrelated to what this roadmap was scoped to fix. Adjacent to
-  "financial model," but a real, separate body of work.
+- **M31 ("Campaign integration and re-verification") is retired from
+  this document.** It was drafted before M27–M34 existed; a review found
+  its stated wiring goal already done (each milestone since has wired
+  itself into both real loops as part of its own commit) and its real
+  remaining value — a shared affordability primitive, `BaselineAi`'s
+  actual behavioral gaps, an obligation to re-measure numbers recorded
+  elsewhere — moved to **`docs/BASELINE_AI_ROADMAP.md`**, which reuses
+  the M31 number for its own first milestone (nothing was ever built
+  under the old scope) and continues from M35.
+- **Fare stance (fully settled by M34), service level, and marketing
+  "postures"** — CLAUDE.md's original framing bundled all three as free
+  competitiveness/revenue dials. Fare is no longer a gap: M34 built a
+  real, direct per-route price (`Route.FarePerPassenger`,
+  `SetFareOrder`), replacing the old flat `DefaultYieldPerPassengerKm`
+  global rate entirely. `Airline.Quality` remains a single placeholder
+  knob standing in for service level and marketing, and fare still
+  doesn't affect demand size or competitive share (M34 scoped that out
+  explicitly) — both real, separate gaps, adjacent to "financial model"
+  but not this roadmap's own scope.
 - **Interest rate scaling with leverage** — today's `InterestRatePerQuarter`
   is fixed at game start (2%) regardless of how much debt an airline
   carries. A realistic "the more you borrow, the worse your rate gets"
