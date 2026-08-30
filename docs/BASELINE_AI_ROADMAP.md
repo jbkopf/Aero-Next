@@ -543,24 +543,108 @@ growing (or ordering) past what its network can sustain.
 
 ## Phase 2 — strategy
 
-## M39 — Growth saturation awareness (the real bankruptcy fix)
+## M39 — A strategy framework (the real bankruptcy fix, redefined)
 
-Gives the "grow best-performing route" step an actual stopping condition:
-stop leasing another unit onto a route once its load factor shows
-capacity is already ahead of demand there, and only then fall through to
-a new pair, a fare cut (M37), paying down debt (M36), or leaving budget
-unspent. This is the milestone that actually addresses the diagnosed
-bankruptcy driver from this doc's own origin section — everything in
-phase 1 is necessary (the tools have to exist) but not sufficient
-without this (nothing before this milestone stops the AI from using
-those tools to dig the same hole).
+**Redefined from its original "growth saturation" framing.** That
+version gave the existing greedy heuristic a single stopping-condition
+tweak. Before building either version, diagnosed the *current*
+bankruptcy driver directly rather than assuming this doc's own
+pre-M35–M38 origin section still describes it: instrumented Atlas Air's
+last 12 quarters before its M13-loop bankruptcy (quarter 56, after M38)
+and found it loses $10–18M/quarter while its own load-factor math says
+it's 99–100% sold out the whole time. Root cause: every decision this
+AI makes (`FindBestPerformingRoute`, M35's close check, M37's raise/cut
+checks, `FindBestUnservedPair`) is computed through
+`RouteEvaluator`/`GravityDemandModel` directly — both assume monopoly,
+`RouteEvaluator`'s own doc comment says so plainly. The real game splits
+demand through `CompetitiveMarket`, and the M13 loop's 4 airlines are,
+by original M23/M24 design, perfectly identical and always chase the
+exact same globally-best pair — a permanent 4-way split on their own
+best markets that nothing in their decision math ever looks at.
 
-**Done when:** the diagnostic reproduced in this doc's origin section
-(instrument a real M13 run, watch fleet size against route count over
-many quarters) no longer shows unconditional quarter-over-quarter
-leasing onto an already-saturated route; the full M13 checkpoint sweep
-and 150-game QA harness sweep are re-measured, not assumed, against this
-new behavior.
+Discussed directly with the user, who proposed a different fix than
+tuning the single heuristic further: short-to-medium-term named
+strategies an airline commits to and periodically re-evaluates, e.g. a
+domestic profit optimizer (top 5 home-region routes) versus rapid
+cross-region expansion. This directly addresses both the saturation
+problem (a route cap *is* a stopping condition, just goal-driven instead
+of threshold-driven) and the cannibalization problem (4 seats no longer
+making identical decisions, if assigned different strategies) at once.
+Settled: each AI seat is **assigned** a starting strategy (not
+self-selected); re-evaluated on a **fixed cadence — once per in-game
+year** (4 quarters); build exactly two strategies now, but architect a
+real, reusable framework with an **intended-era tag** per strategy from
+day one.
+
+**`GameEra` enum** (`AeroNext.Core.Ai`) — `{ Starting, MidGame, LateGame
+}`, `GameEraForQuarter(int quarter)`, boundaries *(proposed, tunable)*:
+Starting = quarters 1–40 (1955–1964), MidGame = 41–160 (1965–1994),
+LateGame = 161–244 (1995–2015) — chosen against this session's own
+measured data, every M13-loop bankruptcy from M34 through M38 landed
+inside quarter 17–56, entirely within the proposed Starting window.
+
+**`IAiStrategy`** — `Name`, `ApplicableEras`, `Suitability(context)`
+(how well it fits current state, used to pick among eligible
+strategies), `DecideOrders(context)`. A new `StrategyContext` record
+bundles what's currently 9 loose parameters on `BaselineAi.DecideOrders`
+**plus one no version of this AI has ever had: `Region homeRegion`** —
+needed for "domestic" to mean anything. Existing helpers
+(`FindBestPerformingRoute`, `FindBestUnservedPair`,
+`HasSlotAtEveryGateway`, `ReserveSlots`, fare/debt/hire logic) become a
+shared internal toolkit both strategies call into, not duplicated.
+
+**Selection mechanism**, unifying initial assignment and later switching
+into one path: `BaselineAi.SelectStrategy(IAiStrategy? current, int
+quarterNumber, StrategyContext context)` — re-evaluates only on a year
+boundary or when `current` is null (quarter 1, or nothing assigned yet);
+otherwise returns `current` unchanged. Filters the roster to strategies
+whose `ApplicableEras` contains the current era, picks the highest
+`Suitability` among eligible ones (deterministic tie-break by name).
+**Explicit, honest gap:** with only two strategies, there may be no
+eligible one once `MidGame`/`LateGame` arrives — falls back to keeping
+the current strategy rather than crashing. Deliberate: the era tag
+exists so a *future* milestone can add mid/late-game-native strategies
+into the same roster without touching the selection mechanism.
+
+**`DomesticProfitOptimizerStrategy`** (`{Starting, MidGame}`): caps at
+`MaxDomesticRoutes = 5` *(proposed, tunable)* routes, both endpoints
+inside `homeRegion`. Below 5: opens the best *intra-region* pair ranked
+by estimated profitability (fare margin × demand), not raw demand. At
+5: stops opening new routes entirely, switches fully to optimizing the
+5 it has. Never proposes a cross-region `RouteOrder` or
+`NegotiationOrder`. *(Swapping a weak one of the 5 for a better
+still-unclaimed candidate is a natural richer behavior, deliberately
+left for later.)*
+
+**`RapidExpansionStrategy`** (`{Starting}`): inverts the existing
+priority order — opening a new pair (cross-region preferred) before
+growing an existing one, gateway negotiation weighted toward
+cross-region-reachable chokepoints (CLAUDE.md's own chokepoint pillar),
+more willing to lease/order than `DomesticOptimizer`. No route cap, no
+region restriction.
+
+**The M13 loop's own gap, surfaced not silently patched:**
+`AeroNext.Sim`'s M13 loop is "deliberately flat/symmetric... no
+GameSetup/region distinction" (its own standing doc comment) — it has no
+home regions for its 4 airlines today, so it could never meaningfully
+run `DomesticOptimizer` at all. Proposed fix, not a workaround: give the
+M13 loop's 4 airlines distinct starting regions/cities, the same way
+`GameSetup`/`StartingConditionsResolver` already would for a real game —
+serves two goals at once, enabling the framework there *and*
+independently reducing the diagnosed cannibalization pathology. A
+deliberate reversal of a long-standing design choice in that loop,
+flagged plainly — every M13 checkpoint figure recorded all session will
+move once this lands, expected and fine, not a regression to chase.
+
+**Done when:** both strategies exist and are unit tested independently
+(cap/region-restriction behavior for `DomesticOptimizer`, priority-order
+behavior for `RapidExpansion`); the selection mechanism is tested for
+initial assignment, year-boundary switching, mid-cycle stability, and
+the no-eligible-strategy fallback; both real loops assign/track a
+current strategy per airline and re-evaluate on schedule; the M13 loop's
+4 airlines have distinct home regions; the full M13 checkpoint sweep and
+150-game QA harness sweep are re-measured, not assumed, against this new
+behavior.
 
 ---
 
@@ -572,6 +656,11 @@ not the best one connected to its existing network." Real strategy work,
 not a mechanical gap — building toward the hub-and-spoke value
 `NetworkPlanner` (M4) already proved emerges from the demand model, which
 nothing in `BaselineAi`'s decision logic currently tries to capture.
+Reframed after M39: a refinement layered onto the strategy framework,
+not a prerequisite to it — both M39's strategies already carry an
+implicit form of network-shape awareness (a regional cluster; explicit
+cross-region reach), so this becomes "make each strategy's own network
+sense sharper," not "add network sense from nothing."
 
 ---
 
@@ -583,7 +672,13 @@ dominates a pair, and — once M34's own explicit scope boundary is
 revisited — factor a rival's fare into route/pair decisions. Fare
 doesn't yet affect demand size or competitive share at all (M34
 deliberately left that out); this milestone either works within that
-limit or is the natural trigger to revisit it.
+limit or is the natural trigger to revisit it. **Explicitly deferred
+until after M39 lands and gets measured:** strategy diversity across the
+4 seats may substantially reduce the cannibalization problem that
+motivated this milestone in the first place, which changes what M41
+actually still needs to do. Re-diagnose with real data before
+re-scoping it — the same "measure, don't guess" discipline this whole
+session has used, not assumed to still need the original scope.
 
 ---
 
