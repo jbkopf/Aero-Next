@@ -634,7 +634,24 @@ string ChokepointStatus(int year)
 // see M37's own "Done" writeup - because those harder conditions
 // actually produce underperforming routes the cut mechanic acts on,
 // unlike this loop.
-var checkpoints = new HashSet<int> { 1, 20, 30, 121, campaignQuarters };
+//
+// M38 (buy, not just lease) moves it further still, and does something
+// no milestone before it has: the 4 airlines genuinely diverge from
+// each other for the first time, despite making byte-identical
+// decisions (BaselineAi is still deterministic) - AircraftOrder is a
+// genuinely *contested* resource (M10's production-line position), so 4
+// airlines simultaneously ordering the same best-range type can't all
+// be satisfied the same quarter, and AircraftOrderResolver's own
+// deterministic tie-break sends them down different delivery timelines
+// from there. Peak cash (Atlas Air) climbs to $122,534,810.05 at
+// quarter 44 (1965) - beyond M37's own peak - and bankruptcy is pushed
+// to quarter 56 (1968, -$2,320,032.11), nearly double M37's quarter 30.
+// Frozen at 24 routes from there. The QA harness's 150 real games moved
+// broadly positive too this time (unlike M37's mixed result) - see
+// M38's own "Done" writeup - eliminating leasing's recurring 4%/quarter
+// fee compounds meaningfully over a long campaign regardless of how
+// harsh the starting conditions are.
+var checkpoints = new HashSet<int> { 1, 44, 56, 121, campaignQuarters };
 
 var campaignDominance = RegionalDominanceState.Empty;
 string? campaignWinner = null;

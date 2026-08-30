@@ -48,6 +48,16 @@ namespace AeroNext.Core.Ai;
 /// straight per-passenger loss under today's mechanics. Both are built
 /// anyway, to exercise the full mechanic and measure the real effect —
 /// see docs/BASELINE_AI_ROADMAP.md's M37 for the measured numbers.
+/// Orders an aircraft outright, instead of leasing, whenever cash
+/// comfortably covers the purchase price — cheaper long-run (no
+/// recurring lease fee) — but only when nothing idle is available to
+/// use immediately: AircraftOrder is a contested resource (delivery-line
+/// position, M10) that doesn't deliver this quarter the way leasing
+/// does, so choosing to order means the route it would have funded
+/// doesn't open/grow this quarter either, trading an immediate route for
+/// a cheaper one later (M38). This closes out phase 1 (mechanical
+/// completeness) of docs/BASELINE_AI_ROADMAP.md — every order type this
+/// AI can meaningfully use, it now does.
 ///
 /// Not trying to play well — CLAUDE.md's game is always exactly 4 airlines,
 /// so this exists because the sim can never run a representative quarter
@@ -99,6 +109,18 @@ public static class BaselineAi
     /// <summary>M37 (proposed, tunable): how far below the computed default an underperforming route's fare gets cut — see the class doc comment for why this is currently revenue-negative under today's demand model, built anyway to exercise the full mechanic.</summary>
     private const double FareCutFraction = 0.20;
 
+    /// <summary>
+    /// M38 (proposed, tunable): order instead of lease only when cash
+    /// clears this multiple of the aircraft's own purchase price —
+    /// deliberately more conservative than QuarterEngine's own
+    /// affordability gate for AircraftOrder (1x cost), so this AI never
+    /// gets its own order rejected and keeps comfortable margin for the
+    /// same quarter's salary/operating cost.
+    /// </summary>
+    private const int AircraftOrderCashComfortMultiplier = 3;
+
+    private static Money ComfortableOrderCost(AircraftType type) => type.Cost * AircraftOrderCashComfortMultiplier;
+
     /// <param name="eraAvailableTypes">
     /// The full aircraft catalog available to lease this era (e.g.
     /// Timeline.AvailableAircraft) — not this airline's own fleet. Only
@@ -109,11 +131,12 @@ public static class BaselineAi
     /// This airline's actual holdings. A new route always prefers an idle
     /// unit already owned or leased — free, no new action needed for the
     /// aircraft itself — over acquiring something new. Only when nothing
-    /// idle can reach a positive-demand unserved pair does this AI lease
-    /// (never order — see the class doc comment) the best available type
-    /// and, in the same order batch, propose a route using it, relying on
-    /// QuarterEngine's inline lease resolution to make that same-quarter
-    /// use possible.
+    /// idle can reach a positive-demand unserved pair does this AI
+    /// acquire one — leasing, and in the same order batch proposing a
+    /// route using it (relying on QuarterEngine's inline lease resolution
+    /// to make that same-quarter use possible), unless cash comfortably
+    /// covers buying outright instead (M38 — see the class doc comment),
+    /// in which case it orders and proposes no route this quarter.
     /// </param>
     /// <param name="availableSlotsByCity">
     /// M33: null (the default) never blocks a candidate on gate scarcity,
@@ -187,9 +210,23 @@ public static class BaselineAi
                 ReserveSlots(bestExisting.Origin, bestExisting.Destination, slotsReservedByCity);
                 spent += 1;
             }
+            else if (availableCash is not null && FinancialState.CanAfford(availableCash.Value, ComfortableOrderCost(bestExisting.Aircraft)))
+            {
+                // M38: nothing idle of this route's own type, but cash
+                // comfortably covers buying one outright - order instead
+                // of lease (cheaper long-run, no recurring fee). No
+                // RouteOrder this quarter: AircraftOrder doesn't deliver
+                // the same quarter the way LeaseAircraftOrder does (M10's
+                // contested delivery-line resource) - the growth simply
+                // happens later, once the order delivers and the unit
+                // shows up idle.
+                orders.Add(new AircraftOrder(bestExisting.Aircraft, Quantity: 1));
+                spent += 1;
+            }
             else if (spent + 2 <= actionCap)
             {
-                // Nothing idle of this route's own type - lease one more
+                // Nothing idle of this route's own type, and cash isn't
+                // comfortable enough to order instead - lease one more
                 // and add it in the same batch, mirroring the new-pair
                 // fallback below. No "best available type" search needed
                 // here: growing an existing route requires the exact type
@@ -212,12 +249,16 @@ public static class BaselineAi
                 ReserveSlots(pair.Origin, pair.Destination, slotsReservedByCity);
                 spent += 1;
             }
-            else if (idleBest is null && spent + 2 <= actionCap)
+            else if (idleBest is null && spent + 1 <= actionCap)
             {
-                // Nothing idle can reach anywhere worth serving - lease the
-                // best available type and open a route with it in the same
-                // batch, rather than leasing speculatively with no route to
-                // show for it this quarter.
+                // Nothing idle can reach anywhere worth serving - either
+                // lease the best available type and open a route with it
+                // in the same batch, or (M38) order it instead when cash
+                // comfortably covers buying outright. Ordering never
+                // proposes a route this quarter (AircraftOrder doesn't
+                // deliver the same quarter - M10's contested delivery-line
+                // resource), so it's cheaper but not immediate - see the
+                // class doc comment.
                 var bestAircraft = eraAvailableTypes
                     .OrderByDescending(a => a.RangeKm)
                     .ThenBy(a => a.Id, StringComparer.Ordinal)
@@ -226,6 +267,12 @@ public static class BaselineAi
                 var bestUnserved = bestAircraft is null ? null : FindBestUnservedPair(currentRoutes, allCities, demandModel, bestAircraft);
 
                 if (bestAircraft is not null && bestUnserved is not null
+                    && availableCash is not null && FinancialState.CanAfford(availableCash.Value, ComfortableOrderCost(bestAircraft)))
+                {
+                    orders.Add(new AircraftOrder(bestAircraft, Quantity: 1));
+                    spent += 1;
+                }
+                else if (bestAircraft is not null && bestUnserved is not null && spent + 2 <= actionCap
                     && HasSlotAtEveryGateway(bestUnserved.Origin, bestUnserved.Destination, availableSlotsByCity, slotsReservedByCity))
                 {
                     orders.Add(new LeaseAircraftOrder(bestAircraft, Quantity: 1));

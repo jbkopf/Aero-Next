@@ -443,7 +443,7 @@ this milestone delivered that honestly, cost included.
 
 ---
 
-## M38 — Aircraft ownership: buy, not just lease
+## M38 — Aircraft ownership: buy, not just lease ✅
 
 `AircraftOrder` (the production-queue purchase path). `BaselineAi` only
 ever leases today, paying a recurring 4%/quarter fee forever against a
@@ -456,6 +456,88 @@ outright and the need isn't immediate.
 condition instead of always falling back to `LeaseAircraftOrder`; a test
 confirms it still leases when the condition isn't met (delivery-position
 scarcity, M10's contested resource, means ordering isn't always better).
+
+**The load-bearing architectural fact, worth stating plainly:**
+`AircraftOrder` doesn't deliver the same quarter the way
+`LeaseAircraftOrder` does — `QuarterEngine` resolves a lease inline, so
+a `RouteOrder` in the same batch can use it immediately; an order only
+resolves later, through `AircraftOrderResolver`'s contested production
+queue (M10). So choosing to order instead of lease means *not*
+submitting the route this quarter either — the growth/new-pair happens
+whenever the order eventually delivers and the unit shows up idle,
+picked up naturally by the existing idle-preferring logic. Both real
+loops already handled `AircraftOrder` generically in
+`result.AppliedOrders` (since M26) — this milestone needed zero wiring
+changes to `Program.cs` or `FullGameRunner.cs`, purely a `BaselineAi.cs`
+change.
+
+`AircraftOrderCashComfortMultiplier = 3` *(proposed, tunable)*:
+`ComfortableOrderCost(type) = type.Cost × 3`, deliberately more
+conservative than `QuarterEngine`'s own affordability gate for
+`AircraftOrder` (1× cost) — this AI never gets its own order rejected,
+keeping real margin for the same quarter's salary/operating cost.
+Checked against both fallback sites that used to always lease: growing
+an existing route, and opening a new pair. `availableCash is null`
+(permissive callers) keeps the exact pre-M38 lease-only behavior
+unchanged — no new gating for anyone who doesn't pass cash, the same
+convention every prior milestone's own cash/debt parameter followed.
+
+Done. 490 tests total (7 new, all in `BaselineAiTests`) — orders instead
+of leasing to grow an existing route when cash is comfortable (no route
+growth that quarter, since the order can't deliver yet); still leases
+when cash is present but not comfortable; the same pair for opening a
+new route; still leases with no cash passed at all (permissive,
+unchanged); a tight-budget test showing ordering fits at a 1-action cap
+where lease+route (2 actions) never could — a genuinely new capability,
+not just a substitution; and a `QuarterEngine.RunQuarter` integration
+test confirming zero rejections. 100% line/branch coverage on
+`BaselineAi`. Overall project coverage **99.86%/99.64%**, at/above the
+established baseline. 150-game QA harness sweep: 150/150 clean, 0
+invariant violations, 0 crashes.
+
+**Campaign trajectory — and something no milestone before it has
+produced.** `AeroNext.Sim`'s M13 loop moved further still: Atlas Air's
+peak cash climbed to **$122,534,810.05 at quarter 44** (1965, beyond
+M37's own peak), and bankruptcy was pushed to **quarter 56** (1968,
+-$2,320,032.11) — nearly double M37's quarter 30. But for the first
+time all session, **the 4 airlines in this loop genuinely diverged from
+each other**, despite `BaselineAi` remaining fully deterministic and
+every airline making byte-identical decisions from identical state.
+`AircraftOrder` is a real *contested* resource (M10's production-line
+position) — this is the first milestone where `BaselineAi` ever actually
+submits one, and with 4 identical airlines simultaneously ordering the
+same best-range type, the production queue can't satisfy all 4 the same
+quarter; `AircraftOrderResolver`'s own deterministic tie-break sends
+them down genuinely different delivery timelines from that point on.
+`NegotiationOrder` was contested in principle since M9 too, but this M13
+loop never actually wires bids into `LandingRightsResolver` (confirmed
+in `FullGameRunner.cs`'s own doc comment), so that contest was never
+real here — `AircraftOrder` is the first mechanic in this loop where
+contention has a genuine, measured effect.
+
+The QA harness's 150 real games moved broadly positive this time —
+unlike M37's mixed result — bankruptcy quarter averages later in every
+region (6.7–12.5, versus M37's 6.4–9.7) and average cash at bankruptcy
+improved in 5 of 6 regions (e.g. East Asia -$1,457,523 → -$648,100,
+South West Asia -$3,313,977 → -$741,079). Consistent with the mechanism
+built: eliminating leasing's recurring 4%/quarter fee compounds
+meaningfully over a long campaign regardless of how harsh the starting
+conditions are, unlike M37's raise/cut split which depended heavily on
+each region's own saturation pattern.
+
+**Phase 1 (mechanical completeness) closes here.** `BaselineAi` now
+constructs every order type this session's own review found it never
+touched: `HireExecutiveOrder` (M31), `RetireAircraftOrder`/
+`CloseRouteOrder` (M35), `RefinanceOrder`/`PayDownDebtOrder` (M36),
+`SetFareOrder` (M37), `AircraftOrder` (M38) — 7 of the 12 order types
+that existed, all built, all measured against both real loops rather
+than assumed. `AllianceCourtOrder` remains the one deliberate exclusion
+(no mechanical consequence yet — M9's own reasoning, restated in this
+doc's "Kept in mind" section). None of these six milestones taught this
+AI to play *well* — that's phase 2's job, starting with M39, the actual
+fix for the bankruptcy pattern M31 first diagnosed and every milestone
+since has measured but not addressed: nothing yet stops this AI from
+growing (or ordering) past what its network can sustain.
 
 ---
 

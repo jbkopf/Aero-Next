@@ -945,4 +945,126 @@ public class BaselineAiTests
         Assert.Equal(market.TotalCarried(airline), raisedMarket.TotalCarried(raisedAirline)); // same carried volume
         Assert.True(raisedStatement.Revenue > baselineStatement.Revenue);
     }
+
+    // --- M38: aircraft ownership, buy not just lease (docs/BASELINE_AI_ROADMAP.md) ---
+
+    [Fact]
+    public void DecideOrders_GrowExistingRoute_NothingIdle_CashComfortablyCoversPurchase_OrdersInsteadOfLeasing()
+    {
+        var a = MakeCity("a", 0, 0, 100);
+        var b = MakeCity("b", 1, 1, 90);
+        var aircraft = new AircraftType("t", "Test", Seats: 10, Cost: Money.FromDollars(1_000_000));
+        var existing = new[] { new Route(a, b, aircraft, AircraftCount: 1) };
+
+        var orders = BaselineAi.DecideOrders(
+            existing, QuarterEngine.BaseActionCap, new[] { a, b }, DemandModel, new[] { aircraft }, AirlineFleet.Empty,
+            availableSlotsByCity: null, availableCash: Money.FromDollars(3_000_000)); // exactly 3x the aircraft's cost
+
+        var order = Assert.Single(orders.OfType<AircraftOrder>());
+        Assert.Equal("t", order.Type.Id);
+        Assert.Empty(orders.OfType<LeaseAircraftOrder>());
+        Assert.DoesNotContain(orders.OfType<RouteOrder>(), o => o.Origin.Id == "a" && o.Destination.Id == "b"); // no growth this quarter - the order can't deliver yet
+    }
+
+    [Fact]
+    public void DecideOrders_GrowExistingRoute_NothingIdle_CashPresentButNotComfortable_StillLeases()
+    {
+        var a = MakeCity("a", 0, 0, 100);
+        var b = MakeCity("b", 1, 1, 90);
+        var aircraft = new AircraftType("t", "Test", Seats: 10, Cost: Money.FromDollars(1_000_000));
+        var existing = new[] { new Route(a, b, aircraft, AircraftCount: 1) };
+
+        var orders = BaselineAi.DecideOrders(
+            existing, QuarterEngine.BaseActionCap, new[] { a, b }, DemandModel, new[] { aircraft }, AirlineFleet.Empty,
+            availableSlotsByCity: null, availableCash: Money.FromDollars(2_999_999)); // just short of 3x
+
+        Assert.Empty(orders.OfType<AircraftOrder>());
+        var lease = Assert.Single(orders.OfType<LeaseAircraftOrder>());
+        Assert.Equal("t", lease.Type.Id);
+        Assert.Contains(orders.OfType<RouteOrder>(), o => o.Origin.Id == "a" && o.Destination.Id == "b");
+    }
+
+    [Fact]
+    public void DecideOrders_NewPair_NothingIdle_CashComfortablyCoversPurchase_OrdersInsteadOfLeasing()
+    {
+        var a = MakeCity("a", 0, 0, 100);
+        var b = MakeCity("b", 1, 1, 90);
+        var aircraft = new AircraftType("t", "Test", Seats: 10, Cost: Money.FromDollars(1_000_000));
+
+        var orders = BaselineAi.DecideOrders(
+            Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { a, b }, DemandModel, new[] { aircraft }, AirlineFleet.Empty,
+            availableSlotsByCity: null, availableCash: Money.FromDollars(3_000_000));
+
+        var order = Assert.Single(orders.OfType<AircraftOrder>());
+        Assert.Equal("t", order.Type.Id);
+        Assert.Empty(orders.OfType<LeaseAircraftOrder>());
+        Assert.Empty(orders.OfType<RouteOrder>());
+    }
+
+    [Fact]
+    public void DecideOrders_NewPair_NothingIdle_CashPresentButNotComfortable_StillLeases()
+    {
+        var a = MakeCity("a", 0, 0, 100);
+        var b = MakeCity("b", 1, 1, 90);
+        var aircraft = new AircraftType("t", "Test", Seats: 10, Cost: Money.FromDollars(1_000_000));
+
+        var orders = BaselineAi.DecideOrders(
+            Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { a, b }, DemandModel, new[] { aircraft }, AirlineFleet.Empty,
+            availableSlotsByCity: null, availableCash: Money.FromDollars(2_999_999));
+
+        Assert.Empty(orders.OfType<AircraftOrder>());
+        var lease = Assert.Single(orders.OfType<LeaseAircraftOrder>());
+        Assert.Equal("t", lease.Type.Id);
+        Assert.Single(orders.OfType<RouteOrder>());
+    }
+
+    [Fact]
+    public void DecideOrders_NewPair_NothingIdle_NoCashPassed_StillLeases_NeverOrders()
+    {
+        var a = MakeCity("a", 0, 0, 100);
+        var b = MakeCity("b", 1, 1, 90);
+        var aircraft = new AircraftType("t", "Test", Seats: 10, Cost: Money.FromDollars(1_000_000));
+
+        var orders = BaselineAi.DecideOrders(Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { a, b }, DemandModel, new[] { aircraft }, AirlineFleet.Empty);
+
+        Assert.Empty(orders.OfType<AircraftOrder>());
+        Assert.Single(orders.OfType<LeaseAircraftOrder>());
+    }
+
+    [Fact]
+    public void DecideOrders_TightBudget_OrderingFitsWhereLeasingPlusRouteWouldNot()
+    {
+        // Cap 1: leasing (1) + opening a route with it (1 more) needs 2
+        // and wouldn't fit, exactly like the pre-M38 behavior already
+        // tested elsewhere - but ordering alone costs only 1, so it fits
+        // when cash is comfortable, a genuinely new capability this
+        // milestone adds.
+        var a = MakeCity("a", 0, 0, 100);
+        var b = MakeCity("b", 1, 1, 90);
+        var aircraft = new AircraftType("t", "Test", Seats: 10, Cost: Money.FromDollars(1_000_000));
+
+        var orders = BaselineAi.DecideOrders(
+            Array.Empty<Route>(), actionCap: 1, new[] { a, b }, DemandModel, new[] { aircraft }, AirlineFleet.Empty,
+            availableSlotsByCity: null, availableCash: Money.FromDollars(3_000_000));
+
+        var order = Assert.Single(orders.OfType<AircraftOrder>());
+        Assert.Equal("t", order.Type.Id);
+    }
+
+    [Fact]
+    public void DecideOrders_AircraftOrder_ProducesLegalOrders_WhenRunThroughQuarterEngine()
+    {
+        var a = MakeCity("a", 0, 0, 100);
+        var b = MakeCity("b", 1, 1, 90);
+        var aircraft = new AircraftType("t", "Test", Seats: 10, Cost: Money.FromDollars(1_000_000));
+
+        var orders = BaselineAi.DecideOrders(
+            Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { a, b }, DemandModel, new[] { aircraft }, AirlineFleet.Empty,
+            availableSlotsByCity: null, availableCash: Money.FromDollars(3_000_000));
+        var result = QuarterEngine.RunQuarter(
+            1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, orders, new[] { a, b }, DemandModel,
+            availableCash: Money.FromDollars(3_000_000));
+
+        Assert.Empty(result.RejectedOrders);
+    }
 }
