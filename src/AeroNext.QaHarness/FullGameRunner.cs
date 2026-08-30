@@ -36,7 +36,7 @@ namespace AeroNext.QaHarness;
 /// </summary>
 public static class FullGameRunner
 {
-    private static readonly Money DefaultStartingDebt = Money.FromDollars(10_000_000);
+    private static readonly Money DefaultStartingDebt = Money.FromDollars(0);
     private const double DefaultInterestRatePerQuarter = 0.02;
 
     /// <summary>Anything past this is almost certainly a sign-flip/overflow bug, not a plausible airline balance.</summary>
