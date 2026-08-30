@@ -857,6 +857,145 @@ folded into any one milestone.
 
 ---
 
+## M34 — Fares: a direct, per-route price the player sets
+
+**Numbering note:** M31 (below) and M32/M33 (already built, in
+`ROUTE_CAPACITY_ROADMAP.md`) are all already spoken for in the shared
+milestone sequence, so this becomes M34 — the next fresh number. It's
+placed here in the *document*, directly before M31, rather than after
+it: fares should exist before M31's `BaselineAi` integration/rework
+pass tries to account for every mechanic at once, the same reasoning
+`M25b` set precedent for — a between-milestone section numbered out of
+strict document order for a real sequencing reason, not a typo.
+
+**Origin:** investigated how ticket revenue currently works, and it
+turns out there is no fare at all. `FinancialResolver.ComputeRevenue`
+sums `carried × O-D great-circle distance × DefaultYieldPerPassengerKm`
+— a flat, hardcoded 0.12 $/passenger-km global constant, identical for
+every airline, every route, every era from 1955 to 2015, with zero
+player or AI control. `Airline.Quality` (the one knob that exists) only
+weights competitive demand *share* in `CompetitiveMarket` — it never
+touches price. Both files' own doc comments already flagged this as a
+known placeholder, matching CLAUDE.md's still-unbuilt "fare stance...
+free to set" market action.
+
+**Settled with the user:** direct, per-route fare control — not a
+discrete posture tier, a literal price. A route's default fare at
+creation should reflect a reasonable profit margin over that route's own
+costs, computed in a way that's easy to extend as more per-route cost
+mechanics get added later, rather than a one-off calculation that needs
+rewriting each time.
+
+**Design.** `Route` gains `Money? FareOverride = null` — a new,
+trailing, defaulted constructor parameter (non-breaking, the same safe
+pattern `AircraftType.CruiseSpeedKmh` used, *not* M32's breaking
+field-meaning change) — plus a computed property:
+```csharp
+public Money FarePerPassenger => FareOverride ?? FareCalculator.SuggestedFarePerPassenger(this);
+```
+This is the key design choice: fare is *not* a required, stored value
+every one of the ~170 existing `new Route(...)` call sites would have to
+fill in (which would silently zero out revenue everywhere it's
+omitted) — it's an optional override with an always-sensible computed
+fallback. Every existing route, test, and demo scenario gets a real,
+non-zero, cost-derived fare automatically, with zero migration burden.
+
+**New `FareCalculator` static class** (`AeroNext.Core.Finance`) — the
+"easy to extend later" piece:
+```csharp
+public static class FareCalculator
+{
+    public const double DefaultFareMarginOverCost = 0.30; // (Proposed, tunable)
+
+    // Cost to fly ONE seat this route's full distance — the same rate
+    // FinancialResolver.ComputeOperatingCost already applies per
+    // available-seat-km, evaluated for a single seat. Today this is the
+    // *only* per-route cost mechanic that exists (M12); a future
+    // per-route cost (e.g. a prorated share of salary/lease once a
+    // per-route fleet-cost attribution model exists) is meant to be
+    // added as one more term summed into this method — a single,
+    // obvious place to extend, not a change to every call site that
+    // reads a default fare.
+    public static Money CostPerSeatOffered(Route route) => ...;
+
+    public static Money SuggestedFarePerPassenger(Route route) =>
+        // CostPerSeatOffered(route) grossed up by DefaultFareMarginOverCost,
+        // computed in double space and rounded once, same pattern
+        // ComputeOperatingCost/ComputeLeaseFee already use.
+}
+```
+Priced per **seat offered**, not per passenger actually carried — load
+factor isn't baked into the default fare, so an under-filled route stays
+a visible cash drain even at a "profitable" fare, consistent with
+`FinancialResolver`'s own existing doc comment and CLAUDE.md's
+legibility pillar.
+
+**New `SetFareOrder(City Origin, City Destination, Money FarePerPassenger) : QuarterOrder`**
+— private, free (CLAUDE.md: "resolves against nothing"), same framing as
+`PayDownDebtOrder`/`CloseRouteOrder`. Reinterprets CLAUDE.md's existing
+"fare stance... free to set (a posture, not a number)" line as a literal
+settable price rather than a discrete tier — the CLAUDE.md edit lands at
+implementation time, not in this roadmap pass.
+
+`QuarterEngine` gains one rejection rule, matching `CloseRouteOrder`'s
+existing shape: a `SetFareOrder` is rejected outright if the airline
+doesn't currently operate that pair (checked against quarter-start
+`currentRoutes` — the same "can't set a fare on a route opening this
+same quarter" punt `RouteOrder`'s type-swap restriction already
+established precedent for) or if `FarePerPassenger` is negative. Cost 0.
+
+`ApplyRouteOrders` gains a `SetFareOrder` fold branch
+(`existing with { FareOverride = fareOrder.FarePerPassenger }`), and a
+**necessary fix to the existing `RouteOrder` branch**: today it always
+constructs `new Route(...)` fresh, which would silently reset a custom
+fare back to the computed default every time another aircraft is added
+to an already-fare-customized route. Must preserve `existing.FareOverride`
+when the same type is already there.
+
+`FinancialResolver.ComputeRevenue` gets rewritten to sum, per
+`CompetitiveRouteUsage` entry (mirrors `ComputeOperatingCost`'s existing
+per-leg iteration exactly): `Route.FarePerPassenger × SeatsUsed`
+(`Money × long`, already an existing operator — pure integer math, no
+double/round needed for this one, unlike the constant it replaces).
+`DefaultYieldPerPassengerKm`/the `yieldPerPassengerKm` parameter on
+`Resolve()` get removed entirely — confirmed via a repo-wide search that
+no test or real call site ever overrides it, so this is a safe
+simplification, not a breaking change to guard.
+
+**Explicit consequence worth stating plainly, not hiding it:** a
+one-stop (connecting) passenger already incurs operating cost on *both*
+legs they fly (existing `RouteUsage` behavior, unchanged). Revenue now
+mirrors that exactly — a connecting passenger's fare becomes the *sum*
+of both legs' `FarePerPassenger`, reflecting the real distance flown via
+the hub rather than today's flattened direct O-D distance. This will
+likely raise connecting-passenger revenue somewhat versus today's
+model — expected, and to be measured (not assumed) the same way every
+other milestone's trajectory shift was.
+
+**Explicitly scoped out, flagged as a natural larger follow-on:** fare
+does **not** yet affect demand size (`GravityDemandModel` untouched) or
+competitive share (`CompetitiveMarket`'s `Quality`-weighted split
+untouched) — this milestone is a revenue-per-passenger lever only. A
+price-elastic demand response, or fare entering the competitive weight
+formula (undercutting a rival to win more of a contested pair), is real
+and left for later — not built here, so it doesn't get silently implied.
+
+**No `BaselineAi` change** — `SetFareOrder` is optional/private, the
+same treatment `PayDownDebtOrder` got; the AI simply never submits one
+and every route it opens keeps the computed default fare, consistent
+with the user's own `BaselineAi`-rework deferral.
+
+**Done when:** a route's fare is visible and player-settable; a route's
+default fare at creation reflects its own aircraft/distance cost-plus-
+margin, not a flat global number; revenue for a fully-sold-out route is
+provably profitable at the default fare, mirroring
+`Resolve_ProfitableRoute_IncreasesCash`'s existing assumption; assigning
+another aircraft to an already-customized route preserves the custom
+fare rather than resetting it; a `SetFareOrder` against a pair the
+airline doesn't operate is rejected.
+
+---
+
 ## M31 — Campaign integration and re-verification
 
 Wire every milestone above into the two real consumers — `AeroNext.Sim`'s
