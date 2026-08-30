@@ -37,7 +37,7 @@ public class StartingConditionsTests
                 Assert.Equal(region, conditions.GuaranteedRouteDestination.Region);
                 Assert.True(Timeline.IsAvailable(conditions.StartingAircraft, Timeline.StartYear));
 
-                var order = new RouteOrder(startingCity, conditions.GuaranteedRouteDestination, conditions.StartingAircraft, WeeklyRoundTrips: 3);
+                var order = new RouteOrder(startingCity, conditions.GuaranteedRouteDestination, conditions.StartingAircraft);
                 var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, cities, DemandModel);
 
                 Assert.Empty(result.RejectedOrders);

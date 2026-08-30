@@ -13,9 +13,9 @@ public class RouteEvaluatorTests
     public void Route_SeatsPerQuarter_MultipliesSeatsByRoundTripsByTwoByThirteenWeeks()
     {
         var aircraft = new AircraftType("t", "Test", Seats: 100);
-        var route = new Route(MakeCity("a", 0, 0, 50), MakeCity("b", 0, 1, 50), aircraft, WeeklyRoundTrips: 2);
+        var route = new Route(MakeCity("a", 0, 0, 50), MakeCity("b", 0, 1, 50), aircraft, AircraftCount: 2);
 
-        Assert.Equal(100L * 2 * 2 * 13, route.SeatsPerQuarter);
+        Assert.Equal(100L * route.WeeklyRoundTrips * 2 * 13, route.SeatsPerQuarter);
     }
 
     [Fact]
@@ -25,7 +25,7 @@ public class RouteEvaluatorTests
         var a = MakeCity("a", 0, 0, 100);
         var b = MakeCity("b", 0, 1, 100); // close + heavy => huge demand
         var tinyAircraft = new AircraftType("t", "Test", Seats: 10);
-        var route = new Route(a, b, tinyAircraft, WeeklyRoundTrips: 1);
+        var route = new Route(a, b, tinyAircraft, AircraftCount: 1);
 
         var load = RouteEvaluator.Evaluate(route, demandModel);
 
@@ -41,7 +41,7 @@ public class RouteEvaluatorTests
         var a = MakeCity("a", 0, 0, 1);
         var b = MakeCity("b", 30, 30, 1); // far + light => tiny demand
         var bigAircraft = new AircraftType("t", "Test", Seats: 400);
-        var route = new Route(a, b, bigAircraft, WeeklyRoundTrips: 10);
+        var route = new Route(a, b, bigAircraft, AircraftCount: 1);
 
         var load = RouteEvaluator.Evaluate(route, demandModel);
 
@@ -57,7 +57,7 @@ public class RouteEvaluatorTests
         var a = MakeCity("a", 0, 0, 50);
         var b = MakeCity("b", 0, 1, 50);
         var aircraft = new AircraftType("t", "Test", Seats: 100);
-        var route = new Route(a, b, aircraft, WeeklyRoundTrips: 0); // suspended route: zero capacity
+        var route = new Route(a, b, aircraft, AircraftCount: 0); // suspended route: zero capacity
 
         var load = RouteEvaluator.Evaluate(route, demandModel);
 

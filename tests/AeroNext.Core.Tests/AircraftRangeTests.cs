@@ -39,7 +39,7 @@ public class AircraftRangeTests
         var b = MakeCity("b", 40, 40, 50);
         var aircraft = new AircraftType("t", "Test", Seats: 100, RangeKm: 100);
 
-        var order = new RouteOrder(a, b, aircraft, 3);
+        var order = new RouteOrder(a, b, aircraft);
 
         Assert.False(order.IsWithinRange);
         Assert.Equal(new Route(a, b, aircraft, 3).IsWithinRange, order.IsWithinRange);
@@ -51,7 +51,7 @@ public class AircraftRangeTests
         var a = MakeCity("a", 0, 0, 50);
         var b = MakeCity("b", 40, 40, 50);
         var shortRange = new AircraftType("t", "Test", Seats: 100, RangeKm: 100);
-        var order = new RouteOrder(a, b, shortRange, 3);
+        var order = new RouteOrder(a, b, shortRange);
 
         var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, new[] { a, b }, DemandModel);
 
@@ -68,8 +68,8 @@ public class AircraftRangeTests
         var shortRange = new AircraftType("t", "Test", Seats: 100, RangeKm: 100);
         var orders = new QuarterOrder[]
         {
-            new RouteOrder(a, b, shortRange, 3), // out of range, rejected
-            new RouteOrder(a, c, shortRange, 3), // in range, should still apply
+            new RouteOrder(a, b, shortRange), // out of range, rejected
+            new RouteOrder(a, c, shortRange), // in range, should still apply
         };
 
         var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, orders, new[] { a, b, c }, DemandModel);
@@ -84,7 +84,7 @@ public class AircraftRangeTests
         var a = MakeCity("a", 0, 0, 50);
         var b = MakeCity("b", 40, 40, 50);
         var shortRange = new AircraftType("t", "Test", Seats: 100, RangeKm: 100);
-        var order = new RouteOrder(a, b, shortRange, 3);
+        var order = new RouteOrder(a, b, shortRange);
 
         var quarter = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, new[] { a, b }, DemandModel);
         var briefing = BriefingGenerator.Generate(null, quarter);

@@ -20,7 +20,7 @@ public class BriefingGeneratorTests
         var a = MakeCity("a", 0, 0, 50);
         var b = MakeCity("b", 1, 1, 50);
         var cities = new[] { a, b };
-        var current = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { new RouteOrder(a, b, Aircraft, 3) }, cities, DemandModel);
+        var current = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { new RouteOrder(a, b, Aircraft) }, cities, DemandModel);
 
         var briefing = BriefingGenerator.Generate(null, current);
 
@@ -34,7 +34,7 @@ public class BriefingGeneratorTests
         var b = MakeCity("b", 1, 1, 50);
         var cities = new[] { a, b };
 
-        var quarter1 = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { new RouteOrder(a, b, Aircraft, 3) }, cities, DemandModel);
+        var quarter1 = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { new RouteOrder(a, b, Aircraft) }, cities, DemandModel);
         var quarter2 = QuarterEngine.RunQuarter(2, quarter1.Routes, quarter1.ActionCap, Array.Empty<QuarterOrder>(), cities, DemandModel);
 
         var briefing = BriefingGenerator.Generate(quarter1, quarter2);
@@ -50,8 +50,8 @@ public class BriefingGeneratorTests
         var c = MakeCity("c", 2, 2, 50);
         var cities = new[] { a, b, c };
 
-        var quarter1 = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { new RouteOrder(a, b, Aircraft, 3) }, cities, DemandModel);
-        var quarter2 = QuarterEngine.RunQuarter(2, quarter1.Routes, quarter1.ActionCap, new[] { new RouteOrder(a, c, Aircraft, 3) }, cities, DemandModel);
+        var quarter1 = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { new RouteOrder(a, b, Aircraft) }, cities, DemandModel);
+        var quarter2 = QuarterEngine.RunQuarter(2, quarter1.Routes, quarter1.ActionCap, new[] { new RouteOrder(a, c, Aircraft) }, cities, DemandModel);
 
         var briefing = BriefingGenerator.Generate(quarter1, quarter2);
 
@@ -60,19 +60,24 @@ public class BriefingGeneratorTests
         Assert.Contains("a-c", entered.Message);
     }
 
+    private static readonly AircraftType SmallAircraft = new("small", "Small", Seats: 2);
+    private static readonly AircraftType BigAircraft = new("big", "Big", Seats: 300);
+
     [Fact]
     public void Generate_LoadFactorDrop_AboveThreshold_IsReported()
     {
-        // Weighted so demand (~4,868/qtr) sits between quarter 1's capacity
-        // (2,600 -> fully saturated) and quarter 2's (130,000 -> nowhere
-        // near saturated), so the same fixed demand reads as a load factor
-        // drop purely from adding capacity.
+        // Same fixed demand both quarters; capacity swings from saturated
+        // to nowhere-near-saturated by swapping to a much bigger aircraft
+        // (M32: WeeklyRoundTrips is derived now, not a hand-picked number,
+        // so a capacity swing this large comes from aircraft size, not
+        // frequency). Permissive mode (no fleet passed) allows the type
+        // change on an already-served pair between quarters.
         var a = MakeCity("a", 0, 0, 4);
         var b = MakeCity("b", 1, 1, 4);
         var cities = new[] { a, b };
 
-        var quarter1 = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { new RouteOrder(a, b, Aircraft, 1) }, cities, DemandModel);
-        var quarter2 = QuarterEngine.RunQuarter(2, quarter1.Routes, quarter1.ActionCap, new[] { new RouteOrder(a, b, Aircraft, 50) }, cities, DemandModel);
+        var quarter1 = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { new RouteOrder(a, b, SmallAircraft) }, cities, DemandModel);
+        var quarter2 = QuarterEngine.RunQuarter(2, quarter1.Routes, quarter1.ActionCap, new[] { new RouteOrder(a, b, BigAircraft) }, cities, DemandModel);
 
         var briefing = BriefingGenerator.Generate(quarter1, quarter2);
 
@@ -82,14 +87,14 @@ public class BriefingGeneratorTests
     [Fact]
     public void Generate_LoadFactorSurge_AboveThreshold_IsReported()
     {
-        // Mirror image of the drop test: same fixed demand, capacity cut
-        // instead of raised, so load factor rises sharply.
+        // Mirror image of the drop test: same fixed demand, a much smaller
+        // aircraft swapped in instead, so load factor rises sharply.
         var a = MakeCity("a", 0, 0, 4);
         var b = MakeCity("b", 1, 1, 4);
         var cities = new[] { a, b };
 
-        var quarter1 = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { new RouteOrder(a, b, Aircraft, 50) }, cities, DemandModel);
-        var quarter2 = QuarterEngine.RunQuarter(2, quarter1.Routes, quarter1.ActionCap, new[] { new RouteOrder(a, b, Aircraft, 1) }, cities, DemandModel);
+        var quarter1 = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { new RouteOrder(a, b, BigAircraft) }, cities, DemandModel);
+        var quarter2 = QuarterEngine.RunQuarter(2, quarter1.Routes, quarter1.ActionCap, new[] { new RouteOrder(a, b, SmallAircraft) }, cities, DemandModel);
 
         var briefing = BriefingGenerator.Generate(quarter1, quarter2);
 
@@ -106,7 +111,7 @@ public class BriefingGeneratorTests
         // action cap so every order is applied, isolating the briefing's
         // own 5-item cap from budget-driven rejections (covered separately
         // in QuarterEngineTests).
-        var orders = cities.Skip(1).Select(spoke => (QuarterOrder)new RouteOrder(hub, spoke, Aircraft, 3)).ToArray();
+        var orders = cities.Skip(1).Select(spoke => (QuarterOrder)new RouteOrder(hub, spoke, Aircraft)).ToArray();
         var quarter = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), currentActionCap: 20, orders, cities, DemandModel);
 
         var briefing = BriefingGenerator.Generate(null, quarter);
@@ -119,7 +124,7 @@ public class BriefingGeneratorTests
     {
         var cities = Enumerable.Range(0, 5).Select(i => MakeCity($"c{i}", i, i, 50)).ToList();
         var hub = cities[0];
-        var orders = cities.Skip(1).Select(spoke => (QuarterOrder)new RouteOrder(hub, spoke, Aircraft, 3)).ToArray();
+        var orders = cities.Skip(1).Select(spoke => (QuarterOrder)new RouteOrder(hub, spoke, Aircraft)).ToArray();
 
         var quarter = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, orders, cities, DemandModel);
         var briefing = BriefingGenerator.Generate(null, quarter);
@@ -154,7 +159,7 @@ public class BriefingGeneratorTests
         var a = MakeCity("a", 0, 0, 50);
         var b = MakeCity("b", 1, 1, 50);
         var cities = new[] { a, b };
-        var orders = new QuarterOrder[] { new RouteOrder(a, b, Aircraft, 3), new HireExecutiveOrder() };
+        var orders = new QuarterOrder[] { new RouteOrder(a, b, Aircraft), new HireExecutiveOrder() };
 
         var quarter = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, orders, cities, DemandModel);
         var briefing = BriefingGenerator.Generate(null, quarter);

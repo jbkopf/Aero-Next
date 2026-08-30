@@ -12,9 +12,9 @@ namespace AeroNext.Core.Ai;
 /// doesn't yet touch, if it can also afford a contested action (per
 /// CLAUDE.md — negotiations are "blind" even for a skilled human, so not
 /// checking the target's remaining gate capacity before bidding isn't a
-/// missing smarts, it's true to the mechanic); and always bumps frequency
-/// on its own best-performing existing route (free, per CLAUDE.md — adding
-/// frequency to a served pair costs nothing).
+/// missing smarts, it's true to the mechanic); and tries to grow its own
+/// best-performing existing route by assigning it another aircraft (M32 —
+/// no longer free; competes for the same action budget as everything else).
 ///
 /// Not trying to play well — CLAUDE.md's game is always exactly 4 airlines,
 /// so this exists because the sim can never run a representative quarter
@@ -25,7 +25,7 @@ namespace AeroNext.Core.Ai;
 /// hiring or alliance courting of its own — M9's alliance mechanic has no
 /// consequence that would change this AI's route decisions, so extending it
 /// there would be cosmetic. Range-awareness (M11), fleet availability
-/// (M13), and now real fleet *ownership* (QuarterEngine's fleet-aware
+/// (M13), and real fleet *ownership* (QuarterEngine's fleet-aware
 /// RouteOrder check) are different: an out-of-range, not-yet-available, or
 /// unowned-aircraft order is rejected today, for real — so this AI must
 /// never propose one, the same "never attempt what will predictably fail"
@@ -35,8 +35,6 @@ namespace AeroNext.Core.Ai;
 /// </summary>
 public static class BaselineAi
 {
-    private const int NewRouteWeeklyRoundTrips = 3;
-    private const int FrequencyIncrement = 2;
     private static readonly Money NegotiationBidAmount = Money.FromDollars(2_000_000);
 
     /// <param name="eraAvailableTypes">
@@ -66,21 +64,48 @@ public static class BaselineAi
         var orders = new List<QuarterOrder>();
         var spent = 0;
 
+        // Reserved this planning pass but not yet actually assigned in
+        // ownFleet (QuarterEngine hasn't run yet) - tracked locally so the
+        // new-pair search below doesn't also propose the same idle unit
+        // this step already claimed, which QuarterEngine would then
+        // reject as a wasted action.
+        var reservedUnitIds = new HashSet<int>();
+
         var bestExisting = FindBestPerformingRoute(currentRoutes, demandModel);
-        if (bestExisting is not null)
+        if (bestExisting is not null && spent + 1 <= actionCap)
         {
-            orders.Add(new RouteOrder(
-                bestExisting.Origin, bestExisting.Destination, bestExisting.Aircraft, bestExisting.WeeklyRoundTrips + FrequencyIncrement));
+            var idleUnit = ownFleet.Idle
+                .Where(u => u.Type.Id == bestExisting.Aircraft.Id)
+                .OrderBy(u => u.Id)
+                .FirstOrDefault();
+
+            if (idleUnit is not null)
+            {
+                orders.Add(new RouteOrder(bestExisting.Origin, bestExisting.Destination, bestExisting.Aircraft));
+                reservedUnitIds.Add(idleUnit.Id);
+                spent += 1;
+            }
+            else if (spent + 2 <= actionCap)
+            {
+                // Nothing idle of this route's own type - lease one more
+                // and add it in the same batch, mirroring the new-pair
+                // fallback below. No "best available type" search needed
+                // here: growing an existing route requires the exact type
+                // already flying it - QuarterEngine rejects a mismatch.
+                orders.Add(new LeaseAircraftOrder(bestExisting.Aircraft, Quantity: 1));
+                orders.Add(new RouteOrder(bestExisting.Origin, bestExisting.Destination, bestExisting.Aircraft));
+                spent += 2;
+            }
         }
 
         if (spent + 1 <= actionCap)
         {
-            var idleBest = FindBestUnservedPairUsingIdleFleet(currentRoutes, allCities, demandModel, ownFleet);
+            var idleBest = FindBestUnservedPairUsingIdleFleet(currentRoutes, allCities, demandModel, ownFleet, reservedUnitIds);
 
             if (idleBest is not null)
             {
                 var (pair, aircraft) = idleBest.Value;
-                orders.Add(new RouteOrder(pair.Origin, pair.Destination, aircraft, NewRouteWeeklyRoundTrips));
+                orders.Add(new RouteOrder(pair.Origin, pair.Destination, aircraft));
                 spent += 1;
             }
             else if (spent + 2 <= actionCap)
@@ -99,7 +124,7 @@ public static class BaselineAi
                 if (bestAircraft is not null && bestUnserved is not null)
                 {
                     orders.Add(new LeaseAircraftOrder(bestAircraft, Quantity: 1));
-                    orders.Add(new RouteOrder(bestUnserved.Origin, bestUnserved.Destination, bestAircraft, NewRouteWeeklyRoundTrips));
+                    orders.Add(new RouteOrder(bestUnserved.Origin, bestUnserved.Destination, bestAircraft));
                     spent += 2;
                 }
             }
@@ -123,11 +148,14 @@ public static class BaselineAi
     /// currently has an idle unit of — searched per distinct idle type,
     /// then the single best result kept, so a smaller idle jet doesn't get
     /// passed over just because a bigger one happens to sort first.
+    /// reservedUnitIds excludes units another step in this same planning
+    /// pass already claimed (see DecideOrders).
     /// </summary>
     private static (PairDemand Pair, AircraftType Aircraft)? FindBestUnservedPairUsingIdleFleet(
-        IReadOnlyList<Route> currentRoutes, IReadOnlyList<City> allCities, GravityDemandModel demandModel, AirlineFleet ownFleet)
+        IReadOnlyList<Route> currentRoutes, IReadOnlyList<City> allCities, GravityDemandModel demandModel, AirlineFleet ownFleet, IReadOnlySet<int> reservedUnitIds)
     {
         var candidates = ownFleet.Idle
+            .Where(u => !reservedUnitIds.Contains(u.Id))
             .Select(u => u.Type)
             .Distinct()
             .Select(type => (Pair: FindBestUnservedPair(currentRoutes, allCities, demandModel, type), Aircraft: type))

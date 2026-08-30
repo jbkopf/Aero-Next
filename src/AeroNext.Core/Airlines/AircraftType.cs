@@ -21,6 +21,11 @@ namespace AeroNext.Core.Airlines;
 /// for newer types (real jet-age and high-bypass-turbofan efficiency
 /// gains) — see <see cref="AeroNext.Core.Finance.FinancialResolver"/>,
 /// which reads this per aircraft rather than a single global placeholder.
+/// CruiseSpeedKmh defaults to 900 (a generic jet-age figure) for the same
+/// reason — a synthetic test aircraft's derived weekly-round-trip capacity
+/// (see <see cref="FlightPerformance"/>) shouldn't have to think about
+/// performance data. Only the real catalog's named aircraft state their
+/// own historically-reasonable speed.
 /// </summary>
 public sealed record AircraftType(
     string Id,
@@ -32,4 +37,5 @@ public sealed record AircraftType(
     int AvailableFromYear = 1900,
     string Manufacturer = "",
     Region? ManufacturerRegion = null,
-    double CostPerAvailableSeatKm = 0.09);
+    double CostPerAvailableSeatKm = 0.09,
+    double CruiseSpeedKmh = 900.0);

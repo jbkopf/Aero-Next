@@ -66,8 +66,11 @@ Actions are classified by **how they resolve under simultaneity**:
 - **Court an alliance partner** — a regional carrier joins only one alliance.
 
 ### Market (no shared object, but choices feed the same demand pool)
-- **Enter a new city-pair** — costs an action. Adding frequency to a pair you
-  already serve is free.
+- **Enter a new city-pair, or assign another aircraft to a pair you already
+  serve** — costs an action either time. How many round trips a single
+  aircraft can fly each week is derived from its real performance and the
+  route's distance, not a number the player picks; growing a route's
+  capacity means committing another aircraft to it, not turning a dial.
 - Fare stance, service level, marketing — free to set (they're postures, not
   numbers; see below).
 

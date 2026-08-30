@@ -16,11 +16,14 @@ namespace AeroNext.Core.Turns;
 /// Budget rule: orders are scanned in list order, tracking cumulative
 /// spend. An order that fits within what's left of the cap is applied and
 /// consumes its cost; an order that would exceed the remaining cap is
-/// rejected — but scanning continues, so a free order (RouteOrder on an
-/// already-served pair, or any HireExecutiveOrder) later in the list still
-/// goes through even after an earlier, costlier order was rejected. Only
-/// orders that don't fit get skipped, not everything after them — a hard
-/// truncate-the-rest rule would needlessly block actions that cost nothing.
+/// rejected — but scanning continues, so a free order (any
+/// HireExecutiveOrder/RefinanceOrder/RetireAircraftOrder) later in the
+/// list still goes through even after an earlier, costlier order was
+/// rejected. Only orders that don't fit get skipped, not everything after
+/// them — a hard truncate-the-rest rule would needlessly block actions
+/// that cost nothing. Every RouteOrder costs 1 action now (M32) — growing
+/// an already-served pair by assigning another aircraft is no longer free;
+/// only genuinely private actions are.
 ///
 /// A RouteOrder the aircraft can't physically fly (M11's range constraint)
 /// is rejected before the budget check even runs — the action never gets
@@ -76,6 +79,18 @@ public static class QuarterEngine
         var year = Timeline.YearForQuarter(quarterNumber);
         var workingFleet = fleet;
 
+        // Fleet-aware mode only (M32): the aircraft type a pair is
+        // committed to this quarter, seeded lazily from currentRoutes and
+        // updated as RouteOrders are accepted. Unlike Cost() (which is
+        // deliberately evaluated against quarter-start state only, so cost
+        // stays order-independent within a batch), type-consistency is a
+        // real correctness constraint — Route has exactly one Aircraft
+        // field — so two orders touching the same pair in the same batch
+        // must be checked against each other, not just against
+        // quarter-start state, or the second could consume a fleet unit
+        // for a type ApplyRouteOrders then silently drops.
+        var committedTypeByPair = new Dictionary<(string, string), AircraftType>();
+
         foreach (var order in orders)
         {
             if (order is RouteOrder ro && !ro.IsWithinRange)
@@ -118,21 +133,34 @@ public static class QuarterEngine
 
             if (order is RouteOrder routeOrder && workingFleet is not null)
             {
-                var existingRoute = currentRoutes.FirstOrDefault(r => r.Origin.Id == routeOrder.Origin.Id && r.Destination.Id == routeOrder.Destination.Id);
-                var needsNewUnit = existingRoute is null || existingRoute.Aircraft.Id != routeOrder.Aircraft.Id;
+                var pairKey = (routeOrder.Origin.Id, routeOrder.Destination.Id);
 
-                if (needsNewUnit)
+                if (!committedTypeByPair.TryGetValue(pairKey, out var committedType))
                 {
-                    unitToAssign = workingFleet.Idle
-                        .Where(u => u.Type.Id == routeOrder.Aircraft.Id)
-                        .OrderBy(u => u.Id)
-                        .FirstOrDefault();
+                    var existingRoute = currentRoutes.FirstOrDefault(r => r.Origin.Id == routeOrder.Origin.Id && r.Destination.Id == routeOrder.Destination.Id);
+                    committedType = existingRoute?.Aircraft;
+                }
 
-                    if (unitToAssign is null)
-                    {
-                        rejected.Add(order);
-                        continue;
-                    }
+                if (committedType is not null && committedType.Id != routeOrder.Aircraft.Id)
+                {
+                    // Swapping a route's aircraft type isn't supported yet
+                    // — there's no detach action to free the old units
+                    // (that's future work). Every RouteOrder now means
+                    // "assign one more of this exact type," so a mismatch
+                    // is rejected outright rather than silently replacing.
+                    rejected.Add(order);
+                    continue;
+                }
+
+                unitToAssign = workingFleet.Idle
+                    .Where(u => u.Type.Id == routeOrder.Aircraft.Id)
+                    .OrderBy(u => u.Id)
+                    .FirstOrDefault();
+
+                if (unitToAssign is null)
+                {
+                    rejected.Add(order);
+                    continue;
                 }
             }
 
@@ -159,14 +187,8 @@ public static class QuarterEngine
             if (order is RouteOrder appliedRouteOrder && unitToAssign is not null && workingFleet is not null)
             {
                 var routeKey = RouteKeyString(appliedRouteOrder.Origin, appliedRouteOrder.Destination);
-                var currentlyAssigned = workingFleet.Units.FirstOrDefault(u => u.AssignedRouteKey == routeKey);
-
-                if (currentlyAssigned is not null)
-                {
-                    workingFleet = FleetLedger.Unassign(workingFleet, currentlyAssigned.Id);
-                }
-
                 workingFleet = FleetLedger.Assign(workingFleet, unitToAssign.Id, routeKey);
+                committedTypeByPair[(appliedRouteOrder.Origin.Id, appliedRouteOrder.Destination.Id)] = appliedRouteOrder.Aircraft;
             }
 
             if (order is RetireAircraftOrder && unitToRetire is not null && workingFleet is not null)
@@ -192,20 +214,17 @@ public static class QuarterEngine
     }
 
     /// <summary>
-    /// 1 action for a pair not already in currentRoutes (entering a new
-    /// city-pair); 0 for a pair already served (adding frequency is free,
-    /// per CLAUDE.md) and for private actions. Negotiations, aircraft
-    /// orders, leases, and alliance courting always cost 1 — contested
-    /// actions (and leasing, which spends the same attention even though
-    /// it isn't contested) have no free variant, unlike market actions.
-    /// Evaluated against the quarter's starting routes for every order in
-    /// the batch, not against other orders being applied in the same
-    /// batch — keeps cost order-independent within a quarter, matching the
-    /// "collect, then resolve" simultaneity this engine is built around.
+    /// 1 action for a RouteOrder always now (M32) — opening a new pair and
+    /// assigning another aircraft to a pair already served cost the same;
+    /// the old free-frequency-bump variant is gone, since frequency is no
+    /// longer a number the player picks. 0 for private actions.
+    /// Negotiations, aircraft orders, leases, and alliance courting always
+    /// cost 1 — contested actions (and leasing, which spends the same
+    /// attention even though it isn't contested) have no free variant.
     /// </summary>
     public static int Cost(QuarterOrder order, IReadOnlyList<Route> currentRoutes) => order switch
     {
-        RouteOrder ro => currentRoutes.Any(r => r.Origin.Id == ro.Origin.Id && r.Destination.Id == ro.Destination.Id) ? 0 : 1,
+        RouteOrder => 1,
         HireExecutiveOrder => 0,
         RefinanceOrder => 0,
         RetireAircraftOrder => 0,
@@ -216,14 +235,27 @@ public static class QuarterEngine
         _ => throw new NotSupportedException($"Unknown order type: {order.GetType().Name}"),
     };
 
+    /// <summary>
+    /// Each applied RouteOrder means "assign one more aircraft of this
+    /// type" (M32): folded sequentially in submission order, adding 1 to
+    /// AircraftCount when the type matches what's already there for that
+    /// pair, or starting fresh at 1 when it doesn't (a brand-new pair, or
+    /// — permissive/no-fleet mode only, since fleet-aware mode rejects
+    /// this in RunQuarter before it ever reaches here — a type change).
+    /// This single fold is correct in both modes without needing to know
+    /// which one produced `orders`.
+    /// </summary>
     private static IReadOnlyList<Route> ApplyRouteOrders(IReadOnlyList<Route> currentRoutes, IEnumerable<RouteOrder> orders)
     {
         var byKey = currentRoutes.ToDictionary(RouteKey);
 
         foreach (var order in orders)
         {
-            byKey[(order.Origin.Id, order.Destination.Id)] =
-                new Route(order.Origin, order.Destination, order.Aircraft, order.WeeklyRoundTrips);
+            var key = (order.Origin.Id, order.Destination.Id);
+            var sameTypeAlreadyThere = byKey.TryGetValue(key, out var existing) && existing.Aircraft.Id == order.Aircraft.Id;
+            var newCount = sameTypeAlreadyThere ? existing!.AircraftCount + 1 : 1;
+
+            byKey[key] = new Route(order.Origin, order.Destination, order.Aircraft, newCount);
         }
 
         return byKey.Values

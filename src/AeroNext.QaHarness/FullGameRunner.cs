@@ -38,7 +38,6 @@ public static class FullGameRunner
 {
     private static readonly Money DefaultStartingDebt = Money.FromDollars(10_000_000);
     private const double DefaultInterestRatePerQuarter = 0.02;
-    private const int GuaranteedRouteWeeklyRoundTrips = 3;
 
     /// <summary>Anything past this is almost certainly a sign-flip/overflow bug, not a plausible airline balance.</summary>
     private static readonly Money SaneMagnitudeBound = Money.FromDollars(1_000_000_000_000);
@@ -142,8 +141,7 @@ public static class FullGameRunner
                         new RouteOrder(
                             seatByName[name].StartingCity,
                             conditionsByName[name].GuaranteedRouteDestination,
-                            conditionsByName[name].StartingAircraft,
-                            GuaranteedRouteWeeklyRoundTrips),
+                            conditionsByName[name].StartingAircraft),
                     }
                     : BaselineAi.DecideOrders(routes[name], caps[name], cities, yearDemandModel, availableFleet, fleets[name]).ToArray();
 

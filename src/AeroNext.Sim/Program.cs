@@ -59,10 +59,10 @@ var regional = new AircraftType("dc3", "Douglas DC-3", Seats: 28, RangeKm: 2_400
 
 var airline = new Airline("Trans-Aero", new[]
 {
-    new Route(byId["jfk"], byId["ord"], narrowbody, WeeklyRoundTrips: 7),  // dense short-haul: capacity-constrained
-    new Route(byId["jfk"], byId["lax"], narrowbody, WeeklyRoundTrips: 1),  // transcon: capacity-constrained
-    new Route(byId["jfk"], byId["lhr"], narrowbody, WeeklyRoundTrips: 3),  // transatlantic gateway: capacity-constrained
-    new Route(byId["jfk"], byId["yqx"], regional, WeeklyRoundTrips: 1),    // Gander refueling stop: demand-constrained
+    new Route(byId["jfk"], byId["ord"], narrowbody, AircraftCount: 1),  // dense short-haul
+    new Route(byId["jfk"], byId["lax"], narrowbody, AircraftCount: 1),  // transcon
+    new Route(byId["jfk"], byId["lhr"], narrowbody, AircraftCount: 1),  // transatlantic gateway
+    new Route(byId["jfk"], byId["yqx"], regional, AircraftCount: 1),    // Gander refueling stop
 });
 
 var network = RouteEvaluator.EvaluateNetwork(airline.Routes, demandModel);
@@ -90,9 +90,9 @@ foreach (var load in network)
 //      reading of the same routes can't? (the milestone's core question)
 //   2. Does the hub's total captured demand approach/beat the regional
 //      network's? (the M2 open question about intercontinental pools)
-const int weeklyRoundTrips = 3;
+const int spokeAircraftCount = 1;
 
-Route Spoke(string originId, string destId) => new(byId[originId], byId[destId], narrowbody, weeklyRoundTrips);
+Route Spoke(string originId, string destId) => new(byId[originId], byId[destId], narrowbody, spokeAircraftCount);
 
 var hubRoutes = new[]
 {
@@ -155,32 +155,32 @@ var quarterlyOrders = new List<IReadOnlyList<QuarterOrder>>
 {
     new QuarterOrder[] // Q1: found the hub (2 of 3 actions — entering a new pair costs 1)
     {
-        new RouteOrder(byId["jfk"], byId["ord"], narrowbody, WeeklyRoundTrips: 3),
-        new RouteOrder(byId["jfk"], byId["lhr"], narrowbody, WeeklyRoundTrips: 3),
+        new RouteOrder(byId["jfk"], byId["ord"], narrowbody),
+        new RouteOrder(byId["jfk"], byId["lhr"], narrowbody),
     },
     new QuarterOrder[] // Q2: extend to Asia, and hire an executive (free — raises next quarter's cap)
     {
-        new RouteOrder(byId["jfk"], byId["hnd"], narrowbody, WeeklyRoundTrips: 3),
+        new RouteOrder(byId["jfk"], byId["hnd"], narrowbody),
         new HireExecutiveOrder(),
     },
     Array.Empty<QuarterOrder>(), // Q3: quiet quarter, nothing ordered
     new QuarterOrder[] // Q4: cap is now 4 — 4 new routes fit, a 5th gets rejected over budget
     {
-        new RouteOrder(byId["jfk"], byId["gru"], narrowbody, WeeklyRoundTrips: 3),
-        new RouteOrder(byId["jfk"], byId["cai"], narrowbody, WeeklyRoundTrips: 3),
-        new RouteOrder(byId["jfk"], byId["mia"], narrowbody, WeeklyRoundTrips: 3),
-        new RouteOrder(byId["jfk"], byId["lax"], narrowbody, WeeklyRoundTrips: 3),
-        new RouteOrder(byId["jfk"], byId["sfo"], narrowbody, WeeklyRoundTrips: 3), // over budget
+        new RouteOrder(byId["jfk"], byId["gru"], narrowbody),
+        new RouteOrder(byId["jfk"], byId["cai"], narrowbody),
+        new RouteOrder(byId["jfk"], byId["mia"], narrowbody),
+        new RouteOrder(byId["jfk"], byId["lax"], narrowbody),
+        new RouteOrder(byId["jfk"], byId["sfo"], narrowbody), // over budget
     },
-    new QuarterOrder[] // Q5: frequency bump on an existing pair is free — doesn't touch the budget
+    new QuarterOrder[] // Q5: assigning a 2nd aircraft to an existing pair (M32 — costs an action same as a new pair, no longer free)
     {
-        new RouteOrder(byId["jfk"], byId["ord"], narrowbody, WeeklyRoundTrips: 7),
+        new RouteOrder(byId["jfk"], byId["ord"], narrowbody),
     },
 };
 
 static string DescribeOrder(QuarterOrder order) => order switch
 {
-    RouteOrder ro => $"{ro.Origin.Id}-{ro.Destination.Id}@{ro.WeeklyRoundTrips}/wk",
+    RouteOrder ro => $"{ro.Origin.Id}-{ro.Destination.Id} ({ro.Aircraft.Name})",
     HireExecutiveOrder => "hire executive",
     NegotiationOrder no => $"bid {no.Bid} @ {no.TargetCity.Id}",
     AircraftOrder ao => $"order {ao.Quantity}x {ao.Type.Name}",
@@ -234,22 +234,22 @@ for (var q = 0; q < quarterlyOrders.Count; q++)
 // operator — the "demand-constrained" regime where competition actually has
 // something to redistribute (a busy route like JFK-ORD is capacity-
 // constrained for any realistic small fleet, so nobody's share would move).
-var baselineA = new Airline("Trans-Aero", new[] { new Route(byId["jfk"], byId["yqx"], regional, WeeklyRoundTrips: 1) });
-var boostedA = new Airline("Trans-Aero", new[] { new Route(byId["jfk"], byId["yqx"], regional, WeeklyRoundTrips: 3) });
-var rivalB = new Airline("Northern Cross", new[] { new Route(byId["jfk"], byId["yqx"], regional, WeeklyRoundTrips: 1) });
+var baselineA = new Airline("Trans-Aero", new[] { new Route(byId["jfk"], byId["yqx"], regional, AircraftCount: 1) });
+var boostedA = new Airline("Trans-Aero", new[] { new Route(byId["jfk"], byId["yqx"], regional, AircraftCount: 3) });
+var rivalB = new Airline("Northern Cross", new[] { new Route(byId["jfk"], byId["yqx"], regional, AircraftCount: 1) });
 
 var beforeBoost = CompetitiveMarket.Resolve(new[] { baselineA, rivalB }, cities, demandModel);
 var afterBoost = CompetitiveMarket.Resolve(new[] { boostedA, rivalB }, cities, demandModel);
 
 Console.WriteLine();
 Console.WriteLine("--- M6: shared demand pool, JFK-YQX (Gander refueling stop) ---");
-Console.WriteLine($"Before: Trans-Aero 1 rt/wk vs Northern Cross 1 rt/wk");
+Console.WriteLine($"Before: Trans-Aero 1 aircraft vs Northern Cross 1 aircraft");
 Console.WriteLine($"  Trans-Aero carried:    {beforeBoost.TotalCarried(baselineA),6:N0}");
 Console.WriteLine($"  Northern Cross carried: {beforeBoost.TotalCarried(rivalB),6:N0}");
-Console.WriteLine($"After: Trans-Aero boosts to 3 rt/wk, Northern Cross unchanged");
+Console.WriteLine($"After: Trans-Aero boosts to 3 aircraft, Northern Cross unchanged");
 Console.WriteLine($"  Trans-Aero carried:    {afterBoost.TotalCarried(boostedA),6:N0}");
 Console.WriteLine($"  Northern Cross carried: {afterBoost.TotalCarried(rivalB),6:N0}" +
-    $"  (was {beforeBoost.TotalCarried(rivalB):N0} — eroded by Trans-Aero's added frequency, not by anything Northern Cross did)");
+    $"  (was {beforeBoost.TotalCarried(rivalB):N0} — eroded by Trans-Aero's added capacity, not by anything Northern Cross did)");
 
 // Finishes M4's conditional pass: does the hub beat regional once the
 // regional triangle is actually contested by multiple airlines, instead of
@@ -292,8 +292,8 @@ var leagueCaps = leagueNames.ToDictionary(n => n, _ => QuarterEngine.BaseActionC
 
 var humanScript = new List<IReadOnlyList<QuarterOrder>>
 {
-    new QuarterOrder[] { new RouteOrder(byId["jfk"], byId["lhr"], narrowbody, WeeklyRoundTrips: 3) },
-    new QuarterOrder[] { new RouteOrder(byId["jfk"], byId["hnd"], narrowbody, WeeklyRoundTrips: 3) },
+    new QuarterOrder[] { new RouteOrder(byId["jfk"], byId["lhr"], narrowbody) },
+    new QuarterOrder[] { new RouteOrder(byId["jfk"], byId["hnd"], narrowbody) },
     Array.Empty<QuarterOrder>(),
 };
 
@@ -462,8 +462,8 @@ Console.WriteLine($"JFK-LHR direct: {new Route(byId["jfk"], lhr, narrowbody, 1).
 
 var earlyEraRoutes = new[]
 {
-    new Route(byId["jfk"], gate, constellation, WeeklyRoundTrips: 3), // JFK-Gander
-    new Route(gate, lhr, constellation, WeeklyRoundTrips: 3),          // Gander-LHR
+    new Route(byId["jfk"], gate, constellation, AircraftCount: 1), // JFK-Gander
+    new Route(gate, lhr, constellation, AircraftCount: 1),          // Gander-LHR
 };
 var earlyEraPlan = NetworkPlanner.Plan(earlyEraRoutes, cities, demandModel);
 var earlyEraJfkLhr = earlyEraPlan.Itineraries.Single(i =>
@@ -472,7 +472,7 @@ var earlyEraJfkLhr = earlyEraPlan.Itineraries.Single(i =>
 Console.WriteLine($"Early era (Constellation, range {constellation.RangeKm:N0} km): JFK-LHR resolves as {earlyEraJfkLhr.Itinerary.Kind} " +
     $"— {earlyEraJfkLhr.Itinerary.Legs.Count} leg(s), via {gate.Id}.");
 
-var jetEraRoutes = new[] { new Route(byId["jfk"], lhr, narrowbody, WeeklyRoundTrips: 3) };
+var jetEraRoutes = new[] { new Route(byId["jfk"], lhr, narrowbody, AircraftCount: 1) };
 var jetEraPlan = NetworkPlanner.Plan(jetEraRoutes, cities, demandModel);
 var jetEraJfkLhr = jetEraPlan.Itineraries.Single(i => i.Itinerary.Origin.Id == "jfk" && i.Itinerary.Destination.Id == "lhr");
 Console.WriteLine($"Jet era (Boeing 707, range {narrowbody.RangeKm:N0} km): JFK-LHR resolves as {jetEraJfkLhr.Itinerary.Kind} " +
@@ -481,7 +481,7 @@ Console.WriteLine($"Jet era (Boeing 707, range {narrowbody.RangeKm:N0} km): JFK-
 // A range-blind order attempt gets rejected with a clear reason, not a silently dead route.
 var rejectedAttempt = QuarterEngine.RunQuarter(
     1, Array.Empty<Route>(), QuarterEngine.BaseActionCap,
-    new QuarterOrder[] { new RouteOrder(byId["jfk"], lhr, constellation, WeeklyRoundTrips: 3) },
+    new QuarterOrder[] { new RouteOrder(byId["jfk"], lhr, constellation) },
     cities, demandModel);
 var rejectionBriefing = BriefingGenerator.Generate(null, rejectedAttempt);
 Console.WriteLine($"Ordering a Constellation direct on JFK-LHR: {rejectionBriefing.Single().Message}");
@@ -519,7 +519,7 @@ Console.WriteLine("--- M12: bankruptcy trigger — reckless overexpansion on thi
 var recklessCities = new[] { byId["yqx"], byId["ter"], byId["awk"] }; // three of the thinnest chokepoints in the dataset
 var recklessAirline = new Airline("Reckless Air", new[]
 {
-    new Route(recklessCities[0], recklessCities[1], widebody, WeeklyRoundTrips: 14), // huge capacity, negligible demand
+    new Route(recklessCities[0], recklessCities[1], widebody, AircraftCount: 14), // huge capacity, negligible demand
 });
 var recklessMarket = CompetitiveMarket.Resolve(new[] { recklessAirline }, cities, demandModel);
 var recklessState = FinancialState.Start(Money.FromDollars(500_000), Money.FromDollars(5_000_000), interestRatePerQuarter: 0.05);
@@ -568,17 +568,21 @@ string ChokepointStatus(int year)
 }
 
 // Chosen to capture the actual arc found by running this: re-measured
-// after M26 wired real lease fees + purchase/retirement cash into this
-// loop (see docs/FINANCIAL_MODEL_ROADMAP.md). No peak anymore - cash
-// declines monotonically from quarter 1 ($19.8M) straight to bankruptcy
-// at quarter 25 (1961, -$135.6K), never once rising above its starting
-// figure. BaselineAi leases a fresh aircraft for essentially every new
-// route (M25b), and each one now carries a real, recurring 4%-of-cost
-// fee every quarter forever - the accumulating fleet of leases outpaces
-// route revenue well before the campaign's early growth curve catches up.
-// 121 stays in the checkpoint set as a stickiness sanity check: bankrupt
-// airlines' cash stays frozen for the ~220 quarters that follow.
-var checkpoints = new HashSet<int> { 1, 12, 24, 25, 121, campaignQuarters };
+// after M32 made route growth cost real budget (docs/ROUTE_CAPACITY_ROADMAP.md).
+// BaselineAi now spends its 3-action budget on growing its best route
+// (idle-or-lease, 1-2 actions) before anything else - once nothing's idle
+// (every quarter after the first), that alone costs 2, leaving only 1
+// more: exactly enough for a negotiation bid, never enough for a second
+// new pair (which also needs a lease). Route COUNT freezes at 2 from
+// quarter 3 onward for exactly this reason - the AI keeps piling more
+// aircraft onto those same two routes long after demand saturates them,
+// paying real lease fees for capacity nobody's buying. Bankruptcy at
+// quarter 16 (1958, -$2.67M), frozen from there - though carried
+// passengers keep climbing after that on the frozen routes anyway, since
+// global demand keeps growing across the decades even with static
+// capacity. 121 stays in the checkpoint set as a stickiness sanity check:
+// bankrupt airlines' cash stays frozen for the ~230 quarters that follow.
+var checkpoints = new HashSet<int> { 1, 11, 15, 16, 121, campaignQuarters };
 
 var campaignDominance = RegionalDominanceState.Empty;
 string? campaignWinner = null;
@@ -789,7 +793,7 @@ foreach (var seat in setupSeats)
     Console.WriteLine($"  {seat.AirlineName,-18} cash {conditions.StartingCash,14}  " +
         $"{conditions.AircraftQuantity}x {conditions.StartingAircraft.Name,-20} -> {conditions.GuaranteedRouteDestination.Name}");
 
-    var order = new RouteOrder(seat.StartingCity, conditions.GuaranteedRouteDestination, conditions.StartingAircraft, WeeklyRoundTrips: 3);
+    var order = new RouteOrder(seat.StartingCity, conditions.GuaranteedRouteDestination, conditions.StartingAircraft);
     var quarter1 = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, cities, demandModel);
     Console.WriteLine($"    Quarter 1 route order: {(quarter1.RejectedOrders.Count == 0 ? "accepted" : "REJECTED")}");
 }
@@ -817,7 +821,7 @@ void RunSetupThroughQuarter1(string label, IReadOnlyList<HumanPlayerChoice> huma
     foreach (var seat in seats)
     {
         var conditions = conditionsBySeat[seat];
-        var order = new RouteOrder(seat.StartingCity, conditions.GuaranteedRouteDestination, conditions.StartingAircraft, WeeklyRoundTrips: 3);
+        var order = new RouteOrder(seat.StartingCity, conditions.GuaranteedRouteDestination, conditions.StartingAircraft);
         var quarter1 = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, cities, demandModel);
 
         routesBySeat[seat] = quarter1.Routes;

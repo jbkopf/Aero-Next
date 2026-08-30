@@ -174,7 +174,7 @@ public class CompetitiveMarketTests
         var a = MakeCity("a", 0, 0, 100);
         var b = MakeCity("b", 1, 1, 100);
         var tinyAircraft = new AircraftType("t", "Test", Seats: 10); // capacity-constrained, so LF pins at 1.0
-        var airline = new Airline("A", new[] { new Route(a, b, tinyAircraft, WeeklyRoundTrips: 1) });
+        var airline = new Airline("A", new[] { new Route(a, b, tinyAircraft, AircraftCount: 1) });
 
         var result = CompetitiveMarket.Resolve(new[] { airline }, new[] { a, b }, demandModel);
 
@@ -190,7 +190,7 @@ public class CompetitiveMarketTests
         var a = MakeCity("a", 0, 0, 20);
         var b = MakeCity("b", 5, 5, 20);
         var aircraft = new AircraftType("t", "Test", Seats: 400);
-        var airline = new Airline("A", new[] { new Route(a, b, aircraft, WeeklyRoundTrips: 0) });
+        var airline = new Airline("A", new[] { new Route(a, b, aircraft, AircraftCount: 0) });
 
         var result = CompetitiveMarket.Resolve(new[] { airline }, new[] { a, b }, demandModel);
 

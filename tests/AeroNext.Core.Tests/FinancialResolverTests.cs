@@ -22,7 +22,7 @@ public class FinancialResolverTests
         var a = MakeCity("a", 0, 0, 100);
         var b = MakeCity("b", 1, 1, 100); // close + heavy: demand swamps capacity -> full load factor
         var aircraft = new AircraftType("t", "Test", Seats: 10);
-        var airline = new Airline("A", new[] { new Route(a, b, aircraft, WeeklyRoundTrips: 1) });
+        var airline = new Airline("A", new[] { new Route(a, b, aircraft, AircraftCount: 1) });
         var market = CompetitiveMarket.Resolve(new[] { airline }, new[] { a, b }, DemandModel);
         var state = FinancialState.Start(Money.FromDollars(1_000_000), Money.Zero, interestRatePerQuarter: 0.0);
 
@@ -46,7 +46,7 @@ public class FinancialResolverTests
         var a = MakeCity("a", 0, 0, 1);
         var b = MakeCity("b", 60, 60, 1); // far + light: negligible demand
         var aircraft = new AircraftType("t", "Test", Seats: 400);
-        var airline = new Airline("A", new[] { new Route(a, b, aircraft, WeeklyRoundTrips: 10) });
+        var airline = new Airline("A", new[] { new Route(a, b, aircraft, AircraftCount: 1) });
         var market = CompetitiveMarket.Resolve(new[] { airline }, new[] { a, b }, DemandModel);
         var state = FinancialState.Start(Money.FromDollars(1_000_000), Money.Zero, interestRatePerQuarter: 0.0);
 
@@ -123,7 +123,7 @@ public class FinancialResolverTests
         var a = MakeCity("a", 0, 0, 100);
         var b = MakeCity("b", 1, 1, 100);
         var aircraft = new AircraftType("t", "Test", Seats: 10);
-        var airline = new Airline("A", new[] { new Route(a, b, aircraft, WeeklyRoundTrips: 1) });
+        var airline = new Airline("A", new[] { new Route(a, b, aircraft, AircraftCount: 1) });
         var market = CompetitiveMarket.Resolve(new[] { airline }, new[] { a, b }, DemandModel);
         var bankruptState = FinancialState.Start(Money.FromDollars(-500), Money.FromDollars(1_000_000), 0.05) with { IsBankrupt = true };
 
@@ -180,8 +180,8 @@ public class FinancialResolverTests
         var lowRate = new AircraftType("low", "Low", Seats: 100, CostPerAvailableSeatKm: 0.05);
         var highRate = new AircraftType("high", "High", Seats: 100, CostPerAvailableSeatKm: 0.20);
 
-        var lowAirline = new Airline("Low", new[] { new Route(a, b, lowRate, WeeklyRoundTrips: 5) });
-        var highAirline = new Airline("High", new[] { new Route(a, b, highRate, WeeklyRoundTrips: 5) });
+        var lowAirline = new Airline("Low", new[] { new Route(a, b, lowRate, AircraftCount: 1) });
+        var highAirline = new Airline("High", new[] { new Route(a, b, highRate, AircraftCount: 1) });
 
         var lowMarket = CompetitiveMarket.Resolve(new[] { lowAirline }, new[] { a, b }, DemandModel);
         var highMarket = CompetitiveMarket.Resolve(new[] { highAirline }, new[] { a, b }, DemandModel);
@@ -192,7 +192,10 @@ public class FinancialResolverTests
         var (_, highStatement) = FinancialResolver.Resolve(state, highAirline, highMarket, Array.Empty<QuarterOrder>());
 
         Assert.True(lowStatement.OperatingCost.Cents > 0);
-        Assert.Equal(highStatement.OperatingCost.Cents, lowStatement.OperatingCost.Cents * 4); // 0.20 / 0.05 = 4x
+        // 0.20 / 0.05 = 4x, within a cent — each side rounds independently
+        // (Math.Round on its own seats*distance*rate product), so an exact
+        // match isn't guaranteed at the cent level.
+        Assert.InRange(highStatement.OperatingCost.Cents, lowStatement.OperatingCost.Cents * 4 - 1, lowStatement.OperatingCost.Cents * 4 + 1);
     }
 
     [Fact]
@@ -201,8 +204,8 @@ public class FinancialResolverTests
         var a = MakeCity("a", 0, 0, 100);
         var b = MakeCity("b", 1, 1, 100);
         var bigAircraft = new AircraftType("t", "Test", Seats: 1000);
-        var winner = new Airline("Winner", new[] { new Route(a, b, bigAircraft, WeeklyRoundTrips: 10) });
-        var loser = new Airline("Loser", new[] { new Route(a, b, bigAircraft, WeeklyRoundTrips: 1) }, Quality: 0.0); // effectively no competitive weight
+        var winner = new Airline("Winner", new[] { new Route(a, b, bigAircraft, AircraftCount: 1) });
+        var loser = new Airline("Loser", new[] { new Route(a, b, bigAircraft, AircraftCount: 1) }, Quality: 0.0); // effectively no competitive weight
         var market = CompetitiveMarket.Resolve(new[] { winner, loser }, new[] { a, b }, DemandModel);
         var state = FinancialState.Start(Money.FromDollars(10_000_000), Money.Zero, interestRatePerQuarter: 0.0);
 

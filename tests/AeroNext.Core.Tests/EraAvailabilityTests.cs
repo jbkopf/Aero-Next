@@ -18,7 +18,7 @@ public class EraAvailabilityTests
         var a = MakeCity("a", 0, 0, 50);
         var b = MakeCity("b", 1, 1, 50);
         var futureAircraft = new AircraftType("t", "Test", Seats: 100, AvailableFromYear: 1995);
-        var order = new RouteOrder(a, b, futureAircraft, 3);
+        var order = new RouteOrder(a, b, futureAircraft);
 
         // Quarter 1 = 1955 (Timeline.StartYear) - decades before this aircraft exists.
         var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, new[] { a, b }, DemandModel);
@@ -33,7 +33,7 @@ public class EraAvailabilityTests
         var a = MakeCity("a", 0, 0, 50);
         var b = MakeCity("b", 1, 1, 50);
         var futureAircraft = new AircraftType("t", "Test", Seats: 100, AvailableFromYear: 1995);
-        var order = new RouteOrder(a, b, futureAircraft, 3);
+        var order = new RouteOrder(a, b, futureAircraft);
 
         // Quarter 161 = 1955 + 160/4 = 1995: the aircraft's debut year.
         var result = QuarterEngine.RunQuarter(161, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, new[] { a, b }, DemandModel);
@@ -83,7 +83,7 @@ public class EraAvailabilityTests
         var a = MakeCity("a", 0, 0, 50);
         var b = MakeCity("b", 1, 1, 50);
         var futureAircraft = new AircraftType("t", "Test", Seats: 100, AvailableFromYear: 1995);
-        var order = new RouteOrder(a, b, futureAircraft, 3);
+        var order = new RouteOrder(a, b, futureAircraft);
 
         var quarter = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, new[] { a, b }, DemandModel);
         var briefing = BriefingGenerator.Generate(null, quarter);
@@ -127,7 +127,7 @@ public class EraAvailabilityTests
         var a = MakeCity("a", 0, 0, 50);
         var b = MakeCity("b", 40, 40, 50);
         var futureShortRange = new AircraftType("t", "Test", Seats: 100, RangeKm: 100, AvailableFromYear: 2000);
-        var order = new RouteOrder(a, b, futureShortRange, 3);
+        var order = new RouteOrder(a, b, futureShortRange);
 
         var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, new[] { a, b }, DemandModel);
 

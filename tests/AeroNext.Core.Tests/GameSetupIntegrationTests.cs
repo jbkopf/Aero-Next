@@ -58,7 +58,7 @@ public class GameSetupIntegrationTests
         foreach (var seat in seats)
         {
             var conditions = conditionsBySeat[seat];
-            var order = new RouteOrder(seat.StartingCity, conditions.GuaranteedRouteDestination, conditions.StartingAircraft, WeeklyRoundTrips: 3);
+            var order = new RouteOrder(seat.StartingCity, conditions.GuaranteedRouteDestination, conditions.StartingAircraft);
             var quarter1 = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, Cities, DemandModel);
 
             Assert.Empty(quarter1.RejectedOrders);

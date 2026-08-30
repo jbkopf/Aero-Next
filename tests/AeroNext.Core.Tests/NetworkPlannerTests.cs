@@ -241,7 +241,7 @@ public class NetworkPlannerTests
         var a = MakeCity("a", 0, 0, 50);
         var b = MakeCity("b", 0, 10, 50);
         var aircraft = new AircraftType("t", "Test", Seats: 400);
-        var route = new Route(a, b, aircraft, WeeklyRoundTrips: 0); // suspended: zero capacity
+        var route = new Route(a, b, aircraft, AircraftCount: 0); // suspended: zero capacity
 
         var plan = NetworkPlanner.Plan(new[] { route }, new[] { a, b }, demandModel);
 

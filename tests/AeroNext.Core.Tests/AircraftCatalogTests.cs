@@ -299,6 +299,30 @@ public class AircraftCatalogTests
     }
 
     [Fact]
+    public void Load_ParsesCruiseSpeedKmh_WhenPresent()
+    {
+        const string json = """
+        [{ "id": "t", "name": "Test", "seats": 100, "rangeKm": 1000, "costDollars": 1, "productionRatePerQuarter": 4, "availableFromYear": 1960, "cruiseSpeedKmh": 850 }]
+        """;
+
+        var fleet = AircraftCatalog.Load(json);
+
+        Assert.Equal(850, fleet.Single().CruiseSpeedKmh);
+    }
+
+    [Fact]
+    public void Load_CruiseSpeedKmh_DefaultsTo900_WhenAbsent()
+    {
+        const string json = """
+        [{ "id": "t", "name": "Test", "seats": 100, "rangeKm": 1000, "costDollars": 1, "productionRatePerQuarter": 4, "availableFromYear": 1960 }]
+        """;
+
+        var fleet = AircraftCatalog.Load(json);
+
+        Assert.Equal(900, fleet.Single().CruiseSpeedKmh);
+    }
+
+    [Fact]
     public void Load_ConvertsCostDollarsToMoney()
     {
         const string json = """
@@ -357,6 +381,7 @@ public class AircraftCatalogTests
     [InlineData("""{ "id": "x", "name": "N", "seats": 100, "rangeKm": 0, "costDollars": 1, "productionRatePerQuarter": 4, "availableFromYear": 1960 }""")]
     [InlineData("""{ "id": "x", "name": "N", "seats": 100, "rangeKm": 1000, "costDollars": 1, "productionRatePerQuarter": 0, "availableFromYear": 1960 }""")]
     [InlineData("""{ "id": "x", "name": "N", "seats": 100, "rangeKm": 1000, "costDollars": 1, "productionRatePerQuarter": 4, "availableFromYear": 1960, "costPerAvailableSeatKm": 0 }""")]
+    [InlineData("""{ "id": "x", "name": "N", "seats": 100, "rangeKm": 1000, "costDollars": 1, "productionRatePerQuarter": 4, "availableFromYear": 1960, "cruiseSpeedKmh": 0 }""")]
     public void Load_ThrowsOnInvalidEntry(string entry)
     {
         var json = $"[{entry}]";

@@ -40,19 +40,20 @@ public class BaselineAiTests
     }
 
     [Fact]
-    public void DecideOrders_WithExistingRoute_AlsoBumpsItsFrequency()
+    public void DecideOrders_WithExistingRoute_AlsoGrowsItWithAnotherAircraft()
     {
         var a = MakeCity("a", 0, 0, 100);
         var b = MakeCity("b", 1, 1, 90);
         var c = MakeCity("c", 30, 30, 20);
         var cities = new[] { a, b, c };
-        var existing = new[] { new Route(a, c, Aircraft, WeeklyRoundTrips: 3) };
+        var existing = new[] { new Route(a, c, Aircraft, AircraftCount: 1) };
+        var fleet = FleetWithIdle(Aircraft, quantity: 2); // one to grow a-c, one to open a-b
 
-        var orders = BaselineAi.DecideOrders(existing, QuarterEngine.BaseActionCap, cities, DemandModel, new[] { Aircraft }, FleetWithAircraft);
+        var orders = BaselineAi.DecideOrders(existing, QuarterEngine.BaseActionCap, cities, DemandModel, new[] { Aircraft }, fleet);
 
         Assert.Equal(2, orders.Count);
         var routeOrders = orders.Cast<RouteOrder>().ToList();
-        Assert.Contains(routeOrders, o => o.Origin.Id == "a" && o.Destination.Id == "c" && o.WeeklyRoundTrips == 5); // 3 + increment(2)
+        Assert.Contains(routeOrders, o => o.Origin.Id == "a" && o.Destination.Id == "c"); // grows the existing route
         Assert.Contains(routeOrders, o => o.Origin.Id == "a" && o.Destination.Id == "b"); // new pair
     }
 
@@ -63,27 +64,28 @@ public class BaselineAiTests
         var b = MakeCity("b", 1, 1, 90); // objectively the best pair in this set
         var c = MakeCity("c", 30, 30, 20);
         var cities = new[] { a, b, c };
-        var existing = new[] { new Route(a, b, Aircraft, WeeklyRoundTrips: 3) }; // already serves the best pair
+        var existing = new[] { new Route(a, b, Aircraft, AircraftCount: 1) }; // already serves the best pair
 
         var orders = BaselineAi.DecideOrders(existing, QuarterEngine.BaseActionCap, cities, DemandModel, new[] { Aircraft }, FleetWithAircraft);
 
-        var newRouteOrder = orders.Cast<RouteOrder>().Single(o => o.WeeklyRoundTrips != 5);
+        var newRouteOrder = orders.OfType<RouteOrder>().Single(o => (o.Origin.Id, o.Destination.Id) != ("a", "b"));
         Assert.DoesNotContain((newRouteOrder.Origin.Id, newRouteOrder.Destination.Id), new[] { ("a", "b") });
     }
 
     [Fact]
-    public void DecideOrders_ZeroActionCap_SkipsNewRoute_StillBumpsFrequency()
+    public void DecideOrders_ZeroActionCap_ProducesNoOrders()
     {
+        // M32: growing an existing route now costs an action too, so a
+        // zero-action-cap quarter produces nothing at all - there's no
+        // longer a free frequency-bump variant to fall back on.
         var a = MakeCity("a", 0, 0, 100);
         var b = MakeCity("b", 1, 1, 90);
         var cities = new[] { a, b };
-        var existing = new[] { new Route(a, b, Aircraft, WeeklyRoundTrips: 3) };
+        var existing = new[] { new Route(a, b, Aircraft, AircraftCount: 1) };
 
         var orders = BaselineAi.DecideOrders(existing, actionCap: 0, cities, DemandModel, new[] { Aircraft }, AirlineFleet.Empty);
 
-        var order = Assert.Single(orders);
-        var routeOrder = Assert.IsType<RouteOrder>(order);
-        Assert.Equal(5, routeOrder.WeeklyRoundTrips); // frequency bump only, no new route
+        Assert.Empty(orders);
     }
 
     [Fact]
@@ -95,7 +97,7 @@ public class BaselineAiTests
     }
 
     [Fact]
-    public void DecideOrders_BumpsTheMostCapacityConstrainedRoute_NotJustAnyRoute()
+    public void DecideOrders_GrowsTheMostCapacityConstrainedRoute_NotJustAnyRoute()
     {
         var a = MakeCity("a", 0, 0, 100);
         var b = MakeCity("b", 0, 1, 100);  // close + heavy: demand swamps a tiny aircraft -> capacity-constrained
@@ -104,14 +106,15 @@ public class BaselineAiTests
         var tinyAircraft = new AircraftType("tiny", "Tiny", Seats: 5);
         var existing = new[]
         {
-            new Route(a, b, tinyAircraft, WeeklyRoundTrips: 1), // high load factor
-            new Route(a, c, tinyAircraft, WeeklyRoundTrips: 1), // low load factor
+            new Route(a, b, tinyAircraft, AircraftCount: 1), // high load factor
+            new Route(a, c, tinyAircraft, AircraftCount: 1), // low load factor
         };
+        var fleet = FleetWithIdle(tinyAircraft); // exactly enough for the one growth action this budget allows
 
-        var orders = BaselineAi.DecideOrders(existing, actionCap: 0, cities, DemandModel, new[] { tinyAircraft }, AirlineFleet.Empty);
+        var orders = BaselineAi.DecideOrders(existing, actionCap: 1, cities, DemandModel, new[] { tinyAircraft }, fleet);
 
-        var bump = Assert.IsType<RouteOrder>(Assert.Single(orders));
-        Assert.Equal(("a", "b"), (bump.Origin.Id, bump.Destination.Id));
+        var growth = Assert.IsType<RouteOrder>(Assert.Single(orders));
+        Assert.Equal(("a", "b"), (growth.Origin.Id, growth.Destination.Id));
     }
 
     [Fact]
@@ -120,14 +123,23 @@ public class BaselineAiTests
         var a = MakeCity("a", 0, 0, 100);
         var b = MakeCity("b", 1, 1, 90);
         var c = MakeCity("c", 30, 30, 20);
-        var existing = new[] { new Route(a, c, Aircraft, WeeklyRoundTrips: 3) };
+        var existing = new[] { new Route(a, c, Aircraft, AircraftCount: 1) };
 
         var original = BaselineAi.DecideOrders(existing, QuarterEngine.BaseActionCap, new[] { a, b, c }, DemandModel, new[] { Aircraft }, FleetWithAircraft);
         var shuffled = BaselineAi.DecideOrders(existing, QuarterEngine.BaseActionCap, new[] { c, b, a }, DemandModel, new[] { Aircraft }, FleetWithAircraft);
 
-        Assert.Equal(
-            original.Cast<RouteOrder>().Select(o => (o.Origin.Id, o.Destination.Id, o.WeeklyRoundTrips)),
-            shuffled.Cast<RouteOrder>().Select(o => (o.Origin.Id, o.Destination.Id, o.WeeklyRoundTrips)));
+        // Compares every order, not just RouteOrders - a fleet this tight
+        // (one idle unit) means the new-pair step falls back to leasing,
+        // and that should be just as deterministic as the routes are.
+        static string Describe(QuarterOrder order) => order switch
+        {
+            RouteOrder r => $"route:{r.Origin.Id}-{r.Destination.Id}@{r.Aircraft.Id}",
+            LeaseAircraftOrder l => $"lease:{l.Type.Id}x{l.Quantity}",
+            NegotiationOrder n => $"negotiate:{n.TargetCity.Id}@{n.Bid}",
+            _ => order.GetType().Name,
+        };
+
+        Assert.Equal(original.Select(Describe), shuffled.Select(Describe));
     }
 
     [Fact]
@@ -165,9 +177,10 @@ public class BaselineAiTests
         var gateway = MakeGateway("gw", 30, 30, 80);
         var otherGateway = MakeGateway("gw2", 40, 40, 10);
         var cities = new[] { a, gateway, otherGateway };
-        var existing = new[] { new Route(a, gateway, Aircraft, WeeklyRoundTrips: 3) }; // already touches "gw"
+        var existing = new[] { new Route(a, gateway, Aircraft, AircraftCount: 1) }; // already touches "gw"
+        var fleet = FleetWithIdle(Aircraft, quantity: 2); // grow a-gw and open a-gw2 without spilling into a lease, leaving budget for the negotiation
 
-        var orders = BaselineAi.DecideOrders(existing, QuarterEngine.BaseActionCap, cities, DemandModel, new[] { Aircraft }, FleetWithAircraft);
+        var orders = BaselineAi.DecideOrders(existing, QuarterEngine.BaseActionCap, cities, DemandModel, new[] { Aircraft }, fleet);
 
         var negotiation = Assert.Single(orders.OfType<NegotiationOrder>());
         Assert.Equal("gw2", negotiation.TargetCity.Id);
@@ -181,10 +194,10 @@ public class BaselineAiTests
         var gateway = MakeGateway("gw", 30, 30, 80);
         var cities = new[] { a, b, gateway };
 
-        // Cap 1: only the frequency-free bump plus exactly one of the two
-        // cost-1 candidates can fit. Needs an idle unit already on hand -
-        // leasing costs 2 actions (lease + route), which wouldn't fit a
-        // cap-1 budget at all.
+        // Cap 1, no existing route to grow: only one of the two cost-1
+        // candidates (new pair vs. negotiation) can fit, and new-pair wins.
+        // Needs an idle unit already on hand - leasing costs 2 actions
+        // (lease + route), which wouldn't fit a cap-1 budget at all.
         var orders = BaselineAi.DecideOrders(Array.Empty<Route>(), actionCap: 1, cities, DemandModel, new[] { Aircraft }, FleetWithAircraft);
 
         Assert.Single(orders.OfType<RouteOrder>());
