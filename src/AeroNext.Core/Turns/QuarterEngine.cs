@@ -17,13 +17,13 @@ namespace AeroNext.Core.Turns;
 /// spend. An order that fits within what's left of the cap is applied and
 /// consumes its cost; an order that would exceed the remaining cap is
 /// rejected — but scanning continues, so a free order (any
-/// HireExecutiveOrder/RefinanceOrder/RetireAircraftOrder) later in the
-/// list still goes through even after an earlier, costlier order was
-/// rejected. Only orders that don't fit get skipped, not everything after
-/// them — a hard truncate-the-rest rule would needlessly block actions
-/// that cost nothing. Every RouteOrder costs 1 action now (M32) — growing
-/// an already-served pair by assigning another aircraft is no longer free;
-/// only genuinely private actions are.
+/// HireExecutiveOrder/RefinanceOrder/RetireAircraftOrder/CloseRouteOrder)
+/// later in the list still goes through even after an earlier, costlier
+/// order was rejected. Only orders that don't fit get skipped, not
+/// everything after them — a hard truncate-the-rest rule would needlessly
+/// block actions that cost nothing. Every RouteOrder costs 1 action now
+/// (M32) — growing an already-served pair by assigning another aircraft is
+/// no longer free; only genuinely private actions are.
 ///
 /// A RouteOrder the aircraft can't physically fly (M11's range constraint)
 /// is rejected before the budget check even runs — the action never gets
@@ -159,6 +159,23 @@ public static class QuarterEngine
                 }
             }
 
+            FleetUnit? unitToDetach = null;
+
+            if (order is CloseRouteOrder closeOrder)
+            {
+                var operatesRoute = workingFleet is not null && currentRoutes.Any(r => r.Origin.Id == closeOrder.Origin.Id && r.Destination.Id == closeOrder.Destination.Id);
+
+                unitToDetach = operatesRoute
+                    ? workingFleet!.Units.Where(u => u.AssignedRouteKey == RouteKeyString(closeOrder.Origin, closeOrder.Destination)).OrderBy(u => u.Id).FirstOrDefault()
+                    : null;
+
+                if (unitToDetach is null)
+                {
+                    rejected.Add(order);
+                    continue;
+                }
+            }
+
             FleetUnit? unitToAssign = null;
 
             if (order is RouteOrder routeOrder && workingFleet is not null)
@@ -227,6 +244,11 @@ public static class QuarterEngine
                 workingFleet = FleetLedger.Retire(workingFleet, unitToRetire.Id);
             }
 
+            if (order is CloseRouteOrder && unitToDetach is not null && workingFleet is not null)
+            {
+                workingFleet = FleetLedger.Unassign(workingFleet, unitToDetach.Id);
+            }
+
             if (order is AircraftOrder appliedAircraftOrder && availableCash is not null)
             {
                 cashSpent += appliedAircraftOrder.Type.Cost * appliedAircraftOrder.Quantity;
@@ -244,7 +266,7 @@ public static class QuarterEngine
             spent += cost;
         }
 
-        var routes = ApplyRouteOrders(currentRoutes, applied.OfType<RouteOrder>());
+        var routes = ApplyRouteOrders(currentRoutes, applied.Where(o => o is RouteOrder or CloseRouteOrder));
         var nextActionCap = currentActionCap + applied.OfType<HireExecutiveOrder>().Sum(h => h.CapIncrease);
         var plan = NetworkPlanner.Plan(routes, cities, demandModel);
 
@@ -266,6 +288,7 @@ public static class QuarterEngine
         HireExecutiveOrder => 0,
         RefinanceOrder => 0,
         RetireAircraftOrder => 0,
+        CloseRouteOrder => 0,
         NegotiationOrder => 1,
         AircraftOrder => 1,
         LeaseAircraftOrder => 1,
@@ -280,20 +303,44 @@ public static class QuarterEngine
     /// pair, or starting fresh at 1 when it doesn't (a brand-new pair, or
     /// — permissive/no-fleet mode only, since fleet-aware mode rejects
     /// this in RunQuarter before it ever reaches here — a type change).
-    /// This single fold is correct in both modes without needing to know
-    /// which one produced `orders`.
+    /// Each applied CloseRouteOrder (M27) means "detach one aircraft" —
+    /// AircraftCount drops by 1, and the entry is removed entirely rather
+    /// than left behind as a zero-capacity ghost once it reaches zero.
+    /// This single fold is correct in both fleet-aware and permissive
+    /// mode without needing to know which one produced `orders`.
     /// </summary>
-    private static IReadOnlyList<Route> ApplyRouteOrders(IReadOnlyList<Route> currentRoutes, IEnumerable<RouteOrder> orders)
+    private static IReadOnlyList<Route> ApplyRouteOrders(IReadOnlyList<Route> currentRoutes, IEnumerable<QuarterOrder> orders)
     {
         var byKey = currentRoutes.ToDictionary(RouteKey);
 
         foreach (var order in orders)
         {
-            var key = (order.Origin.Id, order.Destination.Id);
-            var sameTypeAlreadyThere = byKey.TryGetValue(key, out var existing) && existing.Aircraft.Id == order.Aircraft.Id;
-            var newCount = sameTypeAlreadyThere ? existing!.AircraftCount + 1 : 1;
+            if (order is RouteOrder routeOrder)
+            {
+                var key = (routeOrder.Origin.Id, routeOrder.Destination.Id);
+                var sameTypeAlreadyThere = byKey.TryGetValue(key, out var existing) && existing.Aircraft.Id == routeOrder.Aircraft.Id;
+                var newCount = sameTypeAlreadyThere ? existing!.AircraftCount + 1 : 1;
 
-            byKey[key] = new Route(order.Origin, order.Destination, order.Aircraft, newCount);
+                byKey[key] = new Route(routeOrder.Origin, routeOrder.Destination, routeOrder.Aircraft, newCount);
+            }
+            else if (order is CloseRouteOrder closeOrder)
+            {
+                var key = (closeOrder.Origin.Id, closeOrder.Destination.Id);
+
+                if (byKey.TryGetValue(key, out var existing))
+                {
+                    var newCount = existing.AircraftCount - 1;
+
+                    if (newCount <= 0)
+                    {
+                        byKey.Remove(key);
+                    }
+                    else
+                    {
+                        byKey[key] = existing with { AircraftCount = newCount };
+                    }
+                }
+            }
         }
 
         return byKey.Values

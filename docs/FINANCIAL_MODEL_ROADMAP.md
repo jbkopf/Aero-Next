@@ -408,31 +408,95 @@ off) — a decision for the next design pass, not resolved here.
 
 ---
 
-## M27 — Closing a route
+## M27 — Closing a route ✅
 
 **The gap:** "opening a route" costs an action; there's no way to
 voluntarily exit one. Operating cost is charged on every route flown
-regardless of profitability, so today a losing route is a permanent drag
-once opened — the only "control" a player has is letting an aircraft sit
-on a bad route forever or (once M26 lands) retiring the aircraft entirely,
-which is a bigger hammer than the situation calls for if the aircraft
-itself is fine and it's just this one pairing that isn't working.
+regardless of profitability, so a losing route was a permanent drag once
+opened — the only "control" a player had was letting an aircraft sit on a
+bad route forever, or retiring it entirely (M26), a bigger hammer than
+the situation calls for if the aircraft itself is fine and it's just this
+one pairing that isn't working. `RetireAircraftOrder`'s own M26 doc
+comment named the exact dependency this milestone closes: retirement only
+works on an *idle* unit — freeing an *assigned* one first needed this.
 
-**Proposed shape:** a new order, private (per CLAUDE.md — closing doesn't
-contest anything, matching how adding frequency to an existing route is
-already free): removes the route from the airline's network. Its
-aircraft unit becomes idle in the fleet ledger from M25 (available for
-reassignment to a new `RouteOrder` next quarter, retirement via M26, or
-just sitting idle costing nothing until reassigned — a route's operating
-cost only applies to capacity actually offered, so an idle unit costs
-nothing on its own, matching today's model where idle capacity isn't a
-concept that exists to be charged for).
+**Refined for the `AircraftCount` world M32 introduced, after this text
+was first written:** a route can now carry more than one aircraft, so
+"closing a route" is redesigned as **detaching one aircraft** — the same
+one-at-a-time granularity `RouteOrder` itself already uses to *grow* a
+route. New private, free order `CloseRouteOrder(City Origin, City
+Destination)` (`src/AeroNext.Core/Turns/CloseRouteOrder.cs`) — no
+`UnitId`, unlike `RetireAircraftOrder`: every unit on a route is the same
+aircraft type (`Route.Aircraft` is singular) and units carry no
+per-unit condition, so which specific one gets freed is immaterial;
+`QuarterEngine` picks deterministically (lowest ID). Against a route with
+`AircraftCount > 1` it shrinks by one and the route stays; against the
+last aircraft on it, the route is removed from the list entirely rather
+than lingering as a zero-capacity ghost entry — "close" and "shrink" are
+one primitive, not two. Flagged as a deliberate, reasoned refinement of
+the pre-M32 text above, not silently revised.
+
+**`QuarterEngine.RunQuarter`** gained `CloseRouteOrder` handling in the
+same order-scan loop as every other fleet-aware action: rejected when
+`fleet` is null, when `currentRoutes` shows no matching pair for this
+airline, or (a defensive guard for a fleet/route state that shouldn't go
+inconsistent in practice) when no unit is actually found assigned to that
+route key. On success, `FleetLedger.Unassign` frees the unit — its
+`Mode` (owned/leased) untouched, so "done when"'s preservation bullet
+falls out for free, no code needed for it specifically. `ApplyRouteOrders`
+was generalized from folding only `RouteOrder`s to folding `RouteOrder`s
+and `CloseRouteOrder`s together in submission order against the same
+evolving route dictionary, so a second `CloseRouteOrder` for the same
+pair in one batch correctly frees a *different* unit (the first's already
+gone from the working fleet by the time the second is processed, the same
+sequential-mutation pattern the fleet-aware `RouteOrder` path already
+relies on).
+
+**Nothing else needed to change**, confirmed by reasoning through the
+architecture rather than assumed, and then verified: operating
+cost/revenue for freed capacity stop being charged the *same* quarter the
+close happens (`FinancialResolver`/`CompetitiveMarket` both build from
+`result.Routes` after `RunQuarter` returns, same as any other route
+change); the freed unit is available for reassignment even *within* the
+same quarter's batch (close A-B, open A-C with the same type, one batch —
+more immediate than the "following quarter" bar originally sketched, a
+natural consequence of `workingFleet` threading through the loop in
+order); M33's `AvailableSlotsByCity` recomputes "in use" fresh from live
+`AircraftCount` every call, so a gateway slot freed by closing becomes
+available next quarter with zero coupling needed; `BriefingGenerator`
+needed no new case (a rejected `CloseRouteOrder` falls into the existing
+generic `OrderRejectedOverBudget` bucket, the same treatment
+`RetireAircraftOrder` rejections already get). `BaselineAi` got **zero
+changes, deliberately** — it never submits this order, matching M26's own
+"buys nothing, so nothing to touch" precedent; teaching the AI to *decide*
+when to close an underperforming route is real, valuable future work
+directly relevant to the "BaselineAi needs a rework" finding from
+M32/M33, but a separate, larger effort than wiring the mechanism itself.
 
 **Done when:** closing a route immediately stops its operating cost from
-being charged; the freed aircraft unit is available for reassignment the
-following quarter. Tests: closing a route an airline doesn't operate is
-rejected; the freed unit's ownership mode (owned/leased) is preserved
-through the reassignment.
+being charged; the freed aircraft unit is available for reassignment
+(same quarter's batch, even). Tests: closing a route an airline doesn't
+operate is rejected (including the same-origin/wholly-different-origin
+edge cases already given this rigor for `RouteOrder`); the freed unit's
+ownership mode is preserved; two closes on the same multi-aircraft pair
+in one batch each free a distinct unit.
+
+Done. 396 tests total (11 new). 100% line/branch coverage on every
+touched/new class (`CloseRouteOrder`, `QuarterEngine`) — closing a
+coverage gap took two extra rounds of targeted tests (the same-origin and
+wholly-different-origin edge cases the `&&` inside the route-lookup
+needed, mirroring the exact rigor an equivalent `RouteOrder` gap already
+got in M25b). Overall project coverage **99.84%/99.54%**, at the
+established baseline (only pre-existing, untouched gaps remain —
+`BriefingGenerator`, `QuarterOrder`, `NetworkPlanner`). 150-game QA
+harness sweep at 244 quarters: 150/150 clean, 0 invariant violations.
+
+**Campaign trajectory confirmed unchanged, not just assumed** — full M13
+checkpoint sweep is byte-identical to M33's own output (`BaselineAi`
+never submits `CloseRouteOrder`, so every new code path is genuinely
+inert for existing scripted content). The QA harness sweep's numbers held
+too: bankruptcy timing and the 0/150 win rate are unaffected, exactly as
+expected for a purely additive mechanism nothing yet calls.
 
 ---
 
