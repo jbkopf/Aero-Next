@@ -567,27 +567,26 @@ string ChokepointStatus(int year)
     return direct ? $"{best.Name} flies JFK-LHR direct" : $"{best.Name} still needs a Gander stop";
 }
 
-// Re-measured after M34 replaced the flat global yield with per-route
-// fares (docs/FINANCIAL_MODEL_ROADMAP.md) - the first milestone in this
-// whole sequence to shift the trajectory the *other* direction. Cash
-// actually climbs for the first two quarters (peak $18,752,722.38 at
-// quarter 2) as demand ramps up against the same fixed 2-route network
-// and fares - now real per-seat prices, not a flat $0.12/passenger-km -
-// earn meaningfully more per passenger than before. Bankruptcy still
-// happens (quarter 17, 1959, -$4,101,673.48) once one of the two frozen
-// routes saturates its own seat ceiling (carried pax plateaus at
-// 406,963 through quarters 11-17) while salary/operating cost keep
-// accruing on both - but it took more than twice as long to arrive as
-// M30's quarter 7. Cash itself freezes exactly at bankruptcy
-// (FinancialResolver short-circuits a bankrupt airline's own quarter),
-// but carried pax keeps climbing after that (592,972 at 121, 683,904 at
-// 244) - NetworkPlanner still recomputes against real, growing demand
-// every quarter regardless of financial bankruptcy, and the *other*
-// frozen route was never itself demand-saturated, so total carried
-// keeps rising for decades even as cash cannot move again. 121 stays in
-// the checkpoint set as a stickiness sanity check on cash specifically,
-// not on pax.
-var checkpoints = new HashSet<int> { 1, 2, 17, 121, campaignQuarters };
+// Re-measured after M31 (docs/BASELINE_AI_ROADMAP.md) taught BaselineAi
+// to hire an executive every quarter, unconditionally - the action cap
+// climbs by 1/quarter instead of sitting flat at 3 forever, and this AI
+// spends that extra room opening a genuinely new route almost every
+// quarter (1 route at quarter 1, up to 22 by quarter 22) instead of
+// endlessly re-leasing onto the same 2 saturated ones (M34's own
+// frozen-network shape). The result is a dramatically bigger climb -
+// peak cash $42,113,450.14 at quarter 18, more than double M34's own
+// peak - but also a dramatically sharper crash once route count outruns
+// what the network can actually support: bankruptcy at quarter 22
+// (1960, -$445,156.38), only slightly later than M34's quarter 17, not
+// the multi-quarter runway the cash peak alone would suggest. Frozen at
+// 22 routes/-$445,156.38 from there; carried pax keeps climbing after
+// bankruptcy the same way M34's writeup already explained (NetworkPlanner
+// still recomputes against real, growing demand regardless of financial
+// bankruptcy). This is the expected, *necessary but not sufficient*
+// result the roadmap doc itself predicts: M31 gives BaselineAi room to
+// grow a real network, but nothing yet stops it from over-expanding past
+// what its fares/costs can sustain - that's M39's job, still ahead.
+var checkpoints = new HashSet<int> { 1, 18, 22, 121, campaignQuarters };
 
 var campaignDominance = RegionalDominanceState.Empty;
 string? campaignWinner = null;

@@ -1,4 +1,5 @@
 using AeroNext.Core.Airlines;
+using AeroNext.Core.Finance;
 using AeroNext.Core.Fleet;
 using AeroNext.Core.Turns;
 using AeroNext.Core.World;
@@ -16,7 +17,11 @@ namespace AeroNext.Core.Ai;
 /// before bidding isn't a missing smarts, it's true to the mechanic); and
 /// tries to grow its own best-performing existing route by assigning it
 /// another aircraft (M32 — no longer free; competes for the same action
-/// budget as everything else).
+/// budget as everything else); and hires an executive every quarter,
+/// unconditionally (M31, docs/BASELINE_AI_ROADMAP.md — HireExecutiveOrder
+/// is free and never competes with anything else in the action budget,
+/// and this AI already spends its full budget every quarter, so nothing
+/// else in that roadmap has room to land without this landing first).
 ///
 /// Not trying to play well — CLAUDE.md's game is always exactly 4 airlines,
 /// so this exists because the sim can never run a representative quarter
@@ -164,7 +169,7 @@ public static class BaselineAi
             }
         }
 
-        if (spent + 1 <= actionCap && (availableCash is null || availableCash.Value >= NegotiationBidAmount))
+        if (spent + 1 <= actionCap && (availableCash is null || FinancialState.CanAfford(availableCash.Value, NegotiationBidAmount)))
         {
             var bestGateway = FindBestUnservedGateway(currentRoutes, allCities);
             if (bestGateway is not null)
@@ -173,6 +178,14 @@ public static class BaselineAi
                 spent += 1;
             }
         }
+
+        // M31: unconditional, every quarter, regardless of cities/routes/
+        // fleet/cash/action cap — HireExecutiveOrder is free (0 actions)
+        // and never competes with anything above, so there's no candidate
+        // to weigh it against. Given the mechanic's own current shape
+        // (uncapped, costless), always hiring is the correct behavior,
+        // not a heuristic bug — see docs/BASELINE_AI_ROADMAP.md's M31.
+        orders.Add(new HireExecutiveOrder());
 
         return orders;
     }

@@ -34,9 +34,9 @@ public class BaselineAiTests
 
         var orders = BaselineAi.DecideOrders(Array.Empty<Route>(), QuarterEngine.BaseActionCap, cities, DemandModel, new[] { Aircraft }, FleetWithAircraft);
 
-        var order = Assert.Single(orders);
-        var routeOrder = Assert.IsType<RouteOrder>(order);
+        var routeOrder = Assert.Single(orders.OfType<RouteOrder>());
         Assert.Equal(("a", "b"), (routeOrder.Origin.Id, routeOrder.Destination.Id));
+        Assert.Single(orders.OfType<HireExecutiveOrder>()); // M31: every quarter, unconditionally
     }
 
     [Fact]
@@ -51,10 +51,11 @@ public class BaselineAiTests
 
         var orders = BaselineAi.DecideOrders(existing, QuarterEngine.BaseActionCap, cities, DemandModel, new[] { Aircraft }, fleet);
 
-        Assert.Equal(2, orders.Count);
-        var routeOrders = orders.Cast<RouteOrder>().ToList();
+        var routeOrders = orders.OfType<RouteOrder>().ToList();
+        Assert.Equal(2, routeOrders.Count);
         Assert.Contains(routeOrders, o => o.Origin.Id == "a" && o.Destination.Id == "c"); // grows the existing route
         Assert.Contains(routeOrders, o => o.Origin.Id == "a" && o.Destination.Id == "b"); // new pair
+        Assert.Single(orders.OfType<HireExecutiveOrder>()); // M31: every quarter, unconditionally
     }
 
     [Fact]
@@ -73,11 +74,14 @@ public class BaselineAiTests
     }
 
     [Fact]
-    public void DecideOrders_ZeroActionCap_ProducesNoOrders()
+    public void DecideOrders_ZeroActionCap_ProducesNoActionConsumingOrders_ButStillHires()
     {
         // M32: growing an existing route now costs an action too, so a
-        // zero-action-cap quarter produces nothing at all - there's no
-        // longer a free frequency-bump variant to fall back on.
+        // zero-action-cap quarter produces no RouteOrder/NegotiationOrder/
+        // etc - there's no longer a free frequency-bump variant to fall
+        // back on. M31: HireExecutiveOrder is unconditional and costs 0
+        // actions, so it's still proposed even here - cap 0 isn't "no
+        // orders at all" anymore, just "no action-consuming ones."
         var a = MakeCity("a", 0, 0, 100);
         var b = MakeCity("b", 1, 1, 90);
         var cities = new[] { a, b };
@@ -85,15 +89,19 @@ public class BaselineAiTests
 
         var orders = BaselineAi.DecideOrders(existing, actionCap: 0, cities, DemandModel, new[] { Aircraft }, AirlineFleet.Empty);
 
-        Assert.Empty(orders);
+        Assert.Empty(orders.OfType<RouteOrder>());
+        Assert.Empty(orders.OfType<NegotiationOrder>());
+        Assert.Single(orders.OfType<HireExecutiveOrder>());
     }
 
     [Fact]
-    public void DecideOrders_EmptyNetworkAndNoCities_ProducesNoOrders()
+    public void DecideOrders_EmptyNetworkAndNoCities_ProducesNoActionConsumingOrders_ButStillHires()
     {
         var orders = BaselineAi.DecideOrders(Array.Empty<Route>(), QuarterEngine.BaseActionCap, Array.Empty<City>(), DemandModel, new[] { Aircraft }, AirlineFleet.Empty);
 
-        Assert.Empty(orders);
+        Assert.Empty(orders.OfType<RouteOrder>());
+        Assert.Empty(orders.OfType<NegotiationOrder>());
+        Assert.Single(orders.OfType<HireExecutiveOrder>());
     }
 
     [Fact]
@@ -113,8 +121,9 @@ public class BaselineAiTests
 
         var orders = BaselineAi.DecideOrders(existing, actionCap: 1, cities, DemandModel, new[] { tinyAircraft }, fleet);
 
-        var growth = Assert.IsType<RouteOrder>(Assert.Single(orders));
+        var growth = Assert.Single(orders.OfType<RouteOrder>());
         Assert.Equal(("a", "b"), (growth.Origin.Id, growth.Destination.Id));
+        Assert.Single(orders.OfType<HireExecutiveOrder>()); // M31: free, doesn't compete for the cap-1 budget
     }
 
     [Fact]
@@ -415,5 +424,59 @@ public class BaselineAiTests
             availableSlotsByCity: null, availableCash: Money.FromDollars(2_000_000));
 
         Assert.Single(orders.OfType<NegotiationOrder>());
+    }
+
+    // --- M31: unconditional executive hiring (docs/BASELINE_AI_ROADMAP.md) ---
+
+    [Fact]
+    public void DecideOrders_FullBudgetSpentOnEverythingElse_StillHiresAnExecutiveToo()
+    {
+        var a = MakeCity("a", 0, 0, 100);
+        var b = MakeCity("b", 1, 1, 90);
+        var gateway = MakeGateway("gw", 30, 30, 80);
+        var cities = new[] { a, b, gateway };
+
+        var orders = BaselineAi.DecideOrders(Array.Empty<Route>(), QuarterEngine.BaseActionCap, cities, DemandModel, new[] { Aircraft }, FleetWithAircraft);
+
+        // Every action-consuming candidate this AI can propose here (new
+        // pair + negotiation) already fills the 3-action budget - hiring
+        // still shows up on top, since it never competes for that budget.
+        Assert.Single(orders.OfType<RouteOrder>());
+        Assert.Single(orders.OfType<NegotiationOrder>());
+        Assert.Single(orders.OfType<HireExecutiveOrder>());
+    }
+
+    [Fact]
+    public void DecideOrders_HireExecutiveOrder_NeverCountsAgainstTheActionCap_WhenRunThroughQuarterEngine()
+    {
+        var a = MakeCity("a", 0, 0, 100);
+        var b = MakeCity("b", 1, 1, 90);
+        var cities = new[] { a, b };
+
+        var orders = BaselineAi.DecideOrders(Array.Empty<Route>(), actionCap: 1, cities, DemandModel, new[] { Aircraft }, FleetWithAircraft);
+        var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), currentActionCap: 1, orders, cities, DemandModel, FleetWithAircraft);
+
+        Assert.Empty(result.RejectedOrders); // the one action-consuming order and the free hire both fit a cap-1 budget
+        Assert.Equal(2, result.ActionCap); // the hire raises next quarter's cap
+    }
+
+    [Fact]
+    public void DecideOrders_ActionCapGrowsQuarterOverQuarter_WhenHiringIsAppliedEachTime()
+    {
+        var a = MakeCity("a", 0, 0, 100);
+        var b = MakeCity("b", 1, 1, 90);
+        var cities = new[] { a, b };
+        IReadOnlyList<Route> routes = Array.Empty<Route>();
+        var cap = QuarterEngine.BaseActionCap;
+
+        for (var quarter = 1; quarter <= 3; quarter++)
+        {
+            var orders = BaselineAi.DecideOrders(routes, cap, cities, DemandModel, new[] { Aircraft }, FleetWithAircraft);
+            var result = QuarterEngine.RunQuarter(quarter, routes, cap, orders, cities, DemandModel, FleetWithAircraft);
+            routes = result.Routes;
+            cap = result.ActionCap;
+        }
+
+        Assert.Equal(QuarterEngine.BaseActionCap + 3, cap);
     }
 }

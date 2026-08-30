@@ -61,7 +61,7 @@ extracted into code.
 
 ## Phase 1 — mechanical completeness (interact with every system)
 
-## M31 — Executive hiring + a real `CanAfford` primitive
+## M31 — Executive hiring + a real `CanAfford` primitive ✅
 
 **Why first:** `BaselineAi` already spends its full 3-action budget every
 single quarter today — confirmed in the same diagnostic run above
@@ -93,6 +93,86 @@ dedicated test drives an airline down to near-zero cash and confirms
 `BaselineAi` never once proposes an order the resolver's backstop would
 have to reject; `BaselineAi` hires an executive under some measured
 condition and the action cap visibly grows over a multi-quarter test.
+
+**`FinancialState.CanAfford(Money available, Money cost)` shipped as a
+static two-argument method, not the instance `CanAfford(Money cost)`
+originally sketched.** Neither real caller (`BaselineAi`, `QuarterEngine`)
+holds a whole `FinancialState` at the point it needs this check — both
+work from a raw available-cash figure, often already reduced by whatever
+this same planning pass has committed to spend. Forcing either to
+fabricate a full record (with irrelevant `DebtBalance`/
+`InterestRatePerQuarter`/`IsBankrupt`) just to ask one question would
+have been worse than the inline comparison it replaces. `BaselineAi`'s
+negotiation gate now reads `FinancialState.CanAfford(availableCash.Value,
+NegotiationBidAmount)` — behavior-preserving, confirmed by every
+pre-existing cash-gating test passing unmodified. `QuarterEngine`'s own
+existing inline affordability checks (`AircraftOrder`, `NegotiationOrder`,
+`PayDownDebtOrder` ×2) were deliberately **not** swept into this — they
+predate the cross-cutting rule and are already logically equivalent;
+refactoring them wasn't part of this milestone's own "Done when" and
+would have been scope creep for its own sake.
+
+`BaselineAi` now appends `new HireExecutiveOrder()` unconditionally, on
+every call, after every other candidate order — exactly as the roadmap
+called for, since it's free and never competes with anything else for
+the action budget.
+
+**Test blast radius, checked precisely rather than guessed at:** because
+the hire is unconditional, it appears in every one of `BaselineAiTests`'
+25 pre-existing tests' output now. Exactly 5 needed real fixes (the ones
+asserting a raw order count or `Assert.Single(orders)`/`Assert.Empty(orders)`
+against the *whole* list) — 3 needed only a filter to `.OfType<RouteOrder>()`
+first, and 2 needed an honest rename: `..._ProducesNoOrders` became
+`..._ProducesNoActionConsumingOrders_ButStillHires`, since "cap 0 produces
+nothing" is no longer true — a free order that never touches the budget
+still shows up even there. Every other test, using `.OfType<T>()` filters
+or checking `RejectedOrders`, needed no change at all.
+
+Done. 454 tests total (7 new: 4 in a new `FinancialStateTests.cs`
+directly exercising `CanAfford`; 3 in `BaselineAiTests` — full-budget
+quarters still hire on top of everything else, a cap-1 `QuarterEngine`
+run confirms the hire never counts against the budget and the next
+quarter's cap actually grows, and a 3-quarter loop confirms the cap
+climbs by exactly 1 every single quarter). 100% line/branch coverage on
+both touched classes (`FinancialState`, `BaselineAi`). Overall project
+coverage **99.85%/99.60%**, at the established baseline — same
+pre-existing gaps as always (`BriefingGenerator`, `QuarterOrder`,
+`NetworkPlanner`), untouched here. 150-game QA harness sweep: 150/150
+clean, 0 invariant violations, 0 crashes.
+
+**Campaign trajectory — measured in both real loops, and they tell two
+genuinely different stories, not a contradiction.** `AeroNext.Sim`'s M13
+loop (flat, symmetric, gate-scarcity left permissive) reshapes
+dramatically: with a growing action cap, `BaselineAi` now diversifies
+into a real network — 1 route at quarter 1, 22 by quarter 22 — instead
+of endlessly re-leasing onto the same 2 saturated routes forever (M34's
+own frozen shape). Peak cash more than doubles, to **$42,113,450.14 at
+quarter 18** (versus M34's $18.75M), but the crash is sharper too once
+route count outruns what the network actually supports: bankruptcy at
+**quarter 22 (1960, -$445,156.38)** — only slightly later than M34's
+quarter 17, not the multi-quarter runway the much higher peak alone
+would suggest.
+
+The 150-game QA harness sweep — real, region-differentiated, gate-scarce
+games — came back **numerically unchanged from M34's own figures**,
+down to the cent, across every region's bankruptcy-quarter average and
+win count. Verified this wasn't a stale build or a silent no-op:
+instrumented a single real game directly and confirmed `HireExecutiveOrder`
+applies and the action cap genuinely climbs every quarter (3 → 10 by
+quarter 8) exactly as designed. The reason the aggregate outcome doesn't
+move: `BaselineAi` only ever has 3 candidate action-consuming branches
+(grow, new pair, negotiate), and in the harder QA harness conditions —
+gate scarcity actually enforced, harsher regional starting cash, faster
+bankruptcy (average quarter 4.9–8.5) — those 3 branches never actually
+needed more than the pre-existing cap of 3 to fire everything they were
+going to fire anyway, confirmed directly against the instrumented game's
+own per-quarter applied-order lists. The extra headroom this milestone
+built is real and correctly wired, but nothing in `BaselineAi` today has
+a fourth thing to spend it on under harder conditions — that's exactly
+what M35–M38 exist to give it. The M13 loop's dramatic reshaping is real
+too, not an artifact — it's what the same extra headroom does once
+gate-scarcity and harsh regional variation aren't there to absorb it
+first.
 
 ---
 
