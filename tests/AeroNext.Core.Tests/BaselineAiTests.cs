@@ -1,5 +1,6 @@
 using AeroNext.Core.Ai;
 using AeroNext.Core.Airlines;
+using AeroNext.Core.Finance;
 using AeroNext.Core.Fleet;
 using AeroNext.Core.Turns;
 using AeroNext.Core.World;
@@ -649,5 +650,156 @@ public class BaselineAiTests
 
         Assert.Empty(result.RejectedOrders);
         Assert.Empty(result.UpdatedFleet!.Units);
+    }
+
+    // --- M36: debt tools (docs/BASELINE_AI_ROADMAP.md) ---
+
+    [Fact]
+    public void DecideOrders_CashShortOfBid_RealTargetExists_CeilingHasRoom_BorrowsTheGap_NotTheSameQuarterAsNegotiating()
+    {
+        // Borrowing and negotiating the same quarter would still get the
+        // NegotiationOrder rejected by QuarterEngine - a same-quarter
+        // RefinanceOrder's cash isn't visible to its affordability gate
+        // (established back in M29). So: borrow now, negotiate next
+        // quarter once availableCash actually reflects the top-up.
+        var a = MakeCity("a", 0, 0, 100);
+        var gateway = MakeGateway("gw", 30, 30, 80);
+        var cities = new[] { a, gateway };
+
+        var orders = BaselineAi.DecideOrders(
+            Array.Empty<Route>(), QuarterEngine.BaseActionCap, cities, DemandModel, new[] { Aircraft }, FleetWithAircraft,
+            availableSlotsByCity: null, availableCash: Money.FromDollars(500_000), currentDebtBalance: Money.Zero);
+
+        var refinance = Assert.Single(orders.OfType<RefinanceOrder>());
+        Assert.Equal(Money.FromDollars(1_500_000), refinance.AdditionalBorrowing); // 2,000,000 bid - 500,000 cash
+        Assert.Empty(orders.OfType<NegotiationOrder>());
+    }
+
+    [Fact]
+    public void DecideOrders_BorrowingTheGap_WouldBreachDebtCeiling_NeverBorrows()
+    {
+        var a = MakeCity("a", 0, 0, 100);
+        var gateway = MakeGateway("gw", 30, 30, 80);
+        var cities = new[] { a, gateway };
+        var debtAtCeiling = Money.FromDollars(FinancialResolver.DebtCeilingDollars); // zero headroom left
+
+        var orders = BaselineAi.DecideOrders(
+            Array.Empty<Route>(), QuarterEngine.BaseActionCap, cities, DemandModel, new[] { Aircraft }, FleetWithAircraft,
+            availableSlotsByCity: null, availableCash: Money.FromDollars(500_000), currentDebtBalance: debtAtCeiling);
+
+        Assert.Empty(orders.OfType<RefinanceOrder>());
+        Assert.Empty(orders.OfType<NegotiationOrder>());
+    }
+
+    [Fact]
+    public void DecideOrders_CashShortOfBid_NoDebtBalancePassed_NeverBorrows()
+    {
+        var a = MakeCity("a", 0, 0, 100);
+        var gateway = MakeGateway("gw", 30, 30, 80);
+        var cities = new[] { a, gateway };
+
+        var orders = BaselineAi.DecideOrders(
+            Array.Empty<Route>(), QuarterEngine.BaseActionCap, cities, DemandModel, new[] { Aircraft }, FleetWithAircraft,
+            availableSlotsByCity: null, availableCash: Money.FromDollars(500_000)); // currentDebtBalance stays null
+
+        Assert.Empty(orders.OfType<RefinanceOrder>());
+        Assert.Empty(orders.OfType<NegotiationOrder>());
+    }
+
+    [Fact]
+    public void DecideOrders_CashActuallyCoversTheBid_NeverBorrows()
+    {
+        var a = MakeCity("a", 0, 0, 100);
+        var gateway = MakeGateway("gw", 30, 30, 80);
+        var cities = new[] { a, gateway };
+
+        var orders = BaselineAi.DecideOrders(
+            Array.Empty<Route>(), QuarterEngine.BaseActionCap, cities, DemandModel, new[] { Aircraft }, FleetWithAircraft,
+            availableSlotsByCity: null, availableCash: Money.FromDollars(2_000_000), currentDebtBalance: Money.Zero);
+
+        Assert.Empty(orders.OfType<RefinanceOrder>());
+        Assert.Single(orders.OfType<NegotiationOrder>());
+    }
+
+    [Fact]
+    public void DecideOrders_BorrowThenNegotiate_ProducesLegalOrders_WhenRunThroughQuarterEngine()
+    {
+        var a = MakeCity("a", 0, 0, 100);
+        var gateway = MakeGateway("gw", 30, 30, 80);
+        var cities = new[] { a, gateway };
+
+        var orders = BaselineAi.DecideOrders(
+            Array.Empty<Route>(), QuarterEngine.BaseActionCap, cities, DemandModel, new[] { Aircraft }, FleetWithAircraft,
+            availableSlotsByCity: null, availableCash: Money.FromDollars(500_000), currentDebtBalance: Money.Zero);
+        var result = QuarterEngine.RunQuarter(
+            1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, orders, cities, DemandModel, FleetWithAircraft,
+            availableCash: Money.FromDollars(500_000), currentDebtBalance: Money.Zero);
+
+        Assert.Empty(result.RejectedOrders);
+    }
+
+    [Fact]
+    public void DecideOrders_CashExceedsBuffer_DebtSmallerThanAffordablePaydown_PaysDownFullDebt()
+    {
+        var a = MakeCity("a", 0, 0, 1);
+
+        var orders = BaselineAi.DecideOrders(
+            Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { a }, DemandModel, new[] { Aircraft }, AirlineFleet.Empty,
+            availableSlotsByCity: null, availableCash: Money.FromDollars(15_000_000), currentDebtBalance: Money.FromDollars(1_000_000));
+
+        var payDown = Assert.Single(orders.OfType<PayDownDebtOrder>());
+        Assert.Equal(Money.FromDollars(1_000_000), payDown.Amount);
+    }
+
+    [Fact]
+    public void DecideOrders_CashExceedsBuffer_DebtLargerThanAffordablePaydown_PaysDownOnlyWhatsAffordable()
+    {
+        var a = MakeCity("a", 0, 0, 1);
+
+        var orders = BaselineAi.DecideOrders(
+            Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { a }, DemandModel, new[] { Aircraft }, AirlineFleet.Empty,
+            availableSlotsByCity: null, availableCash: Money.FromDollars(15_000_000), currentDebtBalance: Money.FromDollars(50_000_000));
+
+        var payDown = Assert.Single(orders.OfType<PayDownDebtOrder>());
+        Assert.Equal(Money.FromDollars(5_000_000), payDown.Amount); // 15,000,000 cash - 10,000,000 buffer
+    }
+
+    [Fact]
+    public void DecideOrders_CashExceedsBuffer_DebtIsZero_NeverPaysDown()
+    {
+        var a = MakeCity("a", 0, 0, 1);
+
+        var orders = BaselineAi.DecideOrders(
+            Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { a }, DemandModel, new[] { Aircraft }, AirlineFleet.Empty,
+            availableSlotsByCity: null, availableCash: Money.FromDollars(15_000_000), currentDebtBalance: Money.Zero);
+
+        Assert.Empty(orders.OfType<PayDownDebtOrder>());
+    }
+
+    [Fact]
+    public void DecideOrders_CashAtOrBelowBuffer_NeverPaysDown_EvenWithNonzeroDebt()
+    {
+        var a = MakeCity("a", 0, 0, 1);
+
+        var orders = BaselineAi.DecideOrders(
+            Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { a }, DemandModel, new[] { Aircraft }, AirlineFleet.Empty,
+            availableSlotsByCity: null, availableCash: Money.FromDollars(10_000_000), currentDebtBalance: Money.FromDollars(1_000_000));
+
+        Assert.Empty(orders.OfType<PayDownDebtOrder>());
+    }
+
+    [Fact]
+    public void DecideOrders_PayDownDebtOrder_ProducesLegalOrders_WhenRunThroughQuarterEngine()
+    {
+        var a = MakeCity("a", 0, 0, 1);
+
+        var orders = BaselineAi.DecideOrders(
+            Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { a }, DemandModel, new[] { Aircraft }, AirlineFleet.Empty,
+            availableSlotsByCity: null, availableCash: Money.FromDollars(15_000_000), currentDebtBalance: Money.FromDollars(1_000_000));
+        var result = QuarterEngine.RunQuarter(
+            1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, orders, new[] { a }, DemandModel, fleet: null,
+            availableCash: Money.FromDollars(15_000_000), currentDebtBalance: Money.FromDollars(1_000_000));
+
+        Assert.Empty(result.RejectedOrders);
     }
 }

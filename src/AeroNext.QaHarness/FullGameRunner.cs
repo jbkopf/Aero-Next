@@ -145,7 +145,7 @@ public static class FullGameRunner
                             conditionsByName[name].GuaranteedRouteDestination,
                             conditionsByName[name].StartingAircraft),
                     }
-                    : BaselineAi.DecideOrders(routes[name], caps[name], cities, yearDemandModel, availableFleet, fleets[name], availableSlotsByCity, finances[name].CashBalance).ToArray();
+                    : BaselineAi.DecideOrders(routes[name], caps[name], cities, yearDemandModel, availableFleet, fleets[name], availableSlotsByCity, finances[name].CashBalance, finances[name].DebtBalance).ToArray();
 
                 // M18's guaranteed quarter-1 route is exempt from slot
                 // gating — nothing in the starting-conditions design pre-

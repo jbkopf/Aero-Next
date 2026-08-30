@@ -28,7 +28,16 @@ namespace AeroNext.Core.Ai;
 /// retires any idle unit that's genuinely stranded — no served route
 /// uses its type and no unserved pair worth reaching needs it either
 /// (M35). Both M35 checks are free, so every qualifying route/unit is
-/// acted on the same quarter, not just the single best one.
+/// acted on the same quarter, not just the single best one. Borrows just
+/// enough to cover a negotiation bid shortfall when a real target exists
+/// and the debt ceiling has room — but never attempts the negotiation
+/// the same quarter, since a same-quarter RefinanceOrder's cash isn't
+/// visible to QuarterEngine's own affordability gate; it borrows now so
+/// next quarter's cash actually covers the bid, then negotiates then.
+/// Separately pays down debt whenever cash comfortably exceeds a buffer
+/// and debt is nonzero — never both the same quarter, since the two
+/// thresholds are spaced far enough apart that cash can't be both short
+/// of the bid and above the buffer at once (M36).
 ///
 /// Not trying to play well — CLAUDE.md's game is always exactly 4 airlines,
 /// so this exists because the sim can never run a representative quarter
@@ -60,6 +69,16 @@ public static class BaselineAi
     /// quarter).
     /// </summary>
     private const double CloseRouteLoadFactorFloor = 0.5;
+
+    /// <summary>
+    /// M36 (proposed, tunable): pay down debt only once cash comfortably
+    /// clears this — five times NegotiationBidAmount, deliberately, so
+    /// cash can never be simultaneously short of the bid (the borrow
+    /// trigger below) and above this buffer (the paydown trigger) in the
+    /// same quarter. No explicit mutual-exclusion check needed; the
+    /// thresholds themselves guarantee it.
+    /// </summary>
+    private static readonly Money PayDownCashBuffer = Money.FromDollars(10_000_000);
 
     /// <param name="eraAvailableTypes">
     /// The full aircraft catalog available to lease this era (e.g.
@@ -94,7 +113,18 @@ public static class BaselineAi
     /// the only cash-consuming action this AI ever proposes (growth/new-pair
     /// never cost cash upfront; leasing is a recurring cost, not a
     /// submission-time one), so no running "spent so far" tracker is
-    /// needed here the way fleet/slot reservations already need one.
+    /// needed here the way fleet/slot reservations already need one. M36:
+    /// also the basis for both new debt decisions below.
+    /// </param>
+    /// <param name="currentDebtBalance">
+    /// M36: null (the default) means this AI never borrows or pays down
+    /// debt — no debt tracking means no ceiling to check a borrow against,
+    /// so staying fully passive here is the conservative choice, the same
+    /// asymmetry PayDownDebtOrder's own QuarterEngine gating already
+    /// established. Passing quarter-start debt (before this quarter's own
+    /// automatic interest/principal) turns on both: borrowing just enough
+    /// to cover a negotiation bid shortfall when real ceiling headroom
+    /// exists, and paying down whenever cash clears PayDownCashBuffer.
     /// </param>
     public static IReadOnlyList<QuarterOrder> DecideOrders(
         IReadOnlyList<Route> currentRoutes,
@@ -104,7 +134,8 @@ public static class BaselineAi
         IReadOnlyList<AircraftType> eraAvailableTypes,
         AirlineFleet ownFleet,
         IReadOnlyDictionary<string, int>? availableSlotsByCity = null,
-        Money? availableCash = null)
+        Money? availableCash = null,
+        Money? currentDebtBalance = null)
     {
         var orders = new List<QuarterOrder>();
         var spent = 0;
@@ -186,13 +217,43 @@ public static class BaselineAi
             }
         }
 
-        if (spent + 1 <= actionCap && (availableCash is null || FinancialState.CanAfford(availableCash.Value, NegotiationBidAmount)))
+        if (spent + 1 <= actionCap)
         {
             var bestGateway = FindBestUnservedGateway(currentRoutes, allCities);
-            if (bestGateway is not null)
+            var canAffordNow = availableCash is null || FinancialState.CanAfford(availableCash.Value, NegotiationBidAmount);
+
+            if (bestGateway is not null && canAffordNow)
             {
                 orders.Add(new NegotiationOrder(bestGateway, NegotiationBidAmount));
                 spent += 1;
+            }
+            else if (bestGateway is not null && availableCash is not null && currentDebtBalance is not null)
+            {
+                // M36: cash falls short of the bid this quarter. Borrowing
+                // and negotiating in the *same* quarter would still get
+                // the NegotiationOrder rejected — QuarterEngine's own cash
+                // gate checks only the quarter-start availableCash passed
+                // in below; a same-quarter RefinanceOrder does no
+                // QuarterEngine-side processing at all and never raises
+                // it (see QuarterEngine's own doc comment on this exact
+                // point, established back in M29). So: borrow the gap now
+                // — free, no action spent — so FinancialResolver applies
+                // it to CashBalance before next quarter, and next
+                // quarter's own availableCash will actually cover the
+                // bid. Never attempt the negotiation itself until it can
+                // really afford it. Gated by real debt-ceiling headroom
+                // (CanAfford reused a second way: headroom is "available,"
+                // the borrow amount is "cost"), not just the cash gap.
+                // shortfall is always positive here: this branch only
+                // runs when canAffordNow was already false, i.e.
+                // NegotiationBidAmount > availableCash.Value.
+                var shortfall = NegotiationBidAmount - availableCash.Value;
+                var ceilingHeadroom = Money.FromDollars(FinancialResolver.DebtCeilingDollars) - currentDebtBalance.Value;
+
+                if (FinancialState.CanAfford(ceilingHeadroom, shortfall))
+                {
+                    orders.Add(new RefinanceOrder(shortfall));
+                }
             }
         }
 
@@ -222,6 +283,23 @@ public static class BaselineAi
             .OrderBy(u => u.Id))
         {
             orders.Add(new RetireAircraftOrder(stranded.Id));
+        }
+
+        // M36: pay down debt whenever cash comfortably clears the buffer
+        // and debt is nonzero - free, so it fires whenever the condition
+        // holds, not gated by budget. Can never coincide with borrowing
+        // above in the same quarter - see PayDownCashBuffer's own doc
+        // comment for why the two thresholds guarantee that.
+        if (availableCash is not null && currentDebtBalance is not null
+            && currentDebtBalance.Value > Money.Zero && availableCash.Value > PayDownCashBuffer)
+        {
+            var affordablePaydown = availableCash.Value - PayDownCashBuffer;
+            var payDownAmount = affordablePaydown < currentDebtBalance.Value ? affordablePaydown : currentDebtBalance.Value;
+
+            if (payDownAmount > Money.Zero)
+            {
+                orders.Add(new PayDownDebtOrder(payDownAmount));
+            }
         }
 
         // M31: unconditional, every quarter, regardless of cities/routes/

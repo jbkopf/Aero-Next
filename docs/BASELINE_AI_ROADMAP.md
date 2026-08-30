@@ -256,7 +256,7 @@ both catches that.
 
 ---
 
-## M36 — Debt tools
+## M36 — Debt tools ✅
 
 `RefinanceOrder` (borrow when a real growth opportunity — a lease, an
 aircraft order, a negotiation bid — exceeds cash comfortably on hand) and
@@ -269,6 +269,85 @@ action it judges worth taking, gated by `CanAfford`-style reasoning
 about the resulting debt service, not just the immediate cash gap; it
 pays down debt when cash is idle and debt is nonzero; tests cover both
 independently.
+
+**A real bug caught before it shipped, not after — worth recording.**
+The first design borrowed and negotiated in the *same* quarter. Traced
+through `QuarterEngine` before writing any tests and found that would
+have gotten the `NegotiationOrder` rejected every time regardless: its
+cash gate checks only the `availableCash` passed into `RunQuarter`,
+quarter-start — a same-quarter `RefinanceOrder` does no
+`QuarterEngine`-side processing at all (established back in M29, for
+`PayDownDebtOrder`'s identical situation, and stated plainly in
+`QuarterEngine`'s own doc comment). Attempting both together would have
+been exactly the "attempt and fail, wasting the turn's opportunity"
+outcome the affordability cross-cutting rule exists to prevent. Fixed
+before implementation: `BaselineAi` borrows the gap this quarter with
+*no* attempt at the negotiation, so `FinancialResolver` applies the
+borrowed cash to `CashBalance` before next quarter, and next quarter's
+own `availableCash` genuinely covers the bid.
+
+The only cash-gated action `BaselineAi` proposes today is still
+`NegotiationOrder` (it never constructs an `AircraftOrder`, only
+leases) — so `RefinanceOrder`'s scope here is exactly that one real
+case: borrow just enough to cover the bid shortfall, gated by real
+debt-ceiling headroom (`FinancialState.CanAfford` reused a second way —
+`DebtCeilingDollars − currentDebtBalance` as "available," the borrow
+amount as "cost"), only when a real target (`bestGateway`) exists.
+`PayDownDebtOrder` fires whenever cash clears `PayDownCashBuffer =
+$10,000,000` *(proposed, tunable)* and debt is nonzero, paying down
+`min(cash − buffer, debt)`. The buffer is 5× `NegotiationBidAmount`
+deliberately — cash can never be simultaneously short of the $2,000,000
+bid and above a $10,000,000 buffer, so borrow and paydown can never
+fire the same quarter for the same airline; no explicit mutual-exclusion
+check needed, the thresholds guarantee it on their own. New parameter
+`Money? currentDebtBalance = null` (mirrors `availableCash`'s exact
+shape) wired into both real loops.
+
+Done. 475 tests total (10 new, all in `BaselineAiTests`) — borrowing
+exactly the bid gap without attempting the same-quarter negotiation;
+never borrowing when it would breach the debt ceiling; never borrowing
+with no debt balance passed (permissive); never borrowing when cash
+already covers the bid; paying down the full debt when it's smaller than
+the affordable amount; paying down only the affordable portion when debt
+is larger; never paying down at zero debt or at/below the buffer; both
+scenarios running clean (zero rejections) through
+`QuarterEngine.RunQuarter`. One redundant condition
+(`shortfall > Money.Zero`, always true given the surrounding branch
+already guarantees a shortfall) was caught by the coverage gate as a
+missing branch and removed rather than tested around — genuinely dead
+code, not a gap. 100% line/branch coverage on `BaselineAi`. Overall
+project coverage **99.85%/99.62%**, at the established baseline.
+150-game QA harness sweep: 150/150 clean, 0 invariant violations, 0
+crashes.
+
+**Campaign trajectory — a third consecutive milestone where the M13 loop
+doesn't move at all, and this time no fresh diagnostic was even needed
+to explain why.** `AeroNext.Sim`'s M13 loop came back byte-for-byte
+identical to M31/M35's own figures (peak $42,113,450.14 at quarter 18,
+bankruptcy at quarter 22, -$445,156.38) — the reason is plainly visible
+in the already-printed per-quarter cash figures themselves: cash never
+once drops below ~$15,760,767 across all 22 quarters, nowhere near the
+$2,000,000 bid that would trigger a borrow, and this loop's debt balance
+sits at exactly $0 the whole run (nothing here has ever borrowed), so
+`PayDownDebtOrder`'s own "debt must be nonzero" gate never has anything
+to act on either.
+
+The 150-game QA harness sweep moved again, real but smaller than M35's
+own shift — bankruptcy-quarter averages barely changed (6.6–9.6, versus
+M35's 6.5–9.3), but average/median cash *at* bankruptcy improved
+meaningfully in most regions: EastAsia from -$1,451,876 to -$333,262,
+AustralAsia from -$2,168,937 to -$1,306,416, SouthWestAsia from
+-$2,271,026 to -$1,592,343. Consistent with the mechanism actually
+built: debt tools smooth the cash trajectory (borrow through a real
+shortfall, pay down idle debt before it accrues more interest) rather
+than delaying bankruptcy outright the way M35's route/fleet corrections
+did. Three milestones running now where the M13 loop's specific
+demand-rich, cash-rich, debt-free environment simply never exercises
+the newest mechanic, while the harder, region-differentiated QA harness
+games do — the same lesson restated a third time, worth trusting by now
+rather than re-deriving from scratch each time: measure both real
+loops, expect them to diverge, and don't assume either one is more
+"representative" than the other.
 
 ---
 

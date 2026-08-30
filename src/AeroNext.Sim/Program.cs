@@ -603,6 +603,19 @@ string ChokepointStatus(int year)
 // just never triggers either one, the same kind of loop-specific
 // insensitivity M31's own hiring change already showed in reverse (there
 // it was the QA harness that didn't move; here it's this loop).
+//
+// M36 (debt tools) re-measured on top of this too, and stays a third
+// consecutive byte-for-byte match here - no diagnostic needed this time,
+// the cash figures already printed above make the reason plain: cash
+// never once drops below ~$15,760,767 across all 22 quarters, nowhere
+// near the $2,000,000 negotiation bid that triggers a borrow, and this
+// loop's debt balance stays at exactly $0 throughout (nothing here ever
+// borrows), so PayDownDebtOrder's own trigger (debt must be nonzero)
+// never has anything to act on either. Both mechanics fire for real
+// against the QA harness's 150 games instead - see M36's own "Done"
+// writeup. Three milestones in a row now where this loop's specific
+// demand-rich, cash-rich environment simply never exercises the newest
+// mechanic, while the harder QA harness games do.
 var checkpoints = new HashSet<int> { 1, 18, 22, 121, campaignQuarters };
 
 var campaignDominance = RegionalDominanceState.Empty;
@@ -648,7 +661,7 @@ for (var q = 1; q <= campaignQuarters; q++)
         // same boat, though — this loop already tracks real per-airline
         // cash, so BaselineAi's negotiation step becomes genuinely
         // cash-aware here too.
-        var orders = BaselineAi.DecideOrders(campaignRoutes[name], campaignCaps[name], cities, yearDemandModel, availableFleet, campaignFleets[name], availableSlotsByCity: null, availableCash: campaignFinances[name].CashBalance);
+        var orders = BaselineAi.DecideOrders(campaignRoutes[name], campaignCaps[name], cities, yearDemandModel, availableFleet, campaignFleets[name], availableSlotsByCity: null, availableCash: campaignFinances[name].CashBalance, currentDebtBalance: campaignFinances[name].DebtBalance);
         var result = QuarterEngine.RunQuarter(q, campaignRoutes[name], campaignCaps[name], orders, cities, yearDemandModel, campaignFleets[name], availableCash: campaignFinances[name].CashBalance, currentDebtBalance: campaignFinances[name].DebtBalance);
         campaignRoutes[name] = result.Routes;
         campaignCaps[name] = result.ActionCap;
