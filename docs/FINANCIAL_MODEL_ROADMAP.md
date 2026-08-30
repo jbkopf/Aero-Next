@@ -855,6 +855,33 @@ quarter to a full quarter per region, everything else unchanged. Kept at
 $0 per the user's explicit direction, committed standalone rather than
 folded into any one milestone.
 
+**Amendment (found while designing M34, not part of the original
+commit):** a flat charge with no reduced rate for an idle unit means a
+starting airline that leaves one of its two starting aircraft unassigned
+— entirely plausible first-turn play, not misplay — bleeds cash forever
+with no path back short of retiring it. Verified against the actual
+1955 starting aircraft (Ilyushin Il-14, 28 seats, $0.13/ASK, 350 km/h;
+`StartingConditionsResolver.StartingAircraftQuantity = 2`): even paired
+with M34's cost-plus fare fix (below), one assigned + one idle unit
+loses $53,000–$456,000/quarter across every distance the aircraft can
+fly, because no fare can ever amortize a unit that isn't flying any
+route. Fixed by splitting the flat rate into two: `SalaryCostPerAircraftPerQuarter`
+(unchanged, $250,000 — an assigned/flying unit) and a new
+`IdleSalaryCostFraction = 0.15` *(proposed, tunable)* applied to the
+same rate for a unit with no `AssignedRouteKey` — a grounded aircraft
+still retains some crew/maintenance cost, just far less than one in
+active service, so idle capacity stays a real, felt drag (the M30
+design's actual point) without being an unrecoverable one. 0.15 was
+chosen with a margin under the worst case a distance-based fare could
+ever cover: as route distance approaches zero, the maximum idle rate a
+still-solvent single-assigned-aircraft-plus-one-idle-unit scenario can
+sustain approaches `(DefaultFareMarginOverCost + 1) × 0.90 load - 1 ≈
+0.17` — 0.15 clears that with room to spare, verified by direct
+calculation at nine distances from 1 km to the aircraft's full 1,600 km
+range, all strictly cash-positive. `ComputeSalaryCost` splits
+`fleet.Units` by `AssignedRouteKey is not null` and applies each rate to
+its own group rather than one flat multiplication.
+
 ---
 
 ## M34 — Fares: a direct, per-route price the player sets
@@ -907,19 +934,28 @@ public static class FareCalculator
 {
     public const double DefaultFareMarginOverCost = 0.30; // (Proposed, tunable)
 
-    // Cost to fly ONE seat this route's full distance — the same rate
-    // FinancialResolver.ComputeOperatingCost already applies per
-    // available-seat-km, evaluated for a single seat. Today this is the
-    // *only* per-route cost mechanic that exists (M12); a future
-    // per-route cost (e.g. a prorated share of salary/lease once a
-    // per-route fleet-cost attribution model exists) is meant to be
-    // added as one more term summed into this method — a single,
-    // obvious place to extend, not a change to every call site that
-    // reads a default fare.
-    public static Money CostPerSeatOffered(Route route) => ...;
+    // Sum of every currently-modeled per-route, per-*assigned*-aircraft
+    // cost, expressed as $ per ONE seat flown this route's full one-way
+    // distance. Today: operating cost (M12, the same rate
+    // FinancialResolver.ComputeOperatingCost applies per available-seat-km)
+    // plus this aircraft's own prorated share of its flat quarterly
+    // salary (M30) -- divided across the seats ONE assigned aircraft
+    // offers this quarter (route.SeatsPerQuarter / route.AircraftCount,
+    // exact by construction, no remainder). Adding another recurring
+    // per-aircraft cost later (e.g. a lease fee once a route can carry
+    // leased units) means adding one more term here, not touching every
+    // call site that reads a default fare -- this method is the single,
+    // obvious extension point the user asked for.
+    //
+    // Necessary, not optional: a margin over operating cost alone can
+    // never reliably cover a flat, distance-independent cost like
+    // salary -- verified directly against the 1955 starting scenario
+    // below, where operating-cost-only margin loses money at every
+    // distance the starting aircraft can fly.
+    public static Money CostPerSeatCarried(Route route) => ...;
 
     public static Money SuggestedFarePerPassenger(Route route) =>
-        // CostPerSeatOffered(route) grossed up by DefaultFareMarginOverCost,
+        // CostPerSeatCarried(route) grossed up by DefaultFareMarginOverCost,
         // computed in double space and rounded once, same pattern
         // ComputeOperatingCost/ComputeLeaseFee already use.
 }
@@ -929,6 +965,29 @@ factor isn't baked into the default fare, so an under-filled route stays
 a visible cash drain even at a "profitable" fare, consistent with
 `FinancialResolver`'s own existing doc comment and CLAUDE.md's
 legibility pillar.
+
+**Verified against a concrete scenario, not assumed correct** — the
+user posed it directly: starting conditions, $0 debt, one valid initial
+route opened turn one using the starting aircraft allotment, load factor
+holds at 90% forever, no other spending, should never go bankrupt.
+Checked against the real 1955 starting aircraft (Ilyushin Il-14, 28
+seats, $0.13/ASK, 350 km/h, 1,600 km range; 2 owned units) with both
+assigned to the route:
+
+| Distance | Op. cost/qtr | Salary/qtr | Net income, margin-over-operating-cost-only (original) | Net income, margin-over-cost-plus-salary-share (fixed) |
+|---|---|---|---|---|
+| 100 km | $511,056 | $500,000 | **-$413,120** | **+$171,880** |
+| 400 km | $1,211,392 | $500,000 | **-$294,063** | **+$290,937** |
+| 1,600 km | $1,817,088 | $500,000 | **-$191,095** | **+$393,905** |
+
+The original operating-cost-only margin is cash-negative at *every*
+distance the starting aircraft can fly, even the best case — a
+guaranteed, structural bankruptcy, not a tuning problem. The fixed
+per-assigned-aircraft cost basis above (`CostPerSeatCarried`) is
+comfortably cash-positive across the full range, and — combined with the
+idle-unit rate reduction recorded as an amendment to M30 above — holds
+even in the less-optimal case where only one of the two starting
+aircraft is ever put into service.
 
 **New `SetFareOrder(City Origin, City Destination, Money FarePerPassenger) : QuarterOrder`**
 — private, free (CLAUDE.md: "resolves against nothing"), same framing as
@@ -987,12 +1046,18 @@ with the user's own `BaselineAi`-rework deferral.
 
 **Done when:** a route's fare is visible and player-settable; a route's
 default fare at creation reflects its own aircraft/distance cost-plus-
-margin, not a flat global number; revenue for a fully-sold-out route is
-provably profitable at the default fare, mirroring
-`Resolve_ProfitableRoute_IncreasesCash`'s existing assumption; assigning
-another aircraft to an already-customized route preserves the custom
-fare rather than resetting it; a `SetFareOrder` against a pair the
-airline doesn't operate is rejected.
+margin *and* that aircraft's own prorated salary share, not operating
+cost alone; revenue for a fully-sold-out route is provably profitable at
+the default fare, mirroring `Resolve_ProfitableRoute_IncreasesCash`'s
+existing assumption; assigning another aircraft to an already-customized
+route preserves the custom fare rather than resetting it; a
+`SetFareOrder` against a pair the airline doesn't operate is rejected;
+**a dedicated test reproduces the scenario above** (starting conditions,
+$0 debt, one valid route opened turn one with the full starting
+allotment, 90% load factor held indefinitely, no other spending) and
+confirms cash balance never goes negative across a long run — the actual
+invariant this milestone exists to guarantee, not just the individual
+unit-level cost/revenue checks.
 
 ---
 
