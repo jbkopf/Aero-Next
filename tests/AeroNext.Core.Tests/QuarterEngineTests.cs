@@ -1037,4 +1037,78 @@ public class QuarterEngineTests
 
         Assert.Equal(0, QuarterEngine.Cost(new RelinquishSlotOrder(gateway), Array.Empty<Route>()));
     }
+
+    // --- M29: manual debt paydown ---
+
+    [Fact]
+    public void RunQuarter_PayDownDebtOrder_NoLimitsPassed_NeverRejected()
+    {
+        var demandModel = new GravityDemandModel();
+        var order = new PayDownDebtOrder(Money.FromDollars(10_000));
+
+        var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, Array.Empty<City>(), demandModel);
+
+        Assert.Single(result.AppliedOrders);
+        Assert.Empty(result.RejectedOrders);
+    }
+
+    [Fact]
+    public void RunQuarter_PayDownDebtOrder_ExceedingAvailableCash_Rejected()
+    {
+        var demandModel = new GravityDemandModel();
+        var order = new PayDownDebtOrder(Money.FromDollars(10_000));
+
+        var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, Array.Empty<City>(), demandModel, availableCash: Money.FromDollars(9_999));
+
+        Assert.Empty(result.AppliedOrders);
+        Assert.Single(result.RejectedOrders);
+    }
+
+    [Fact]
+    public void RunQuarter_PayDownDebtOrder_ExceedingCurrentDebtBalance_Rejected()
+    {
+        var demandModel = new GravityDemandModel();
+        var order = new PayDownDebtOrder(Money.FromDollars(10_000));
+
+        var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, Array.Empty<City>(), demandModel, currentDebtBalance: Money.FromDollars(9_999));
+
+        Assert.Empty(result.AppliedOrders);
+        Assert.Single(result.RejectedOrders);
+    }
+
+    [Fact]
+    public void RunQuarter_PayDownDebtOrder_ExactlyMatchingCashAndDebtBalance_Applied()
+    {
+        var demandModel = new GravityDemandModel();
+        var order = new PayDownDebtOrder(Money.FromDollars(10_000));
+
+        var result = QuarterEngine.RunQuarter(
+            1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, Array.Empty<City>(), demandModel,
+            availableCash: Money.FromDollars(10_000), currentDebtBalance: Money.FromDollars(10_000));
+
+        Assert.Single(result.AppliedOrders);
+        Assert.Empty(result.RejectedOrders);
+    }
+
+    [Fact]
+    public void RunQuarter_TwoPayDownDebtOrders_SecondExceedsWhatFirstLeftOfDebtBalance_Rejected()
+    {
+        var demandModel = new GravityDemandModel();
+        var orders = new QuarterOrder[]
+        {
+            new PayDownDebtOrder(Money.FromDollars(6_000)),
+            new PayDownDebtOrder(Money.FromDollars(6_000)),
+        };
+
+        var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, orders, Array.Empty<City>(), demandModel, currentDebtBalance: Money.FromDollars(10_000));
+
+        Assert.Single(result.AppliedOrders);
+        Assert.Single(result.RejectedOrders);
+    }
+
+    [Fact]
+    public void RunQuarter_PayDownDebtOrder_IsFreeAction()
+    {
+        Assert.Equal(0, QuarterEngine.Cost(new PayDownDebtOrder(Money.FromDollars(1_000)), Array.Empty<Route>()));
+    }
 }

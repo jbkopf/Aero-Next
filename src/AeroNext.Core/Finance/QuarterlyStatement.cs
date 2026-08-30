@@ -10,6 +10,13 @@ namespace AeroNext.Core.Finance;
 /// did before this milestone. M28: NegotiationBidCost gets the same
 /// treatment — every applied NegotiationOrder's Bid this quarter, charged
 /// whether or not it eventually wins (see FinancialResolver).
+///
+/// M29: DebtService now means interest *plus* PrincipalRepayment combined
+/// (real-world "debt service" has always meant both) — PrincipalRepayment
+/// is broken out separately so DebtService - PrincipalRepayment recovers
+/// interest alone. ManualDebtPaydown mirrors Borrowed's own treatment: a
+/// discretionary balance-sheet swap, not an operating cost, kept outside
+/// NetIncome (see FinancialResolver) the same way Borrowed already is.
 /// </summary>
 public sealed record QuarterlyStatement(
     Money Revenue,
@@ -22,4 +29,6 @@ public sealed record QuarterlyStatement(
     Money AircraftPurchaseCost = default,
     Money LeaseFee = default,
     Money RetirementProceeds = default,
-    Money NegotiationBidCost = default);
+    Money NegotiationBidCost = default,
+    Money PrincipalRepayment = default,
+    Money ManualDebtPaydown = default);

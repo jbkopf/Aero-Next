@@ -18,13 +18,13 @@ namespace AeroNext.Core.Turns;
 /// consumes its cost; an order that would exceed the remaining cap is
 /// rejected — but scanning continues, so a free order (any
 /// HireExecutiveOrder/RefinanceOrder/RetireAircraftOrder/CloseRouteOrder/
-/// RelinquishSlotOrder) later in the list still goes through even after
-/// an earlier, costlier order was rejected. Only orders that don't fit
-/// get skipped, not everything after them — a hard truncate-the-rest rule
-/// would needlessly block actions that cost nothing. Every RouteOrder
-/// costs 1 action now
-/// (M32) — growing an already-served pair by assigning another aircraft is
-/// no longer free; only genuinely private actions are.
+/// RelinquishSlotOrder/PayDownDebtOrder) later in the list still goes
+/// through even after an earlier, costlier order was rejected. Only
+/// orders that don't fit get skipped, not everything after them — a hard
+/// truncate-the-rest rule would needlessly block actions that cost
+/// nothing. Every RouteOrder costs 1 action now (M32) — growing an
+/// already-served pair by assigning another aircraft is no longer free;
+/// only genuinely private actions are.
 ///
 /// A RouteOrder the aircraft can't physically fly (M11's range constraint)
 /// is rejected before the budget check even runs — the action never gets
@@ -84,6 +84,23 @@ public static class QuarterEngine
     /// contents, matching City's own "null means gate access isn't
     /// modeled as scarce there."
     /// </param>
+    /// <param name="currentDebtBalance">
+    /// Null (the default) preserves fully permissive behavior — a
+    /// PayDownDebtOrder is never rejected for exceeding the debt owed,
+    /// exactly as before this parameter existed. Passing a real amount
+    /// (quarter-start DebtBalance, before this quarter's own automatic
+    /// interest/principal or RefinanceOrder borrowing) turns on
+    /// enforcement (M29): a PayDownDebtOrder whose Amount would exceed
+    /// what's left of it — after every already-applied paydown this
+    /// quarter — is rejected outright, the same "never attempt what will
+    /// predictably fail" principle availableCash already applies.
+    /// PayDownDebtOrder is gated by *both* this and availableCash
+    /// independently — it's rejected if it exceeds either. Validated
+    /// against the quarter-start balance only; a same-quarter
+    /// RefinanceOrder never increases how much can be paid down that same
+    /// quarter, since RefinanceOrder does no QuarterEngine-side processing
+    /// at all (resolved entirely in FinancialResolver, as always).
+    /// </param>
     public static QuarterResult RunQuarter(
         int quarterNumber,
         IReadOnlyList<Route> currentRoutes,
@@ -93,7 +110,8 @@ public static class QuarterEngine
         GravityDemandModel demandModel,
         AirlineFleet? fleet = null,
         Money? availableCash = null,
-        IReadOnlyDictionary<string, int>? availableSlotsByCity = null)
+        IReadOnlyDictionary<string, int>? availableSlotsByCity = null,
+        Money? currentDebtBalance = null)
     {
         var applied = new List<QuarterOrder>();
         var rejected = new List<QuarterOrder>();
@@ -101,6 +119,7 @@ public static class QuarterEngine
         var spent = 0;
         var cashSpent = Money.Zero;
         var slotsSpentByCity = new Dictionary<string, int>();
+        var debtPaidDownSoFar = Money.Zero;
         var year = Timeline.YearForQuarter(quarterNumber);
         var workingFleet = fleet;
 
@@ -167,6 +186,18 @@ public static class QuarterEngine
                 var available = availableSlotsByCity.GetValueOrDefault(relinquishOrder.TargetCity.Id) - slotsSpentByCity.GetValueOrDefault(relinquishOrder.TargetCity.Id);
 
                 if (available <= 0)
+                {
+                    rejected.Add(order);
+                    continue;
+                }
+            }
+
+            if (order is PayDownDebtOrder payDownOrder)
+            {
+                var exceedsCash = availableCash is not null && cashSpent + payDownOrder.Amount > availableCash.Value;
+                var exceedsDebt = currentDebtBalance is not null && debtPaidDownSoFar + payDownOrder.Amount > currentDebtBalance.Value;
+
+                if (exceedsCash || exceedsDebt)
                 {
                     rejected.Add(order);
                     continue;
@@ -299,6 +330,19 @@ public static class QuarterEngine
                 slotsSpentByCity[appliedRelinquishOrder.TargetCity.Id] = slotsSpentByCity.GetValueOrDefault(appliedRelinquishOrder.TargetCity.Id) + 1;
             }
 
+            if (order is PayDownDebtOrder appliedPayDownOrder)
+            {
+                if (availableCash is not null)
+                {
+                    cashSpent += appliedPayDownOrder.Amount;
+                }
+
+                if (currentDebtBalance is not null)
+                {
+                    debtPaidDownSoFar += appliedPayDownOrder.Amount;
+                }
+            }
+
             applied.Add(order);
             spent += cost;
         }
@@ -327,6 +371,7 @@ public static class QuarterEngine
         RetireAircraftOrder => 0,
         CloseRouteOrder => 0,
         RelinquishSlotOrder => 0,
+        PayDownDebtOrder => 0,
         NegotiationOrder => 1,
         AircraftOrder => 1,
         LeaseAircraftOrder => 1,

@@ -568,20 +568,20 @@ string ChokepointStatus(int year)
 }
 
 // Chosen to capture the actual arc found by running this: re-measured
-// after M28 made NegotiationOrder bids cost real cash at submission
-// (docs/FINANCIAL_MODEL_ROADMAP.md). Route count still freezes at 2 from
-// quarter 3 onward, same structural reason M32 found (growing the best
-// route costs 2 of 3 actions once nothing's idle, leaving only 1 - just
-// enough for a negotiation bid). What moved: every quarter BaselineAi
-// affords the $2M bid, it pays it immediately, win or lose - a real,
-// recurring-feeling drain on top of everything M26/M32 already added
-// (it's actually a one-time-per-successful-quarter cost, not literally
-// recurring, but it lands most quarters here since cash starts high).
-// Bankruptcy moved from quarter 16 to quarter 11 (1957, -$891,513.07),
-// frozen from there - carried passengers keep climbing anyway on the
-// frozen routes as global demand grows across the decades. 121 stays in
-// the checkpoint set as a stickiness sanity check.
-var checkpoints = new HashSet<int> { 1, 9, 10, 11, 121, campaignQuarters };
+// after M29 made automatic quarterly debt service interest *plus* a 5%
+// principal repayment, not interest alone (docs/FINANCIAL_MODEL_ROADMAP.md).
+// Route count still freezes at 2 from quarter 3 onward (M32's structural
+// finding, unchanged). BaselineAi never submits PayDownDebtOrder, but its
+// automatic debt service is bigger every single quarter regardless -
+// interest plus 5% of the $10M starting debt (~$500K/quarter extra) lands
+// on top of everything M26/M28/M32/M33 already added, with no player
+// action needed to trigger it. Bankruptcy moved from quarter 11 to
+// quarter 9 (1957, -$601,426.82), frozen from there - by then the
+// automatic principal component had already shrunk the debt balance
+// itself from its $10M start, purely from 8 quarters of decay before
+// bankruptcy locked it in place. 121 stays in the checkpoint set as a
+// stickiness sanity check.
+var checkpoints = new HashSet<int> { 1, 8, 9, 121, campaignQuarters };
 
 var campaignDominance = RegionalDominanceState.Empty;
 string? campaignWinner = null;
@@ -627,7 +627,7 @@ for (var q = 1; q <= campaignQuarters; q++)
         // cash, so BaselineAi's negotiation step becomes genuinely
         // cash-aware here too.
         var orders = BaselineAi.DecideOrders(campaignRoutes[name], campaignCaps[name], cities, yearDemandModel, availableFleet, campaignFleets[name], availableSlotsByCity: null, availableCash: campaignFinances[name].CashBalance);
-        var result = QuarterEngine.RunQuarter(q, campaignRoutes[name], campaignCaps[name], orders, cities, yearDemandModel, campaignFleets[name], availableCash: campaignFinances[name].CashBalance);
+        var result = QuarterEngine.RunQuarter(q, campaignRoutes[name], campaignCaps[name], orders, cities, yearDemandModel, campaignFleets[name], availableCash: campaignFinances[name].CashBalance, currentDebtBalance: campaignFinances[name].DebtBalance);
         campaignRoutes[name] = result.Routes;
         campaignCaps[name] = result.ActionCap;
         campaignFleets[name] = result.UpdatedFleet!;

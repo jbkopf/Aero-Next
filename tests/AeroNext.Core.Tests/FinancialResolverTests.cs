@@ -57,8 +57,12 @@ public class FinancialResolverTests
     }
 
     [Fact]
-    public void Resolve_DebtService_IsInterestRateTimesDebtBalance()
+    public void Resolve_DebtService_IsInterestPlusPrincipalRepayment_BothTimesDebtBalance()
     {
+        // M29: DebtService now means interest + automatic principal
+        // repayment combined - PrincipalRepayment is broken out
+        // separately so DebtService - PrincipalRepayment recovers
+        // interest alone.
         var a = MakeCity("a", 0, 0, 1);
         var airline = new Airline("A", Array.Empty<Route>());
         var market = CompetitiveMarket.Resolve(new[] { airline }, new[] { a }, DemandModel);
@@ -66,7 +70,8 @@ public class FinancialResolverTests
 
         var (_, statement) = FinancialResolver.Resolve(state, airline, market, Array.Empty<QuarterOrder>());
 
-        Assert.Equal(Money.FromDollars(5_000), statement.DebtService); // 5% of 100,000
+        Assert.Equal(Money.FromDollars(5_000), statement.PrincipalRepayment); // 5% of 100,000
+        Assert.Equal(Money.FromDollars(10_000), statement.DebtService); // 5% interest + 5% principal of 100,000
     }
 
     [Fact]
@@ -90,11 +95,16 @@ public class FinancialResolverTests
         // M23: closes the infinite-refinance gap - without this trigger, an
         // airline could stay technically solvent forever by borrowing just
         // enough cash each quarter, no matter how deep its debt hole is.
+        // M29: the ceiling is now checked against the balance *after* this
+        // same quarter's automatic 5% principal repayment, so borrowing
+        // merely 1 dollar over the ceiling (the old amount here) no longer
+        // triggers it on its own - borrow comfortably past ceiling/0.95
+        // instead, so the post-repayment balance is still well over it.
         var a = MakeCity("a", 0, 0, 1);
         var airline = new Airline("A", Array.Empty<Route>());
         var market = CompetitiveMarket.Resolve(new[] { airline }, new[] { a }, DemandModel);
         var state = FinancialState.Start(Money.FromDollars(10_000_000), Money.Zero, interestRatePerQuarter: 0.0);
-        var orders = new QuarterOrder[] { new RefinanceOrder(Money.FromDollars(FinancialResolver.DebtCeilingDollars + 1)) };
+        var orders = new QuarterOrder[] { new RefinanceOrder(Money.FromDollars(100_000_000)) };
 
         var (newState, statement) = FinancialResolver.Resolve(state, airline, market, orders);
 
@@ -137,8 +147,13 @@ public class FinancialResolverTests
     }
 
     [Fact]
-    public void Resolve_RefinanceOrder_IncreasesCashAndDebtByTheSameAmount()
+    public void Resolve_RefinanceOrder_IncreasesCashAndDebt_ThenAutomaticPrincipalAppliesTheSameQuarter()
     {
+        // M29: the freshly-borrowed balance isn't exempt from this same
+        // quarter's automatic principal repayment - PrincipalRepaymentRatePerQuarter
+        // applies regardless of InterestRatePerQuarter (even at 0% interest,
+        // as here), so DebtBalance ends up below the raw Borrowed amount
+        // and cash absorbs that same charge.
         var a = MakeCity("a", 0, 0, 1);
         var airline = new Airline("A", Array.Empty<Route>());
         var market = CompetitiveMarket.Resolve(new[] { airline }, new[] { a }, DemandModel);
@@ -148,8 +163,9 @@ public class FinancialResolverTests
         var (newState, statement) = FinancialResolver.Resolve(state, airline, market, orders);
 
         Assert.Equal(Money.FromDollars(50_000), statement.Borrowed);
-        Assert.Equal(Money.FromDollars(50_000), newState.DebtBalance);
-        Assert.Equal(state.CashBalance + Money.FromDollars(50_000), newState.CashBalance);
+        Assert.Equal(Money.FromDollars(2_500), statement.PrincipalRepayment); // 5% of the freshly-borrowed 50,000
+        Assert.Equal(Money.FromDollars(47_500), newState.DebtBalance); // 50,000 - 2,500 automatic principal
+        Assert.Equal(state.CashBalance + Money.FromDollars(50_000) - Money.FromDollars(2_500), newState.CashBalance);
     }
 
     [Fact]
@@ -395,5 +411,88 @@ public class FinancialResolverTests
         var (newState, _) = FinancialResolver.Resolve(state, airline, market, orders);
 
         Assert.Equal(state.CashBalance - Money.FromDollars(500_000), newState.CashBalance);
+    }
+
+    // --- M29: automatic principal amortization + manual paydown ---
+
+    [Fact]
+    public void Resolve_UntouchedDebtBalance_ShrinksQuarterOverQuarter_WithNoPlayerAction()
+    {
+        var a = MakeCity("a", 0, 0, 1);
+        var airline = new Airline("A", Array.Empty<Route>());
+        var market = CompetitiveMarket.Resolve(new[] { airline }, new[] { a }, DemandModel);
+        var state = FinancialState.Start(Money.FromDollars(10_000_000), Money.FromDollars(100_000), interestRatePerQuarter: 0.0);
+
+        var (afterQ1, _) = FinancialResolver.Resolve(state, airline, market, Array.Empty<QuarterOrder>());
+        var (afterQ2, _) = FinancialResolver.Resolve(afterQ1, airline, market, Array.Empty<QuarterOrder>());
+
+        Assert.Equal(Money.FromDollars(95_000), afterQ1.DebtBalance); // 5% automatic principal, no player action
+        Assert.True(afterQ2.DebtBalance < afterQ1.DebtBalance);
+        Assert.True(afterQ2.DebtBalance > Money.Zero); // declining-balance - shrinks, never reaches exactly zero
+    }
+
+    [Fact]
+    public void Resolve_ManualPaydown_ReducesBalanceImmediately_AndShrinksNextQuartersAutomaticCharge()
+    {
+        var a = MakeCity("a", 0, 0, 1);
+        var airline = new Airline("A", Array.Empty<Route>());
+        var market = CompetitiveMarket.Resolve(new[] { airline }, new[] { a }, DemandModel);
+        var state = FinancialState.Start(Money.FromDollars(10_000_000), Money.FromDollars(100_000), interestRatePerQuarter: 0.0);
+        var paydownOrders = new QuarterOrder[] { new PayDownDebtOrder(Money.FromDollars(20_000)) };
+
+        var (withPaydown, statement) = FinancialResolver.Resolve(state, airline, market, paydownOrders);
+        var (withoutPaydown, _) = FinancialResolver.Resolve(state, airline, market, Array.Empty<QuarterOrder>());
+
+        Assert.Equal(Money.FromDollars(20_000), statement.ManualDebtPaydown);
+        Assert.Equal(Money.FromDollars(76_000), withPaydown.DebtBalance); // (100,000 - 20,000) * 0.95
+        Assert.True(withPaydown.DebtBalance < withoutPaydown.DebtBalance); // immediately smaller this same quarter
+
+        var (nextWithPaydown, nextStatementWithPaydown) = FinancialResolver.Resolve(withPaydown, airline, market, Array.Empty<QuarterOrder>());
+        var (_, nextStatementWithoutPaydown) = FinancialResolver.Resolve(withoutPaydown, airline, market, Array.Empty<QuarterOrder>());
+
+        Assert.True(nextStatementWithPaydown.PrincipalRepayment.Cents < nextStatementWithoutPaydown.PrincipalRepayment.Cents);
+        Assert.NotNull(nextWithPaydown); // sanity: the paid-down path keeps resolving normally
+    }
+
+    [Fact]
+    public void Resolve_PayDownDebtOrder_ExceedingDebtBalance_IsQuarterEnginesJob_NotClampedHereEither()
+    {
+        // FinancialResolver itself never rejects anything - QuarterEngine
+        // is the sole place an order is accepted or rejected (M29's own
+        // affordability rule). This documents that FinancialResolver just
+        // applies whatever Amount it's handed, trusting QuarterEngine
+        // already validated it - if it somehow received an oversized
+        // amount directly (bypassing QuarterEngine), debt legitimately
+        // goes negative rather than silently clamping.
+        var a = MakeCity("a", 0, 0, 1);
+        var airline = new Airline("A", Array.Empty<Route>());
+        var market = CompetitiveMarket.Resolve(new[] { airline }, new[] { a }, DemandModel);
+        var state = FinancialState.Start(Money.FromDollars(10_000_000), Money.FromDollars(10_000), interestRatePerQuarter: 0.0);
+        var orders = new QuarterOrder[] { new PayDownDebtOrder(Money.FromDollars(15_000)) };
+
+        var (newState, _) = FinancialResolver.Resolve(state, airline, market, orders);
+
+        Assert.True(newState.DebtBalance < Money.Zero);
+    }
+
+    [Fact]
+    public void Resolve_BorrowedAndManualDebtPaydown_StayOutsideNetIncome_LikeBorrowedAlreadyDid()
+    {
+        // Equal-and-opposite borrow + paydown in one quarter nets to zero
+        // change in the balance used for this quarter's own automatic
+        // interest/principal calc - NetIncome, CashBalance, and DebtBalance
+        // should all come out identical to a quarter with neither order.
+        var a = MakeCity("a", 0, 0, 1);
+        var airline = new Airline("A", Array.Empty<Route>());
+        var market = CompetitiveMarket.Resolve(new[] { airline }, new[] { a }, DemandModel);
+        var state = FinancialState.Start(Money.FromDollars(10_000_000), Money.FromDollars(100_000), interestRatePerQuarter: 0.02);
+        var orders = new QuarterOrder[] { new RefinanceOrder(Money.FromDollars(50_000)), new PayDownDebtOrder(Money.FromDollars(50_000)) };
+
+        var (withBoth, statementWithBoth) = FinancialResolver.Resolve(state, airline, market, orders);
+        var (withNeither, statementWithNeither) = FinancialResolver.Resolve(state, airline, market, Array.Empty<QuarterOrder>());
+
+        Assert.Equal(statementWithNeither.NetIncome, statementWithBoth.NetIncome);
+        Assert.Equal(withNeither.CashBalance, withBoth.CashBalance);
+        Assert.Equal(withNeither.DebtBalance, withBoth.DebtBalance);
     }
 }

@@ -64,6 +64,21 @@ public static class FinancialResolver
     /// </summary>
     public const double RetirementResaleFraction = 0.40;
 
+    /// <summary>
+    /// M29: automatic quarterly principal repayment, as a fraction of the
+    /// current balance (a declining-balance schedule — additional
+    /// borrowing keeps merging into one running DebtBalance, so this can
+    /// only be a percentage of what exists now, not a fixed payment
+    /// against some original principal that no longer exists as a
+    /// distinct number once loans combine). DebtService genuinely expands
+    /// to mean interest *plus* this — real-world "debt service" has
+    /// always meant both combined; the interest-only version was a
+    /// placeholder simplification, not a deliberate definition this
+    /// changes. Never reaches exactly zero under geometric decay — the
+    /// honest consequence of not tracking a fixed loan term.
+    /// </summary>
+    public const double PrincipalRepaymentRatePerQuarter = 0.05;
+
     /// <param name="fleet">
     /// The airline's *post*-quarter fleet (QuarterResult.UpdatedFleet) —
     /// so a unit leased this same quarter is charged its fee immediately,
@@ -95,8 +110,12 @@ public static class FinancialResolver
         var revenue = ComputeRevenue(airline, marketResult, yieldPerPassengerKm);
         var operatingCost = ComputeOperatingCost(airline, marketResult);
         var borrowed = appliedOrders.OfType<RefinanceOrder>().Aggregate(Money.Zero, (sum, o) => sum + o.AdditionalBorrowing);
-        var debtBalance = state.DebtBalance + borrowed;
-        var debtService = new Money((long)Math.Round(debtBalance.Cents * state.InterestRatePerQuarter, MidpointRounding.AwayFromZero));
+        var manualPaydown = appliedOrders.OfType<PayDownDebtOrder>().Aggregate(Money.Zero, (sum, o) => sum + o.Amount);
+        var debtBalance = state.DebtBalance + borrowed - manualPaydown;
+        var interest = new Money((long)Math.Round(debtBalance.Cents * state.InterestRatePerQuarter, MidpointRounding.AwayFromZero));
+        var principalRepayment = new Money((long)Math.Round(debtBalance.Cents * PrincipalRepaymentRatePerQuarter, MidpointRounding.AwayFromZero));
+        var debtService = interest + principalRepayment;
+        var finalDebtBalance = debtBalance - principalRepayment;
 
         var purchaseCost = appliedOrders.OfType<AircraftOrder>().Aggregate(Money.Zero, (sum, o) => sum + o.Type.Cost * o.Quantity);
         var leaseFee = ComputeLeaseFee(fleet);
@@ -104,11 +123,11 @@ public static class FinancialResolver
         var negotiationBidCost = appliedOrders.OfType<NegotiationOrder>().Aggregate(Money.Zero, (sum, o) => sum + o.Bid);
 
         var netIncome = revenue - operatingCost - debtService - purchaseCost - leaseFee + retirementProceeds - negotiationBidCost;
-        var cashAfter = state.CashBalance + borrowed + netIncome;
-        var isBankrupt = cashAfter < Money.Zero || debtBalance > Money.FromDollars(DebtCeilingDollars);
+        var cashAfter = state.CashBalance + borrowed - manualPaydown + netIncome;
+        var isBankrupt = cashAfter < Money.Zero || finalDebtBalance > Money.FromDollars(DebtCeilingDollars);
 
-        var newState = state with { CashBalance = cashAfter, DebtBalance = debtBalance, IsBankrupt = isBankrupt };
-        var statement = new QuarterlyStatement(revenue, operatingCost, debtService, borrowed, netIncome, cashAfter, isBankrupt, purchaseCost, leaseFee, retirementProceeds, negotiationBidCost);
+        var newState = state with { CashBalance = cashAfter, DebtBalance = finalDebtBalance, IsBankrupt = isBankrupt };
+        var statement = new QuarterlyStatement(revenue, operatingCost, debtService, borrowed, netIncome, cashAfter, isBankrupt, purchaseCost, leaseFee, retirementProceeds, negotiationBidCost, principalRepayment, manualPaydown);
 
         return (newState, statement);
     }

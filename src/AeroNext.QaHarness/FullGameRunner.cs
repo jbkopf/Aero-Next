@@ -155,7 +155,8 @@ public static class FullGameRunner
                 var result = QuarterEngine.RunQuarter(
                     q, routes[name], caps[name], orders, cities, yearDemandModel, fleets[name],
                     availableCash: finances[name].CashBalance,
-                    availableSlotsByCity: q == 1 ? null : availableSlotsByCity);
+                    availableSlotsByCity: q == 1 ? null : availableSlotsByCity,
+                    currentDebtBalance: finances[name].DebtBalance);
 
                 if (q == 1 && result.RejectedOrders.Count > 0)
                 {

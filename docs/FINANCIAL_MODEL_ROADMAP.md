@@ -643,7 +643,7 @@ before M26/M32/M33/M28's mechanics can be fairly judged on campaign feel.
 
 ---
 
-## M29 — Loan restructuring: automatic amortization + manual paydown
+## M29 — Loan restructuring: automatic amortization + manual paydown ✅
 
 **Settled with the user, precisely:** additional borrowing keeps merging
 into one running `DebtBalance` — no per-loan tracking, same as today.
@@ -676,6 +676,80 @@ immediately and correspondingly reduces the next quarter's automatic
 principal-plus-interest charge (since it's computed against the new,
 smaller balance); paying down more than the current balance or more than
 available cash is rejected.
+
+**One real design decision the settled text didn't fully pin down:**
+where manual paydown and automatic principal repayment each sit relative
+to `NetIncome`. Resolved by matching existing precedent rather than
+inventing one fresh — `RefinanceOrder`'s `Borrowed` was *already* kept
+**outside** `NetIncome`, added to cash as its own balance-sheet term
+(`cashAfter = CashBalance + borrowed + netIncome`), since raising debt
+isn't an operating expense. Manual paydown is the same kind of event in
+reverse — kept outside `NetIncome` too, symmetric with `Borrowed`.
+Automatic principal is different in kind: a mandatory, recurring
+quarterly charge like interest already is, so it stays folded into
+`DebtService`/`NetIncome` exactly where interest already lived — only its
+*amount* changed, not its treatment. `DebtService`'s own meaning
+genuinely expands to interest-plus-principal combined — real-world "debt
+service" has always meant both; the interest-only version was a
+placeholder simplification this corrects, not a redefinition.
+`QuarterlyStatement` gained `PrincipalRepayment` (so `DebtService -
+PrincipalRepayment` recovers interest alone) and `ManualDebtPaydown`
+(mirroring `Borrowed`'s own field), both the same "broken out, not
+silently folded" legibility treatment every prior cost/revenue line this
+session got.
+
+**`PayDownDebtOrder(Money Amount)`** — private, free, same framing as
+`RefinanceOrder`. `QuarterEngine.RunQuarter` gained `Money?
+currentDebtBalance = null` (mirrors `availableCash`'s exact shape) and a
+running `debtPaidDownSoFar` tracker (mirrors `cashSpent`) — rejected
+outright, not silently clamped, if it would exceed *either* available
+cash or the quarter-start debt balance, reusing the existing cash
+machinery for the first half and adding one new, small, symmetric piece
+for the second. Validated against the quarter-start balance only — a
+same-quarter `RefinanceOrder` never increases how much can be paid down
+that same quarter, since `RefinanceOrder` still does no `QuarterEngine`-side
+processing at all (resolved entirely in `FinancialResolver`, unchanged).
+No `BaselineAi` changes — it never submits this order, per the user's own
+explicit staging (`BaselineAi` work deferred until after M30, once both
+milestones' real numbers are in).
+
+**Blast radius was three pre-existing tests, not the one originally
+estimated while planning** — found by actually running the suite, not
+assumed: `Resolve_DebtService_IsInterestRateTimesDebtBalance` (expected,
+rewritten to assert the combined interest+principal figure);
+`Resolve_RefinanceOrder_IncreasesCashAndDebtByTheSameAmount` (not
+anticipated — a freshly-borrowed balance isn't exempt from the *same*
+quarter's automatic principal repayment, so "cash and debt move by
+exactly the borrowed amount" is no longer true even at 0% interest, since
+the principal rate applies independently of the interest rate); a debt-
+ceiling test that borrowed exactly `ceiling + 1` (no longer sufficient to
+trigger bankruptcy on its own, since the same quarter's automatic 5%
+repayment pulls the post-borrowing balance back under the ceiling —
+fixed by borrowing comfortably past `ceiling / 0.95` instead). All three
+were genuine, correct consequences of the design, not bugs.
+
+Done. 427 tests total (10 new — 4 `FinancialResolver`, 6 `QuarterEngine`).
+100% line/branch coverage on every touched/new class (`PayDownDebtOrder`,
+`QuarterEngine`, `FinancialResolver`, `QuarterlyStatement`). Overall
+project coverage **99.85%/99.58%**, at the established baseline. 150-game
+QA harness sweep at 244 quarters: 150/150 clean, 0 invariant violations.
+
+**Campaign trajectory shifted again, measured not assumed — this time
+purely from a passive/background change, no `BaselineAi` behavior
+involved at all.** `AeroNext.Sim`'s M13 loop: bankruptcy moved from
+quarter 11 to **quarter 9 (1957, -$601,426.82)**. The automatic principal
+component alone adds roughly $500K/quarter against the $10M starting
+debt, landing on every airline every quarter with zero player or AI
+action required — on top of everything M26/M28/M32/M33 already stacked
+on. QA harness sweep: bankruptcy now averages quarter 4.7-7.0 across
+regions (essentially matching M28's 4.9-7.2 — this milestone's marginal
+effect was real but smaller than M28's direct action-blocking one), win
+rate holds at **0/150**. Noted for the upcoming `BaselineAi` work rather
+than acted on here, per the user's own staging: this is now the fifth
+milestone in a row where the financial model got measurably more
+realistic and the same un-tuned heuristic AI's campaign got measurably
+worse — the case for a real rework, after M30 lands, is about as
+complete as the data can make it.
 
 ---
 
