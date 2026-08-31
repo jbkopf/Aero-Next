@@ -49,6 +49,81 @@ public class DomesticProfitOptimizerStrategyTests
     }
 
     [Fact]
+    public void DecideOrders_HubConnectedCandidate_BeatsHigherNonstopProfitDisconnectedOne_OnceOneStopValueIsCounted()
+    {
+        // Numerically pre-verified (not guessed): with an existing
+        // home-hub route, "hub-far" earns less on its own nonstop demand
+        // alone ($1,525,138.86) than the fully disconnected "p2-p3"
+        // ($1,612,260.00) - a nonstop-only ranking picks p2-p3. But
+        // hub-far also unlocks a brand-new home<->far one-stop
+        // connection through the existing hub (home is already
+        // home-hub-connected) - real extra demand carried on hub-far's
+        // own leg, at hub-far's own fare, exactly FinancialResolver's
+        // real per-leg mechanic. Counting it correctly flips the
+        // ranking: hub-far's real value ($1,826,396.60) beats p2-p3. A
+        // tight 500km aircraft range excludes every other candidate pair
+        // among these 5 cities (all >500km apart otherwise) so only
+        // these two compete.
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
+        var hub = MakeCity("hub", Region.NorthAmerica, 5, 0, 100);
+        var far = MakeCity("far", Region.NorthAmerica, 9, 0, 7);
+        var p2 = MakeCity("p2", Region.NorthAmerica, -6, -6, 90);
+        var p3 = MakeCity("p3", Region.NorthAmerica, -6.9, -6.9, 90);
+        var cities = new[] { home, hub, far, p2, p3 };
+        var wideAircraft = new AircraftType("wide", "Wide", Seats: 100, RangeKm: 2000); // flies the existing network's own leg
+        var candidateAircraft = new AircraftType("t", "Test", Seats: 100, RangeKm: 500); // short enough to exclude every other candidate pair
+        var existing = new[] { new Route(home, hub, wideAircraft, AircraftCount: 1) };
+        var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, candidateAircraft, quantity: 1, FleetOwnershipMode.Owned);
+
+        var context = MakeContext(existing, cities, new[] { candidateAircraft }, Region.NorthAmerica, fleet);
+
+        var orders = Strategy.DecideOrders(context);
+
+        var routeOrder = Assert.Single(orders.OfType<RouteOrder>());
+        Assert.Equal(new HashSet<string> { "hub", "far" }, new HashSet<string> { routeOrder.Origin.Id, routeOrder.Destination.Id });
+    }
+
+    [Fact]
+    public void DecideOrders_HubBonus_SkipsDemandAlreadyDirectlyServedElsewhere_NotDoubleCounted()
+    {
+        // Numerically pre-verified: existing routes home-hub, hub-elsewhere,
+        // elsewhere-far. Candidate hub-far connects through hub to TWO
+        // already-served neighbors (home and elsewhere) - but elsewhere is
+        // already directly connected to far via the existing elsewhere-far
+        // route, so that demand is already nonstop-served and must be
+        // skipped, not double-counted. Correct hub bonus = home-far demand
+        // only, giving hub-far a real value of $1,826,396.60 - below the
+        // p2-p3 decoy's $1,974,336.00, so p2-p3 wins. If elsewhere-far's
+        // demand were wrongly double-counted too, hub-far's value would
+        // reach $2,110,988.04, wrongly beating the decoy instead. A tight
+        // 500km aircraft range excludes every other candidate pair
+        // (all >500km apart) so only these two compete.
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
+        var hub = MakeCity("hub", Region.NorthAmerica, 5, 0, 100);
+        var far = MakeCity("far", Region.NorthAmerica, 9, 0, 7);
+        var elsewhere = MakeCity("elsewhere", Region.NorthAmerica, 5, -6, 60);
+        var p2 = MakeCity("p2", Region.NorthAmerica, -6, -6, 100);
+        var p3 = MakeCity("p3", Region.NorthAmerica, -6.9, -7.5, 100);
+        var cities = new[] { home, hub, far, elsewhere, p2, p3 };
+        var wideAircraft = new AircraftType("wide", "Wide", Seats: 100, RangeKm: 2000); // flies the existing network's own legs
+        var candidateAircraft = new AircraftType("t", "Test", Seats: 100, RangeKm: 500); // short enough to exclude every other candidate pair
+        var existing = new[]
+        {
+            new Route(home, hub, wideAircraft, AircraftCount: 1),
+            new Route(hub, elsewhere, wideAircraft, AircraftCount: 1),
+            new Route(elsewhere, far, wideAircraft, AircraftCount: 1),
+        };
+        var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, candidateAircraft, quantity: 1, FleetOwnershipMode.Owned);
+
+        var context = MakeContext(existing, cities, new[] { candidateAircraft }, Region.NorthAmerica, fleet);
+
+        var orders = Strategy.DecideOrders(context);
+
+        var routeOrder = Assert.Single(orders.OfType<RouteOrder>());
+        Assert.Equal(new HashSet<string> { "p2", "p3" }, new HashSet<string> { routeOrder.Origin.Id, routeOrder.Destination.Id });
+    }
+
+    [Fact]
     public void DecideOrders_NeverOpensACrossRegionPair_EvenWhenItWouldBeMoreProfitable()
     {
         var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);

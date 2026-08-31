@@ -21,6 +21,16 @@ namespace AeroNext.Core.Ai;
 /// cross-region route from a prior strategy still gets managed, just
 /// never opened fresh). Never proposes a cross-region RouteOrder or
 /// NegotiationOrder.
+///
+/// M40 (hub-awareness): that same profitability ranking is now
+/// hub-aware, not just nonstop-demand-aware — a real equivalence again,
+/// not an invented bonus. FinancialResolver pays each *leg* its own fare
+/// for every passenger CompetitiveMarket routes over it, one-stop
+/// itineraries included (NetworkPlanner fills a leg's leftover capacity
+/// with connecting traffic after nonstop demand), so a candidate that
+/// connects to an already-served city really would carry extra,
+/// currently-uncounted passengers at this leg's own fare — see
+/// EstimatedHubBonusDemand for exactly which demand that is and why.
 /// </summary>
 public sealed class DomesticProfitOptimizerStrategy : IAiStrategy
 {
@@ -143,10 +153,18 @@ public sealed class DomesticProfitOptimizerStrategy : IAiStrategy
             .Where(p => !served.Contains((p.Origin.Id, p.Destination.Id)))
             .ToList();
 
+        // Built once per DecideOrders call, not once per candidate - hub
+        // bonus depends only on the existing network, not on which
+        // candidate/aircraft is being scored.
+        var neighborsByCity = BuildNeighborsByCity(context.CurrentRoutes);
+        var pairsWithHubBonus = domesticPairs
+            .Select(p => (Pair: p, HubBonus: EstimatedHubBonusDemand(context.DemandModel, neighborsByCity, p)))
+            .ToList();
+
         var best = candidateTypes
-            .SelectMany(type => domesticPairs
-                .Where(p => p.DistanceKm <= type.RangeKm)
-                .Select(p => (Pair: p, Aircraft: type, Profit: EstimatedProfit(p, type))))
+            .SelectMany(type => pairsWithHubBonus
+                .Where(pb => pb.Pair.DistanceKm <= type.RangeKm)
+                .Select(pb => (Pair: pb.Pair, Aircraft: type, Profit: EstimatedProfit(pb.Pair, type, pb.HubBonus))))
             .OrderByDescending(c => c.Profit.Cents)
             .ThenBy(c => c.Pair.Origin.Id, StringComparer.Ordinal)
             .ThenBy(c => c.Pair.Destination.Id, StringComparer.Ordinal)
@@ -156,11 +174,90 @@ public sealed class DomesticProfitOptimizerStrategy : IAiStrategy
         return best.Pair is null ? null : (best.Pair, best.Aircraft);
     }
 
-    /// <summary>fare-per-passenger x carried - the actual dollar figure ranked by; see the class doc comment for why this is a real profit proxy, not a loose one, under today's uniform-margin fare model.</summary>
-    private static Money EstimatedProfit(PairDemand pair, AircraftType aircraft)
+    /// <summary>Every city directly reachable from a given city via an existing route, keyed by city id - the "who already connects to whom" map EstimatedHubBonusDemand needs.</summary>
+    private static Dictionary<string, List<City>> BuildNeighborsByCity(IReadOnlyList<Route> currentRoutes)
+    {
+        var neighborsByCity = new Dictionary<string, List<City>>(StringComparer.Ordinal);
+
+        void AddNeighbor(City from, City to)
+        {
+            if (!neighborsByCity.TryGetValue(from.Id, out var list))
+            {
+                list = new List<City>();
+                neighborsByCity[from.Id] = list;
+            }
+
+            list.Add(to);
+        }
+
+        foreach (var route in currentRoutes)
+        {
+            AddNeighbor(route.Origin, route.Destination);
+            AddNeighbor(route.Destination, route.Origin);
+        }
+
+        return neighborsByCity;
+    }
+
+    /// <summary>
+    /// M40: the real, currently-uncounted one-stop demand a candidate
+    /// pair would carry on its own new leg, if opened. For whichever
+    /// endpoint is already served (the "connector"), every other city S
+    /// already reachable from it becomes a brand-new S ↔ connector ↔
+    /// otherEndpoint itinerary once this leg exists - carried on THIS
+    /// leg, earning THIS leg's own fare, exactly the mechanic
+    /// FinancialResolver/CompetitiveMarket/NetworkPlanner already apply
+    /// for real (see the class doc comment). Skips any S already
+    /// directly connected to otherEndpoint elsewhere - that demand is
+    /// already nonstop-served, matching NetworkPlanner.Plan's own
+    /// nonstop-first allocation, and skips a city already counted from
+    /// the other connector to avoid double-counting when both endpoints
+    /// happen to already be served. Legitimately returns 0 when neither
+    /// endpoint is served yet (e.g. quarter 1) - no special-cased
+    /// fallback needed, EstimatedProfit already reduces to today's
+    /// pure-nonstop ranking in that case.
+    /// </summary>
+    private static long EstimatedHubBonusDemand(GravityDemandModel demandModel, IReadOnlyDictionary<string, List<City>> neighborsByCity, PairDemand candidate)
+    {
+        var connectorPairs = new[]
+        {
+            (Connector: candidate.Origin, OtherEndpoint: candidate.Destination),
+            (Connector: candidate.Destination, OtherEndpoint: candidate.Origin),
+        };
+
+        var bonus = 0L;
+        var countedNeighborIds = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var (connector, otherEndpoint) in connectorPairs)
+        {
+            if (!neighborsByCity.TryGetValue(connector.Id, out var neighbors))
+            {
+                continue; // connector isn't served at all - nothing to connect through
+            }
+
+            var otherEndpointNeighborIds = neighborsByCity.TryGetValue(otherEndpoint.Id, out var otherNeighbors)
+                ? otherNeighbors.Select(c => c.Id).ToHashSet(StringComparer.Ordinal)
+                : new HashSet<string>(StringComparer.Ordinal);
+
+            foreach (var s in neighbors)
+            {
+                if (s.Id == otherEndpoint.Id || !countedNeighborIds.Add(s.Id) || otherEndpointNeighborIds.Contains(s.Id))
+                {
+                    continue;
+                }
+
+                bonus += demandModel.ForPair(s, otherEndpoint).PassengersPerQuarter;
+            }
+        }
+
+        return bonus;
+    }
+
+    /// <summary>fare-per-passenger x carried (nonstop demand plus M40's real hub bonus) - the actual dollar figure ranked by; see the class doc comment for why this is a real profit proxy, not a loose one, under today's uniform-margin fare model.</summary>
+    private static Money EstimatedProfit(PairDemand pair, AircraftType aircraft, long hubBonusDemand)
     {
         var hypotheticalRoute = new Route(pair.Origin, pair.Destination, aircraft, AircraftCount: 1);
-        var cappedCarried = Math.Min(pair.PassengersPerQuarter, hypotheticalRoute.SeatsPerQuarter);
+        var cappedCarried = Math.Min(pair.PassengersPerQuarter + hubBonusDemand, hypotheticalRoute.SeatsPerQuarter);
 
         return FareCalculator.SuggestedFarePerPassenger(hypotheticalRoute) * cappedCarried;
     }

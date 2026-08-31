@@ -728,7 +728,7 @@ system this milestone didn't touch and shouldn't silently absorb.
 
 ---
 
-## M40 — Network/hub awareness
+## M40 — Network/hub awareness ✅
 
 `BaselineAi`'s own doc comment already names this gap directly: "no
 hub-awareness — picks the single best pair/gateway in the whole world,
@@ -741,6 +741,109 @@ not a prerequisite to it — both M39's strategies already carry an
 implicit form of network-shape awareness (a regional cluster; explicit
 cross-region reach), so this becomes "make each strategy's own network
 sense sharper," not "add network sense from nothing."
+
+**Traced the real mechanism, not just the gap's description.**
+`FinancialResolver.ComputeRevenue` pays each *route (leg)* its own
+`FarePerPassenger × SeatsUsed`, and `CompetitiveMarket` gets `SeatsUsed`
+per leg from `NetworkPlanner.Plan`, which allocates nonstop demand to a
+leg first, then fills *leftover* capacity with one-stop itineraries
+connecting through that leg as a hub. So a new route's real revenue
+potential already includes any one-stop demand it would carry —
+`CompetitiveMarket`/`FinancialResolver` already account for this in the
+real resolver. What didn't: `DomesticProfitOptimizerStrategy`'s own
+`EstimatedProfit`, ranking unserved-pair candidates by
+`PairDemand.PassengersPerQuarter` alone — blind to a candidate connecting
+to an already-served city carrying real, currently-uncounted one-stop
+passengers at that same leg's own fare. The same class of gap M39
+diagnosed for `RouteEvaluator` (decision-time math blind to a mechanic
+the real resolver already applies), this time for hub value instead of
+competitive splitting.
+
+**Scoped to `DomesticProfitOptimizerStrategy` only.**
+`RapidExpansionStrategy`'s own defining trait is breadth — cross-region
+reach, no route cap, no consolidation — deliberately the opposite of
+hub-building; rewarding connectivity there would fight its own purpose,
+and the roadmap already credits it with a different form of network
+awareness (explicit cross-region reach). `DomesticProfitOptimizerStrategy`
+is the one whose whole concept — a small, profitable, capped home
+network — is exactly where rewarding hub-and-spoke shape over disconnected
+point-to-point pairs makes sense. `BaselineAi.DecideOrders` stays
+untouched (dead/demo-only after M39's wiring).
+
+**`EstimatedHubBonusDemand`** (new, `DomesticProfitOptimizerStrategy.cs`):
+for a candidate pair, for whichever endpoint is already served (the
+"connector"), every other city already reachable from it represents a
+brand-new one-stop opportunity once the candidate opens — carried on the
+candidate's own new leg, earning *that leg's own* fare, exactly matching
+`FinancialResolver`'s real per-leg accounting, not approximating it.
+Skips any city already directly connected to the candidate's other
+endpoint elsewhere (that demand is already nonstop-served, matching
+`NetworkPlanner.Plan`'s own nonstop-first allocation) and skips a city
+already counted from the other connector (both endpoints served at
+once). `EstimatedProfit` now caps carried passengers at
+`pair.PassengersPerQuarter + hubBonus`, computed once per candidate pair
+and reused across every aircraft type tried for it — same complexity
+class as before, no new O(n²) blowup. Legitimately returns 0 when nothing
+is served yet (quarter 1) — no special-cased fallback, `EstimatedProfit`
+already reduces to the pre-M40 pure-nonstop ranking in that case.
+
+**Done when:** the cap/region-restriction/toolkit logic is unchanged;
+`EstimatedProfit` is hub-aware; a numerically-verified test shows a
+network-connected candidate beating a higher-nonstop-demand disconnected
+one once one-stop value is counted; a second test confirms demand
+already directly served elsewhere isn't double-counted; both real loops
+are re-measured, not assumed.
+
+Done. 545 tests total (2 new, in `DomesticProfitOptimizerStrategyTests`),
+both numerically pre-verified before writing (this session's own
+established discipline) against a hand-computed `GravityDemandModel`/
+`FareCalculator`/`FlightPerformance` reconstruction, not guessed: one
+proves a hub-connected candidate ($1,826,396.60 real value) beats a
+higher-raw-nonstop-demand disconnected one ($1,612,260.00) once one-stop
+value is counted, where a nonstop-only ranking would have picked the
+disconnected one instead; the other proves demand already directly
+served by an existing route elsewhere is correctly excluded, not
+double-counted ($1,826,396.60 correct vs. $2,110,988.04 if double-counted
+would have wrongly won). `DomesticProfitOptimizerStrategy` at 100%/100%
+line/branch coverage. Overall project coverage **99.89%/99.30%**,
+at/above the established baseline; every remaining partial branch
+(`AiToolkit`, `BaselineAi`, `RapidExpansionStrategy`) is the same
+confirmed-structurally-unreachable set M39 already documented, untouched
+by this milestone.
+
+**Campaign trajectory.** The M13 loop came back byte-for-byte identical
+to M39's own numbers — expected, not a bug: that loop resolves via a
+`RapidExpansionStrategy` win at quarter 10, before
+`DomesticProfitOptimizerStrategy`'s ranking ever gets a chance to matter
+in such a short game. The 150-game QA harness sweep, which runs far
+longer and covers more varied seat configurations, moved for real:
+150/150 clean, 0 violations, 0 crashes, still 0/150 reaching a win
+condition before the timeline ends. Regionally, the effect was mixed,
+not a uniform improvement — reported in full rather than only the
+flattering part:
+
+| Region | Bankrupt (M39→M40) | Avg cash (M39→M40) | Wins (M39→M40) |
+|---|---|---|---|
+| NorthAmerica | 144→140 | -$1.2M→**+$4.6M** | 3→6 |
+| Europe | 94→95 | $11.4M→-$1.1M | 1→2 |
+| EastAsia | 3→9 | $735.8M→$167.8M | 116→**132** |
+| SouthWestAsia | 54→55 | $34.4M→-$1.3M | 2→0 |
+| AustralAsia | 16→41 | $1,415.1M→$65.8M | 28→8 |
+| SouthAmerica | 119→119 | -$1.66M→-$1.66M (unchanged) | 0→2 |
+
+NorthAmerica got measurably healthier (fewer bankruptcies, cash flipped
+positive) — smarter domestic route selection genuinely helps a region
+that isn't already winning by brute economic force. But this did **not**
+fix M39's own flagged regional-imbalance finding — if anything the
+extreme concentration got *more* lopsided at the very top: EastAsia's
+win share rose from 116/150 to 132/150, even as AustralAsia's runaway
+wealth (avg cash was $1.4B, briefly exceeding SouthAmerica-style
+implausibility) collapsed toward a far more modest $65.8M. Read
+together: hub-aware ranking reshuffles who's healthy *beneath* the top,
+it doesn't touch why EastAsia dominates in the first place — consistent
+with M39's own diagnosis that the imbalance traces to
+`RegionalEconomics.Factor` itself, a system this milestone still hasn't
+touched, on purpose.
 
 ---
 
