@@ -516,6 +516,40 @@ public class GravityDemandModelTests
     }
 
     [Fact]
+    public void RealDataset_CampDavidPeace1979_PermanentlyBoostsCairo_NeverReverts()
+    {
+        // Window 5 of the historical sweep: the Egypt-Israel Peace
+        // Treaty (March 1979) normalizes relations and ends the state
+        // of war - a genuine, permanent structural improvement in
+        // Cairo's own stability, not a shock with a recovery arc, so
+        // it's modeled the same permanent shape as the 747's own
+        // step-up and the Cuba embargo: a single Event breakpoint with
+        // no reversion, ever.
+        var cities = CityCatalog.LoadFile(Path.Combine(AppContext.BaseDirectory, "data", "cities.json"));
+        var byId = cities.ToDictionary(c => c.Id);
+        var schedule = DemandGrowthCatalog.LoadCampaignSchedule(Path.Combine(AppContext.BaseDirectory, "data"));
+        var withoutPeaceTreaty = schedule.Where(p => p.EventGroup != "camp-david-1979").ToList();
+        var farAway = byId["gru"];
+
+        var before1978 = new GravityDemandModel(schedule: schedule, year: 1978).ForPair(farAway, byId["cai"]).PassengersPerQuarter;
+        var before1978Reference = new GravityDemandModel(schedule: withoutPeaceTreaty, year: 1978).ForPair(farAway, byId["cai"]).PassengersPerQuarter;
+        Assert.Equal(before1978Reference, before1978);
+
+        var during1979 = new GravityDemandModel(schedule: schedule, year: 1979).ForPair(farAway, byId["cai"]).PassengersPerQuarter;
+        Assert.True(during1979 > before1978, "1979 should boost above the pre-treaty baseline");
+
+        // Permanence, proven against a same-year reference with the
+        // treaty's own event group removed, decades later in 2015 -
+        // the with/without ratio should stay pinned at the authored
+        // 1.15 factor, not fade back toward 1.0.
+        var boosted2015 = new GravityDemandModel(schedule: schedule, year: 2015).ForPair(farAway, byId["cai"]).PassengersPerQuarter;
+        var unaffected2015 = new GravityDemandModel(schedule: withoutPeaceTreaty, year: 2015).ForPair(farAway, byId["cai"]).PassengersPerQuarter;
+
+        var ratio = boosted2015 / (double)unaffected2015;
+        Assert.InRange(ratio, 1.14, 1.16);
+    }
+
+    [Fact]
     public void RealDataset_OlympicsEvents_BoostHostYearOnly_NotAdjacentYears()
     {
         // Stress-tests the trend/event architecture against a real,

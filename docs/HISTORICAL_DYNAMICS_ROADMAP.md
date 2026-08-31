@@ -15,7 +15,9 @@ every year with no gaps), M21 round 7 done (Cuba embargo 1962, window
 2 — the first permanent, real-dataset event in the sweep; a real
 regional shift measured in the QA sweep), M21 round 8 done (Suez
 Canal closure 1967-75, window 3 — a second, longer Cairo episode;
-both loops unchanged, a genuine no-effect result), M22 not started.**
+both loops unchanged, a genuine no-effect result), M21 round 9 done
+(Camp David Peace Treaty 1979, window 5 — a permanent Cairo boost,
+window 4 needed nothing new), M22 not started.**
 China's
 opening and the 1997 Asian Financial Crisis remain named, not-yet-
 authored future rounds. Builds on the completed sim core
@@ -189,7 +191,7 @@ entries (M21's job), so nothing behavioral could have changed yet.
 
 ---
 
-## M21 — Author real historical trends and events (round 1: architecture + Dubai; round 2: global curve redesign; round 3: trend/event split; round 4: every Olympic Games + a real perf fix; round 5: remaining Games via same-country substitution; round 6: Suez Crisis, window 1 of a 13-window historical sweep; round 7: Cuba embargo, window 2; round 8: Suez Canal closure 1967-75, window 3) ✅
+## M21 — Author real historical trends and events (round 1: architecture + Dubai; round 2: global curve redesign; round 3: trend/event split; round 4: every Olympic Games + a real perf fix; round 5: remaining Games via same-country substitution; round 6: Suez Crisis, window 1 of a 13-window historical sweep; round 7: Cuba embargo, window 2; round 8: Suez Canal closure 1967-75, window 3; round 9: Camp David Peace Treaty 1979, window 5) ✅
 
 Content, not mechanics — the same shape as the aircraft-catalog and
 city-expansion series, and expected to become its own ongoing round-by-round
@@ -760,8 +762,8 @@ pick events ad hoc.
 | 1955-59 | Suez Crisis (1956) | Authored round 6 — Cairo (`cai`), city-scoped |
 | 1960-64 | US embargo on Cuba (1962) | **Authored this round** — `hav`, permanent step-down |
 | 1965-69 | Six-Day War → Suez Canal closed (1967-75) | **Authored round 8** — Cairo (`cai`), city-scoped, spans into windows 4-5 |
-| 1970-74 | (747, Munich/Sapporo Olympics, first oil crisis) | Already covered by rounds 3-4 |
-| 1975-79 | Suez reopens (1975); Camp David / Egypt-Israel peace (1979) | Named — Cairo bookend + boost |
+| 1970-74 | (747, Munich/Sapporo Olympics, first oil crisis) | **Confirmed round 9** — already covered by rounds 3-4, nothing new needed |
+| 1975-79 | Suez reopens (1975, round 8's own bookend); Camp David / Egypt-Israel peace (1979) | **Authored round 9** — Cairo (`cai`), permanent boost |
 | 1980-84 | Iran-Iraq War (1980-88) | Named, spans into window 7 — `thr`, `bgw` |
 | 1985-89 | Chernobyl (1986); Berlin Wall falls (1989) | Named — Europe-wide dip; `ber` trend-shift |
 | 1990-94 | USSR dissolves (1991) | Named — `mow` |
@@ -934,6 +936,55 @@ a route to move. Two Cairo-scoped events now compose correctly on top
 of each other whenever a game *does* touch Africa — confirmed by the
 proof test's own reference-schedule comparison, just not visible in
 this particular sweep's own random draws.
+
+### Round 9: the sweep, window 4 confirmed empty, window 5 (Camp David Peace Treaty, 1979) ✅
+
+**Window 4 (1970-74) needed nothing new** — checked directly against
+the sweep table rather than skipped on assumption: the 747 (round 3),
+Munich and Sapporo (round 4), and the first oil crisis (round 3)
+already cover this window's own real history. Confirmed, not assumed,
+and recorded in the table above so the sweep's own gap-free coverage
+stays visible.
+
+**Egypt-Israel Peace Treaty:** signed March 1979, following the
+September 1978 Camp David Accords — Egypt becomes the first Arab state
+to formally recognize Israel, ending the state of war between them.
+A genuine, permanent structural improvement in Cairo's own stability,
+not a shock with a recovery arc — modeled the same permanent shape as
+the 747 and the Cuba embargo: a single `Event` breakpoint
+(`camp-david-1979`), no reversion, ever. +15% (`1.15`), matching the
+747's own magnitude for the same reason both are used here: a
+structural, permanent step, not a temporary spike sized like the
+Olympics' own +20%.
+
+This is Cairo's **third** independent event group (alongside the 1956
+Suez Crisis and the 1967-75 closure) — a real exercise of the
+composition architecture round 3's own bug fix protects: three
+separate historical episodes on the same city, each resolved and
+reverted (or not) entirely independently, then multiplied together.
+
+New proof test,
+`RealDataset_CampDavidPeace1979_PermanentlyBoostsCairo_NeverReverts`:
+confirms 1978 (pre-treaty) matches a same-year reference with the
+treaty's own event group removed exactly (proving the two Suez
+episodes alone drive 1978's value, nothing new yet), 1979 boosts above
+1978, and the boost stays pinned at the authored 1.15 ratio as late as
+2015 against the same kind of event-free reference used for the Cuba
+embargo's own permanence proof. 582 tests, up from 581, all passing;
+coverage gate re-run and unchanged (same accepted baseline as every
+round).
+
+**Measured — both loops unchanged again, the third consecutive genuine
+no-effect result on Cairo for the same reason as rounds 6 and 8: none
+of these particular 150 seeded games' 4 competing airlines call Africa
+home.** M13 stayed byte-identical to round 8 (resolves by 1957, 22
+years before this event). The 150-game sweep also came back
+byte-for-byte identical to round 8's own numbers (113/150 wins avg
+quarter 19.9; every regional row unchanged, NorthAmerica still 117/144
+bankrupt $19.61M avg cash 16 wins). Expected, not a concern — Africa
+genuinely isn't touched by this particular sweep's random seed draws,
+and the effect's correctness is already proven directly by the new
+proof test's own before/after and reference-schedule comparisons.
 
 ---
 
