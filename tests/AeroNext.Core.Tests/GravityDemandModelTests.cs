@@ -792,6 +792,65 @@ public class GravityDemandModelTests
     }
 
     [Fact]
+    public void RealDataset_Eyjafjallajokull2010_DipsEuropeOnly_RecoveredBy2011()
+    {
+        // Window 12 of the historical sweep: Eyjafjallajokull's April
+        // 2010 eruption shut down European airspace for over a week -
+        // the sweep's third Region-scoped event, and the first purely
+        // aviation-driven one (unlike Chernobyl's fear-driven tourism
+        // dip or SARS's outbreak-driven collapse). 2010 also falls
+        // inside the unrelated global financial crisis's own
+        // 2009-2011 window, so a ratio against a same-year event-free
+        // reference isolates the effect cleanly.
+        var cities = CityCatalog.LoadFile(Path.Combine(AppContext.BaseDirectory, "data", "cities.json"));
+        var byId = cities.ToDictionary(c => c.Id);
+        var schedule = DemandGrowthCatalog.LoadCampaignSchedule(Path.Combine(AppContext.BaseDirectory, "data"));
+        var withoutEruption = schedule.Where(p => p.EventGroup != "eyjafjallajokull-2010").ToList();
+        var farAway = byId["gru"];
+        var europeCity = byId["lhr"];
+
+        double EruptionRatio(int year)
+        {
+            var withEvent = new GravityDemandModel(schedule: schedule, year: year).ForPair(farAway, europeCity).PassengersPerQuarter;
+            var withoutEvent = new GravityDemandModel(schedule: withoutEruption, year: year).ForPair(farAway, europeCity).PassengersPerQuarter;
+            return withEvent / (double)withoutEvent;
+        }
+
+        Assert.True(EruptionRatio(2010) < 1.0, "2010 should be suppressed relative to an eruption-free reference");
+        Assert.Equal(1.0, EruptionRatio(2011));
+    }
+
+    [Fact]
+    public void RealDataset_ArabSpring2011_PermanentlyCollapsesCairo_FourthIndependentLayer()
+    {
+        // Also window 12: the Arab Spring is Cairo's fourth
+        // independent event layer (alongside the 1956 Suez Crisis, the
+        // 1967-75 closure, and the 1979 Camp David boost) - the
+        // deepest real exercise yet of the multi-independent-group
+        // composition architecture. Political instability following
+        // Mubarak's ouster doesn't meaningfully resolve within the
+        // campaign's own 2015 end year, so - like the 2003 Iraq War -
+        // it's modeled with no reversion.
+        var cities = CityCatalog.LoadFile(Path.Combine(AppContext.BaseDirectory, "data", "cities.json"));
+        var byId = cities.ToDictionary(c => c.Id);
+        var schedule = DemandGrowthCatalog.LoadCampaignSchedule(Path.Combine(AppContext.BaseDirectory, "data"));
+        var withoutArabSpring = schedule.Where(p => p.EventGroup != "arab-spring-2011").ToList();
+        var farAway = byId["gru"];
+        var cairo = byId["cai"];
+
+        double ArabSpringRatio(int year)
+        {
+            var withEvent = new GravityDemandModel(schedule: schedule, year: year).ForPair(farAway, cairo).PassengersPerQuarter;
+            var withoutEvent = new GravityDemandModel(schedule: withoutArabSpring, year: year).ForPair(farAway, cairo).PassengersPerQuarter;
+            return withEvent / (double)withoutEvent;
+        }
+
+        Assert.Equal(1.0, ArabSpringRatio(2010));
+        Assert.True(ArabSpringRatio(2012) < 1.0, "2012 should be suppressed relative to an Arab-Spring-free reference");
+        Assert.InRange(ArabSpringRatio(2015), 0.69, 0.71);
+    }
+
+    [Fact]
     public void RealDataset_OlympicsEvents_BoostHostYearOnly_NotAdjacentYears()
     {
         // Stress-tests the trend/event architecture against a real,

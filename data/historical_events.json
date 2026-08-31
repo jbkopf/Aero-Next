@@ -146,5 +146,10 @@
   { "year": 2003, "globalMultiplier": 0.75, "region": "EastAsia", "kind": "Event", "eventGroup": "sars-2003", "name": "SARS outbreak (Nov 2002 - July 2003): sharp, short-lived collapse in East Asian air travel during the outbreak's peak months" },
   { "year": 2004, "globalMultiplier": 1.0,  "region": "EastAsia", "kind": "Event", "eventGroup": "sars-2003", "name": "WHO declares the outbreak contained (July 2003); East Asian travel recovers" },
 
-  { "year": 2003, "globalMultiplier": 0.50, "cityId": "bgw", "kind": "Event", "eventGroup": "iraq-war-2003", "name": "US-led invasion of Iraq (March 2003): a second, later, far more severe episode than the 1980-88 war - occupation and insurgency leave Baghdad's travel/business activity near collapse, with no recovery within the campaign's own remaining timeframe (instability continues through ISIS's 2014 gains)" }
+  { "year": 2003, "globalMultiplier": 0.50, "cityId": "bgw", "kind": "Event", "eventGroup": "iraq-war-2003", "name": "US-led invasion of Iraq (March 2003): a second, later, far more severe episode than the 1980-88 war - occupation and insurgency leave Baghdad's travel/business activity near collapse, with no recovery within the campaign's own remaining timeframe (instability continues through ISIS's 2014 gains)" },
+
+  { "year": 2010, "globalMultiplier": 0.88, "region": "Europe", "kind": "Event", "eventGroup": "eyjafjallajokull-2010", "name": "Eyjafjallajokull eruption (April 2010): unprecedented shutdown of European airspace for over a week, a purely aviation-driven disruption spread across the whole year's demand" },
+  { "year": 2011, "globalMultiplier": 1.0,  "region": "Europe", "kind": "Event", "eventGroup": "eyjafjallajokull-2010", "name": "European airspace fully reopens; disruption resolved" },
+
+  { "year": 2011, "globalMultiplier": 0.70, "cityId": "cai", "kind": "Event", "eventGroup": "arab-spring-2011", "name": "Egyptian Revolution / Arab Spring (Jan-Feb 2011): Mubarak's ouster, followed by sustained political instability (transitional military rule, the 2013 coup) - tourism collapses and does not meaningfully recover within the campaign's own remaining timeframe, a fourth independent event layer on Cairo" }
 ]

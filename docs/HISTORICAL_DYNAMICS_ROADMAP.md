@@ -32,7 +32,10 @@ Kong's own size and gateway status), M21 round 14 done (SARS 2003 —
 the sweep's second Region-scoped event, EastAsia — and the 2003 Iraq
 War as a second, permanent, far more severe Baghdad episode, window
 10; a real, non-monotonic EastAsia ripple, SouthWestAsia unmoved in
-this sample), M22 not
+this sample), M21 round 15 done (Eyjafjallajokull 2010 + Arab Spring
+2011, window 12 — Cairo's fourth independent event layer; 2015
+confirmed needing nothing — **the 13-window sweep is now complete**),
+M22 not
 started.**
 China's
 opening and the 1997 Asian Financial Crisis remain named, not-yet-
@@ -207,7 +210,7 @@ entries (M21's job), so nothing behavioral could have changed yet.
 
 ---
 
-## M21 — Author real historical trends and events (round 1: architecture + Dubai; round 2: global curve redesign; round 3: trend/event split; round 4: every Olympic Games + a real perf fix; round 5: remaining Games via same-country substitution; round 6: Suez Crisis, window 1 of a 13-window historical sweep; round 7: Cuba embargo, window 2; round 8: Suez Canal closure 1967-75, window 3; round 9: Camp David Peace Treaty 1979, window 5; round 10: Iran-Iraq War 1980-88, window 6; round 11: Chernobyl + Berlin Wall falls, window 7; round 12: USSR dissolution, window 8; round 13: Hong Kong Handover, window 9; round 14: SARS + Iraq War 2003, window 10) ✅
+## M21 — Author real historical trends and events (round 1: architecture + Dubai; round 2: global curve redesign; round 3: trend/event split; round 4: every Olympic Games + a real perf fix; round 5: remaining Games via same-country substitution; round 6: Suez Crisis, window 1 of a 13-window historical sweep; round 7: Cuba embargo, window 2; round 8: Suez Canal closure 1967-75, window 3; round 9: Camp David Peace Treaty 1979, window 5; round 10: Iran-Iraq War 1980-88, window 6; round 11: Chernobyl + Berlin Wall falls, window 7; round 12: USSR dissolution, window 8; round 13: Hong Kong Handover, window 9; round 14: SARS + Iraq War 2003, window 10; round 15: Eyjafjallajokull + Arab Spring, window 12 — sweep complete) ✅
 
 Content, not mechanics — the same shape as the aircraft-catalog and
 city-expansion series, and expected to become its own ongoing round-by-round
@@ -785,9 +788,9 @@ pick events ad hoc.
 | 1990-94 | USSR dissolves (1991) | **Authored round 12** — `mow`, non-monotonic trend-shift |
 | 1995-99 | Hong Kong Handover (1997) | **Authored round 13** — `hkg`, confirmed genuinely mild |
 | 2000-04 | SARS (2003); Iraq War (2003) | **Authored round 14** — Region-scope (EastAsia); `bgw` permanent second episode |
-| 2005-09 | — | No standout beyond what rounds 3-4 already cover (Beijing, financial crisis) |
-| 2010-14 | Eyjafjallajökull eruption (2010); Arab Spring (2011) | Named — Europe-wide airspace shutdown; Cairo/North Africa |
-| 2015 | — | Campaign's final year — no room for a reversion arc, not worth authoring |
+| 2005-09 | — | **Confirmed round 15** — already covered by rounds 3-4 (Beijing, financial crisis), nothing new needed |
+| 2010-14 | Eyjafjallajökull eruption (2010); Arab Spring (2011) | **Authored round 15** — Europe region-wide shutdown; Cairo's 4th layer |
+| 2015 | — | **Confirmed round 15** — campaign's final year, no room for a reversion arc, not worth authoring |
 
 China's opening and the 1997 Asian Financial Crisis stay reserved for
 their own dedicated rounds (named since round 1/2), not folded into
@@ -1296,6 +1299,62 @@ Baghdad's own -50% permanent collapse is the same "correctness proven
 directly, invisible at this sample size" result as Hong Kong in round
 13 — Baghdad, like Tehran, is a comparatively minor city within a
 region whose AI strategies aren't centered on it.
+
+### Round 15: the sweep, window 11 confirmed empty, window 12 (Eyjafjallajökull + Arab Spring), 2015 confirmed empty — sweep complete ✅
+
+**Window 11 (2005-09) needed nothing new** — checked directly, same
+discipline as window 4 in round 9: the Beijing Olympics (round 4) and
+the financial crisis (round 3) already cover it.
+
+**Eyjafjallajökull — the sweep's third Region-scoped event, and the
+first purely aviation-driven one.** The April 2010 eruption shut down
+European airspace for over a week — unlike Chernobyl's fear-driven
+tourism dip or SARS's outbreak-driven collapse, this was flight
+operations themselves being grounded. -12% (`0.88`), a single year
+(2010), reverting in 2011 — a real but brief disruption, spread across
+a whole year's demand at this sim's own annual granularity, so sized
+more modestly than the day-level severity might suggest.
+
+**Arab Spring — Cairo's fourth independent event layer**, alongside
+the 1956 Suez Crisis, the 1967-75 closure, and the 1979 Camp David
+boost — the deepest real exercise yet of the multi-independent-group
+composition architecture round 3's own bug fix protects. Mubarak's
+ouster (Jan-Feb 2011) and the sustained political instability that
+followed (transitional military rule, the 2013 coup) left Egyptian
+tourism collapsed without meaningful recovery within the campaign's
+own 2015 end year — modeled the same permanent shape as the 2003 Iraq
+War: -30% (`0.70`), no reversion.
+
+**2015 confirmed needing nothing** — the campaign's own final year,
+no room for a reversion arc, same conclusion the original
+sweep-planning table already reached, now checked directly rather
+than left an assertion.
+
+**This closes the entire 13-window sweep** first built in round 6:
+every one of the 61 campaign years (1955-2015) has now been checked
+against real, travel-relevant history, with 9 windows authored (1-3,
+5-10, 12) and 3 confirmed needing nothing (4, 11, and the 2015 tail).
+
+Two new proof tests, both using the ratio-against-same-year-reference
+pattern (2010 falls inside the unrelated global financial crisis's own
+2009-2011 window, another confound this pattern cancels automatically)
+— both passed on their first run, the fourth round in a row this
+pattern has worked cleanly on the first try.
+`RealDataset_Eyjafjallajokull2010_DipsEuropeOnly_RecoveredBy2011` and
+`RealDataset_ArabSpring2011_PermanentlyCollapsesCairo_
+FourthIndependentLayer`. 591 tests, up from 589, all passing; coverage
+gate re-run and unchanged (same accepted baseline as every round).
+
+**Measured — both loops came back byte-for-byte identical to round
+14's own numbers, a genuine "no effect" result for both events at this
+sample size.** M13 unchanged (resolves decades before either event).
+The 150-game sweep: Europe's own row stays flat despite
+Eyjafjallajökull, and Cairo's fourth event layer doesn't move Africa's
+numbers either — the same pattern rounds 6, 8, and 9 already
+established for Cairo (Africa isn't among the home regions these
+particular 150 seeded games draw), and the same "correctness proven
+directly, not visible in this sample" story as Hong Kong (round 13)
+and Baghdad's own 2003 event (round 14).
 
 ---
 
