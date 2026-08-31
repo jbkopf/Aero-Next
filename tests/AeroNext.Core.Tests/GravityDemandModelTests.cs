@@ -692,6 +692,30 @@ public class GravityDemandModelTests
     }
 
     [Fact]
+    public void RealDataset_HongKongHandover1997_MildDip_RecoveredBy1999()
+    {
+        // Window 9 of the historical sweep: the July 1997 handover of
+        // Hong Kong to China is real but historically mild in effect -
+        // brief transitional uncertainty, quickly resolved, with the
+        // city's role as a global aviation/financial hub continuing
+        // essentially uninterrupted. Deliberately the smallest
+        // magnitude authored anywhere in this sweep, and deliberately
+        // kept separate from the unrelated, same-year Asian Financial
+        // Crisis, which stays its own reserved future round.
+        var cities = CityCatalog.LoadFile(Path.Combine(AppContext.BaseDirectory, "data", "cities.json"));
+        var byId = cities.ToDictionary(c => c.Id);
+        var schedule = DemandGrowthCatalog.LoadCampaignSchedule(Path.Combine(AppContext.BaseDirectory, "data"));
+        var farAway = byId["gru"];
+
+        var before1996 = new GravityDemandModel(schedule: schedule, year: 1996).ForPair(farAway, byId["hkg"]).PassengersPerQuarter;
+        var during1997 = new GravityDemandModel(schedule: schedule, year: 1997).ForPair(farAway, byId["hkg"]).PassengersPerQuarter;
+        var after1999 = new GravityDemandModel(schedule: schedule, year: 1999).ForPair(farAway, byId["hkg"]).PassengersPerQuarter;
+
+        Assert.True(during1997 < before1996, "1997 should dip below 1996");
+        Assert.Equal(before1996, after1999);
+    }
+
+    [Fact]
     public void RealDataset_OlympicsEvents_BoostHostYearOnly_NotAdjacentYears()
     {
         // Stress-tests the trend/event architecture against a real,

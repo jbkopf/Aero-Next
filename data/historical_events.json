@@ -138,5 +138,8 @@
   { "year": 1955, "globalMultiplier": 0.6, "cityId": "mow", "name": "Moscow: Soviet-era travel restrictions, Intourist controls, Aeroflot state monopoly limit access" },
   { "year": 1991, "globalMultiplier": 0.5, "cityId": "mow", "name": "USSR dissolves (Dec 1991): economic collapse and hyperinflation ('shock therapy') offset newly opened borders" },
   { "year": 2000, "globalMultiplier": 1.0, "cityId": "mow", "name": "Post-Yeltsin stabilization; Putin era begins, growing international access" },
-  { "year": 2015, "globalMultiplier": 1.4, "cityId": "mow", "name": "Moscow: established major destination for Russia/Eastern Europe travel" }
+  { "year": 2015, "globalMultiplier": 1.4, "cityId": "mow", "name": "Moscow: established major destination for Russia/Eastern Europe travel" },
+
+  { "year": 1997, "globalMultiplier": 0.92, "cityId": "hkg", "kind": "Event", "eventGroup": "hong-kong-handover-1997", "name": "Hong Kong Handover (July 1997): brief uncertainty around the sovereignty transfer to China, mild and short-lived - the city's role as a global hub continues essentially uninterrupted" },
+  { "year": 1998, "globalMultiplier": 1.0,  "cityId": "hkg", "kind": "Event", "eventGroup": "hong-kong-handover-1997", "name": "Confidence in 'one country, two systems' stabilizes (the Asian Financial Crisis, a separate real event, is not modeled here)" }
 ]

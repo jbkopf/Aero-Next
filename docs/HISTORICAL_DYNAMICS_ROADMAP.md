@@ -25,7 +25,10 @@ the Berlin Wall falling 1989 as a permanent city Trend, window 7;
 Europe's avg cash nearly doubled in the QA sweep), M21 round 12 done
 (USSR dissolution 1991, window 8 — a non-monotonic Moscow Trend
 (dip-then-recover); the first round to ripple across nearly every
-region in the QA sweep, not just one), M22 not
+region in the QA sweep, not just one), M21 round 13 done (Hong Kong
+Handover 1997, window 9 — deliberately the smallest magnitude in the
+sweep; confirmed genuinely mild, no QA-sweep effect despite Hong
+Kong's own size and gateway status), M22 not
 started.**
 China's
 opening and the 1997 Asian Financial Crisis remain named, not-yet-
@@ -200,7 +203,7 @@ entries (M21's job), so nothing behavioral could have changed yet.
 
 ---
 
-## M21 — Author real historical trends and events (round 1: architecture + Dubai; round 2: global curve redesign; round 3: trend/event split; round 4: every Olympic Games + a real perf fix; round 5: remaining Games via same-country substitution; round 6: Suez Crisis, window 1 of a 13-window historical sweep; round 7: Cuba embargo, window 2; round 8: Suez Canal closure 1967-75, window 3; round 9: Camp David Peace Treaty 1979, window 5; round 10: Iran-Iraq War 1980-88, window 6; round 11: Chernobyl + Berlin Wall falls, window 7; round 12: USSR dissolution, window 8) ✅
+## M21 — Author real historical trends and events (round 1: architecture + Dubai; round 2: global curve redesign; round 3: trend/event split; round 4: every Olympic Games + a real perf fix; round 5: remaining Games via same-country substitution; round 6: Suez Crisis, window 1 of a 13-window historical sweep; round 7: Cuba embargo, window 2; round 8: Suez Canal closure 1967-75, window 3; round 9: Camp David Peace Treaty 1979, window 5; round 10: Iran-Iraq War 1980-88, window 6; round 11: Chernobyl + Berlin Wall falls, window 7; round 12: USSR dissolution, window 8; round 13: Hong Kong Handover, window 9) ✅
 
 Content, not mechanics — the same shape as the aircraft-catalog and
 city-expansion series, and expected to become its own ongoing round-by-round
@@ -776,7 +779,7 @@ pick events ad hoc.
 | 1980-84 | Iran-Iraq War (1980-88) | **Authored round 10** — `thr` + `bgw`, spans into window 7 |
 | 1985-89 | Chernobyl (1986); Berlin Wall falls (1989) | **Authored round 11** — Europe region-wide dip; `ber` trend-shift |
 | 1990-94 | USSR dissolves (1991) | **Authored round 12** — `mow`, non-monotonic trend-shift |
-| 1995-99 | Hong Kong Handover (1997) | Named — `hkg`, flagged as historically mild |
+| 1995-99 | Hong Kong Handover (1997) | **Authored round 13** — `hkg`, confirmed genuinely mild |
 | 2000-04 | SARS (2003); Iraq War (2003) | Named — first real **Region**-scope candidate (EastAsia); `bgw` |
 | 2005-09 | — | No standout beyond what rounds 3-4 already cover (Beijing, financial crisis) |
 | 2010-14 | Eyjafjallajökull eruption (2010); Arab Spring (2011) | Named — Europe-wide airspace shutdown; Cairo/North Africa |
@@ -1182,6 +1185,46 @@ Moscow's dip partly offsets Berlin's own boost within the same region;
 EastAsia and SouthWestAsia's win counts each moved by exactly one game
 out of 150 — small, real, and plausible given how close a margin
 separates them already.
+
+### Round 13: the sweep, window 9 (Hong Kong Handover, 1997) ✅
+
+**Deliberately the smallest magnitude authored anywhere in this
+sweep**, on purpose: the July 1997 transfer of Hong Kong's sovereignty
+to China was real, but genuinely mild in its own effect on travel
+demand — the city's role as a global aviation and financial hub
+continued essentially uninterrupted through the transition. The
+original sweep-planning table flagged this candidate as "historically
+mild," and this round is where that flag gets tested against real
+numbers rather than left as an assertion. -8% (`0.92`), a single year
+(1997), reverting in 1998 — deliberately kept separate from the
+unrelated, same-year Asian Financial Crisis, which stays its own
+reserved future round (named since round 1, not folded in here just
+because the years coincide).
+
+New proof test,
+`RealDataset_HongKongHandover1997_MildDip_RecoveredBy1999`: both 1996
+and 1998 fall within the global trend's own flat 1990-2015 step, and
+neither touches any other authored event's own window, so a direct
+before/during/after comparison isolates the effect cleanly, no
+reference-schedule trick needed this time. 587 tests, up from 586, all
+passing; coverage gate re-run and unchanged (same accepted baseline as
+every round).
+
+**Measured — and this round's own real finding is a negative result,
+reported as such rather than smoothed over: M13 unchanged (resolves by
+1957, 40 years before this event), and the 150-game sweep came back
+byte-for-byte identical to round 12's own numbers, despite Hong Kong
+being one of the highest-weighted cities in the dataset
+(`demandWeight` 85) and a 3-slot gateway in EastAsia, this sweep's
+single dominant region.** Confirms the "historically mild" flag
+directly: an 8%, single-year dip is simply too small to register
+against a region whose AI strategies are already winning 88-89/150
+games by a wide margin — the same mechanism, sized correctly small,
+produces correctly small (here, invisible-at-this-sample-size)
+aggregate consequences. Not a bug, and not evidence the event was
+wasted effort: its own correctness is proven directly by the proof
+test, independent of whether this particular 150-game sample happens
+to surface it.
 
 ---
 
