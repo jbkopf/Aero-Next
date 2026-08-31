@@ -67,5 +67,47 @@
   { "year": 2011, "globalMultiplier": 1.0, "cityId": "yvr", "kind": "Event", "eventGroup": "olympics-2010-winter", "name": "Post-Olympics reversion" },
 
   { "year": 2012, "globalMultiplier": 1.2, "cityId": "lhr", "kind": "Event", "eventGroup": "olympics-2012-summer", "name": "2012 London Summer Olympics" },
-  { "year": 2013, "globalMultiplier": 1.0, "cityId": "lhr", "kind": "Event", "eventGroup": "olympics-2012-summer", "name": "Post-Olympics reversion" }
+  { "year": 2013, "globalMultiplier": 1.0, "cityId": "lhr", "kind": "Event", "eventGroup": "olympics-2012-summer", "name": "Post-Olympics reversion" },
+
+  { "year": 1956, "globalMultiplier": 1.2, "cityId": "mil", "kind": "Event", "eventGroup": "olympics-1956-winter-proxy", "name": "1956 Cortina d'Ampezzo Winter Olympics (host city not in dataset - nearest same-country city, Milan, 257km)" },
+  { "year": 1957, "globalMultiplier": 1.0, "cityId": "mil", "kind": "Event", "eventGroup": "olympics-1956-winter-proxy", "name": "Post-Olympics reversion" },
+
+  { "year": 1960, "globalMultiplier": 1.2, "cityId": "sfo", "kind": "Event", "eventGroup": "olympics-1960-winter-proxy", "name": "1960 Squaw Valley Winter Olympics (host city not in dataset - nearest same-country city, San Francisco, 256km)" },
+  { "year": 1961, "globalMultiplier": 1.0, "cityId": "sfo", "kind": "Event", "eventGroup": "olympics-1960-winter-proxy", "name": "Post-Olympics reversion" },
+
+  { "year": 1964, "globalMultiplier": 1.2, "cityId": "vie", "kind": "Event", "eventGroup": "olympics-1964-winter-proxy", "name": "1964 Innsbruck Winter Olympics (host city not in dataset - only same-country city, Vienna, 386km)" },
+  { "year": 1965, "globalMultiplier": 1.0, "cityId": "vie", "kind": "Event", "eventGroup": "olympics-1964-winter-proxy", "name": "Post-Olympics reversion" },
+
+  { "year": 1968, "globalMultiplier": 1.2, "cityId": "nce", "kind": "Event", "eventGroup": "olympics-1968-winter-proxy", "name": "1968 Grenoble Winter Olympics (host city not in dataset - nearest same-country city, Nice, 205km)" },
+  { "year": 1969, "globalMultiplier": 1.0, "cityId": "nce", "kind": "Event", "eventGroup": "olympics-1968-winter-proxy", "name": "Post-Olympics reversion" },
+
+  { "year": 1976, "globalMultiplier": 1.2, "cityId": "yyz", "kind": "Event", "eventGroup": "olympics-1976-summer-proxy", "name": "1976 Montreal Summer Olympics (host city not in dataset - nearest same-country city, Toronto, 521km)" },
+  { "year": 1977, "globalMultiplier": 1.0, "cityId": "yyz", "kind": "Event", "eventGroup": "olympics-1976-summer-proxy", "name": "Post-Olympics reversion" },
+
+  { "year": 1976, "globalMultiplier": 1.2, "cityId": "vie", "kind": "Event", "eventGroup": "olympics-1976-winter-proxy", "name": "1976 Innsbruck Winter Olympics (host city not in dataset - only same-country city, Vienna, 386km)" },
+  { "year": 1977, "globalMultiplier": 1.0, "cityId": "vie", "kind": "Event", "eventGroup": "olympics-1976-winter-proxy", "name": "Post-Olympics reversion" },
+
+  { "year": 1980, "globalMultiplier": 1.2, "cityId": "jfk", "kind": "Event", "eventGroup": "olympics-1980-winter-proxy", "name": "1980 Lake Placid Winter Olympics (host city not in dataset - nearest same-country city, New York, 405km)" },
+  { "year": 1981, "globalMultiplier": 1.0, "cityId": "jfk", "kind": "Event", "eventGroup": "olympics-1980-winter-proxy", "name": "Post-Olympics reversion" },
+
+  { "year": 1988, "globalMultiplier": 1.2, "cityId": "yvr", "kind": "Event", "eventGroup": "olympics-1988-winter-proxy", "name": "1988 Calgary Winter Olympics (host city not in dataset - nearest same-country city, Vancouver, 681km)" },
+  { "year": 1989, "globalMultiplier": 1.0, "cityId": "yvr", "kind": "Event", "eventGroup": "olympics-1988-winter-proxy", "name": "Post-Olympics reversion" },
+
+  { "year": 1992, "globalMultiplier": 1.2, "cityId": "nce", "kind": "Event", "eventGroup": "olympics-1992-winter-proxy", "name": "1992 Albertville Winter Olympics (host city not in dataset - nearest same-country city, Nice, 229km)" },
+  { "year": 1993, "globalMultiplier": 1.0, "cityId": "nce", "kind": "Event", "eventGroup": "olympics-1992-winter-proxy", "name": "Post-Olympics reversion" },
+
+  { "year": 1994, "globalMultiplier": 1.2, "cityId": "osl", "kind": "Event", "eventGroup": "olympics-1994-winter-proxy", "name": "1994 Lillehammer Winter Olympics (host city not in dataset - only same-country city, Oslo, 135km)" },
+  { "year": 1995, "globalMultiplier": 1.0, "cityId": "osl", "kind": "Event", "eventGroup": "olympics-1994-winter-proxy", "name": "Post-Olympics reversion" },
+
+  { "year": 1998, "globalMultiplier": 1.2, "cityId": "hnd", "kind": "Event", "eventGroup": "olympics-1998-winter-proxy", "name": "1998 Nagano Winter Olympics (host city not in dataset - nearest same-country city, Tokyo, 189km)" },
+  { "year": 1999, "globalMultiplier": 1.0, "cityId": "hnd", "kind": "Event", "eventGroup": "olympics-1998-winter-proxy", "name": "Post-Olympics reversion" },
+
+  { "year": 2002, "globalMultiplier": 1.2, "cityId": "den", "kind": "Event", "eventGroup": "olympics-2002-winter-proxy", "name": "2002 Salt Lake City Winter Olympics (host city not in dataset - nearest same-country city, Denver, 620km)" },
+  { "year": 2003, "globalMultiplier": 1.0, "cityId": "den", "kind": "Event", "eventGroup": "olympics-2002-winter-proxy", "name": "Post-Olympics reversion" },
+
+  { "year": 2006, "globalMultiplier": 1.2, "cityId": "mil", "kind": "Event", "eventGroup": "olympics-2006-winter-proxy", "name": "2006 Turin Winter Olympics (host city not in dataset - nearest same-country city, Milan, 126km)" },
+  { "year": 2007, "globalMultiplier": 1.0, "cityId": "mil", "kind": "Event", "eventGroup": "olympics-2006-winter-proxy", "name": "Post-Olympics reversion" },
+
+  { "year": 2014, "globalMultiplier": 1.2, "cityId": "rov", "kind": "Event", "eventGroup": "olympics-2014-winter-proxy", "name": "2014 Sochi Winter Olympics (host city not in dataset - nearest same-country city, Rostov, 404km)" },
+  { "year": 2015, "globalMultiplier": 1.0, "cityId": "rov", "kind": "Event", "eventGroup": "olympics-2014-winter-proxy", "name": "Post-Olympics reversion" }
 ]

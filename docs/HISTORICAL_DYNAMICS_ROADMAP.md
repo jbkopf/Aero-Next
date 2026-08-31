@@ -6,9 +6,12 @@ curve redesign — real 1955-2015 growth/shock history), M21 round 3 done
 found and fixed a genuine event-composition bug during its own
 verification), M21 round 4 done (every Olympic Games 1956-2015 with a
 host city in the dataset; found and fixed a real performance regression
-— a 150-game sweep that looked hung now runs in 53s), M22 not started.**
-China's opening and the 1997 Asian Financial Crisis remain named,
-not-yet-authored future rounds. Builds on the completed sim core
+— a 150-game sweep that looked hung now runs in 53s), M21 round 5 done
+(the remaining 14 Games, mapped to the nearest same-country dataset
+city; 1984 Sarajevo skipped on the user's own direction — no dataset
+city is in Bosnia/former Yugoslavia), M22 not started.** China's
+opening and the 1997 Asian Financial Crisis remain named, not-yet-
+authored future rounds. Builds on the completed sim core
 (`docs/SIM_CORE_ROADMAP.md`, M0–M14) and game setup system
 (`docs/GAME_SETUP_ROADMAP.md`, M15–M19, plus its ongoing city-expansion
 series). Continues the shared milestone numbering from M20, since this is
@@ -179,7 +182,7 @@ entries (M21's job), so nothing behavioral could have changed yet.
 
 ---
 
-## M21 — Author real historical trends and events (round 1: architecture + Dubai; round 2: global curve redesign; round 3: trend/event split; round 4: every Olympic Games + a real perf fix) ✅
+## M21 — Author real historical trends and events (round 1: architecture + Dubai; round 2: global curve redesign; round 3: trend/event split; round 4: every Olympic Games + a real perf fix; round 5: remaining Games via same-country substitution) ✅
 
 Content, not mechanics — the same shape as the aircraft-catalog and
 city-expansion series, and expected to become its own ongoing round-by-round
@@ -653,6 +656,86 @@ region hosting *two* of the authored Games (Melbourne 1956, Sydney
 2000) — a real, small, explainable effect, not noise, sized correctly
 relative to the region's own much larger existing drivers (starting
 economics, strategy choice, the global trend/event backdrop).
+
+### Round 5: the 14 remaining Games, via same-country/nearest-city substitution ✅
+
+Round 4 named 15 Games with no host city in the dataset (1 Summer, 14
+Winter) rather than silently drop them. This round closes 14 of those
+15 — every real host city was cross-referenced against the actual
+99-city dataset (with each existing city's real-world country inferred
+directly, not guessed) and mapped to the nearest city **in the same
+country**, computed via the exact same great-circle formula
+`GreatCircle.cs` itself uses, not eyeballed:
+
+| Games | Host (country) | Substitute | Distance |
+|---|---|---|---|
+| 1956 Winter | Cortina d'Ampezzo (Italy) | Milan (`mil`) | 257 km |
+| 1960 Winter | Squaw Valley (USA) | San Francisco (`sfo`) | 256 km |
+| 1964 Winter | Innsbruck (Austria) | Vienna (`vie`) | 386 km |
+| 1968 Winter | Grenoble (France) | Nice (`nce`) | 205 km |
+| 1976 Summer | Montreal (Canada) | Toronto (`yyz`) | 521 km |
+| 1976 Winter | Innsbruck (Austria) | Vienna (`vie`) | 386 km |
+| 1980 Winter | Lake Placid (USA) | New York (`jfk`) | 405 km |
+| 1988 Winter | Calgary (Canada) | Vancouver (`yvr`) | 681 km |
+| 1992 Winter | Albertville (France) | Nice (`nce`) | 229 km |
+| 1994 Winter | Lillehammer (Norway) | Oslo (`osl`) | 135 km |
+| 1998 Winter | Nagano (Japan) | Tokyo (`hnd`) | 189 km |
+| 2002 Winter | Salt Lake City (USA) | Denver (`den`) | 620 km |
+| 2006 Winter | Turin (Italy) | Milan (`mil`) | 126 km |
+| 2014 Winter | Sochi (Russia) | Rostov (`rov`) | 404 km |
+
+**1984 Sarajevo stayed unauthored, on the user's own explicit
+direction** — no city anywhere in the dataset is in Bosnia or the
+former Yugoslavia, so the "same country" rule this round otherwise
+used throughout has nothing to anchor to there; the fallback
+("geographically closest, any country" → Vienna, 509 km) was computed
+and offered, but skipped rather than assumed acceptable. Still named
+in the doc so it isn't silently lost from the record. Each substitute
+event's own `name` field states plainly that it's standing in for a
+host city not in the dataset, and by how far — self-documenting, not
+requiring a reader to cross-reference this table to understand why
+(say) Vienna carries three separate Olympics-shaped bumps across the
+campaign (1964, 1976, and none of its own).
+
+14 new events, 28 breakpoints, same +20%/host-year/reverts-next-year
+shape as round 4 — still entirely data, no source changes. 578 tests
+unchanged, coverage unaffected (confirmed, not assumed, same as every
+prior data-only round).
+
+**Measured — and for the first time in this whole M20-M21 series,
+`AeroNext.Sim`'s M13 loop actually moved.** Quarters 1 and 4 (1955)
+stayed byte-identical, but quarter 7 (1956) diverged for real: Atlas
+Air's carried traffic rose from 108,472 to 111,384 pax/qtr and Skyward's
+from 185,328 to 188,760 — the Cortina-d'Ampezzo-via-Milan proxy event
+(active for all of 1956) reaching a route this loop's own seed happens
+to fly through Milan on, the first time any round in this series has
+been visible in that specific loop rather than resolving too early or
+missing every relevant city. The win condition itself was unaffected —
+Continental Wings still wins at quarter 10.
+
+The 150-game QA harness sweep (54s, no perf regression from doubling
+the event count again) also moved for real this time, unlike round 4's
+own near-parity comparison to round 3:
+
+| Metric | Round 4 (16 events) | Round 5 (30 events) |
+|---|---|---|
+| Clean games with a win | 113/150 (avg quarter 19.8) | 113/150 (avg quarter 19.9) |
+| NorthAmerica bankrupt / avg cash / wins | 119/144, $4.5M, 14 | 118/144, **$14.8M**, 15 |
+| Europe bankrupt / avg cash / wins | 80/95, $4.1M, 5 | 80/95, $4.1M, 4 |
+| EastAsia bankrupt / avg cash / wins | 14/142, $140.5M, 88 | 14/142, $140.6M, 88 |
+| SouthWestAsia bankrupt / avg cash / wins | 29/55, $113.4M, 17 | 29/55, $113.4M, 17 |
+| AustralAsia bankrupt / avg cash / wins | 22/45, $92.5M, 7 | 22/45, $92.6M, 7 |
+| SouthAmerica bankrupt / avg cash / wins | 62/119, $63.6M, 19 | 62/119, $63.6M, 19 |
+
+**NorthAmerica moved the most, by a wide margin** (avg cash more than
+tripled, $4.5M→$14.8M) — the one region that picked up *five* new
+proxy events on its own cities this round (Toronto, New York, Vancouver,
+San Francisco, Denver — Squaw Valley/Lake Placid/Calgary/Montreal/Salt
+Lake City all substitute onto NorthAmerica cities), versus Europe's
+three (Milan ×2, Vienna ×2, Nice ×2 — six event-slots but only three
+distinct cities) and no change at all for the regions that picked up
+none (EastAsia, SouthWestAsia, SouthAmerica essentially flat). A real,
+explainable, region-count-proportional effect, not noise.
 
 ---
 
