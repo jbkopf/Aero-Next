@@ -193,6 +193,49 @@ public class DomesticProfitOptimizerStrategyTests
     }
 
     [Fact]
+    public void DecideOrders_SkipsDomesticGatewayWithAPendingNegotiation_TargetsNextBestInstead()
+    {
+        // "best" would normally win (higher demand weight - same ranking
+        // shape as DecideOrders_NegotiatesForADomesticGateway above), but
+        // a negotiation is already pending there, so it's skipped in
+        // favor of "next" - the same M41 fix RapidExpansionStrategy gets,
+        // since both strategies share AiToolkit.NegotiateOrBorrow.
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
+        var best = MakeCity("best", Region.NorthAmerica, 2, 2, 90, isGateway: true);
+        var next = MakeCity("next", Region.NorthAmerica, 3, 3, 50, isGateway: true);
+        var cities = new[] { home, best, next };
+
+        var context = new StrategyContext(
+            Array.Empty<Route>(), 3, cities, DemandModel, Array.Empty<AircraftType>(), AirlineFleet.Empty, Region.NorthAmerica,
+            AvailableCash: Money.FromDollars(10_000_000),
+            PendingNegotiationCityIds: new HashSet<string> { "best" });
+
+        var orders = Strategy.DecideOrders(context);
+
+        var negotiation = Assert.Single(orders.OfType<NegotiationOrder>());
+        Assert.Equal("next", negotiation.TargetCity.Id);
+    }
+
+    [Fact]
+    public void DecideOrders_SkipsDomesticGatewayWithAnAlreadyHeldUnusedSlot_TargetsNextBestInstead()
+    {
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
+        var best = MakeCity("best", Region.NorthAmerica, 2, 2, 90, isGateway: true);
+        var next = MakeCity("next", Region.NorthAmerica, 3, 3, 50, isGateway: true);
+        var cities = new[] { home, best, next };
+
+        var context = new StrategyContext(
+            Array.Empty<Route>(), 3, cities, DemandModel, Array.Empty<AircraftType>(), AirlineFleet.Empty, Region.NorthAmerica,
+            AvailableSlotsByCity: new Dictionary<string, int> { ["best"] = 1 },
+            AvailableCash: Money.FromDollars(10_000_000));
+
+        var orders = Strategy.DecideOrders(context);
+
+        var negotiation = Assert.Single(orders.OfType<NegotiationOrder>());
+        Assert.Equal("next", negotiation.TargetCity.Id);
+    }
+
+    [Fact]
     public void Suitability_HigherWhenCashIsLower()
     {
         var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);

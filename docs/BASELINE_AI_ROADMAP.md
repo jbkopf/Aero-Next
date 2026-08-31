@@ -847,21 +847,95 @@ touched, on purpose.
 
 ---
 
-## M41 — Competitive awareness
+## M41 — Stop wasting cash on repeat gateway negotiation bids ✅
 
-React to rivals directly: contest a gateway more aggressively where a
-rival looks weak there, avoid overinvesting where a rival already
-dominates a pair, and — once M34's own explicit scope boundary is
-revisited — factor a rival's fare into route/pair decisions. Fare
-doesn't yet affect demand size or competitive share at all (M34
-deliberately left that out); this milestone either works within that
-limit or is the natural trigger to revisit it. **Explicitly deferred
-until after M39 lands and gets measured:** strategy diversity across the
-4 seats may substantially reduce the cannibalization problem that
-motivated this milestone in the first place, which changes what M41
-actually still needs to do. Re-diagnose with real data before
-re-scoping it — the same "measure, don't guess" discipline this whole
-session has used, not assumed to still need the original scope.
+**Redefined from "Competitive awareness."** That framing was itself
+explicitly deferred pending re-diagnosis once M39/M40 landed and got
+measured — its own text said so. Re-diagnosed with real data, not
+assumed: instrumented one QA-harness game (`FullGameRunner.Run`, game
+index 0, all real code) quarter-by-quarter through its first 25
+quarters, then again printing every `NegotiationOrder` submitted.
+
+**Root cause: not competitive at all.**
+`FindBestUnservedGatewayCrossRegionFirst` (`RapidExpansionStrategy`) and
+`FindBestUnservedDomesticGateway` (`DomesticProfitOptimizerStrategy`)
+both rank "unserved" gateways using only `touchedCityIds` built from
+current routes — a gateway stays "unserved" (and gets re-targeted) until
+a *route* actually opens there, even with a `NegotiationOrder` already
+**pending** at that exact city. `LandingRightsResolver.Submit` never
+checks for an existing pending bid either — it just appends another one.
+Measured directly: EastAsia Air bid $2,000,000 on "jfk" for **6
+consecutive quarters** (Q2-Q7, $12M spent on one already-pending bid);
+"QA Human 1" bid $2,000,000 on "hnd" for **11 consecutive quarters**
+(Q2-Q12, $22M). This — not aircraft leasing/ordering, and not any rival
+contesting anything — was the real mechanism behind every region's early
+bankruptcy wave the M13-loop trace and M39/M40's own QA sweeps kept
+showing. A real, pre-existing bug: the identical `touchedCityIds`
+pattern already existed in `BaselineAi.FindBestUnservedGateway` itself
+(M9/M28-era, predates M39) — it just hit `RapidExpansionStrategy`
+hardest because that strategy negotiates far more readily.
+
+**The fix.** `StrategyContext` gains `PendingNegotiationCityIds`
+(nullable, permissive-default — `null` reproduces the exact pre-M41 bug,
+so no existing test/caller changes behavior silently). New shared
+`AiToolkit.CitiesAlreadyPursuedForNegotiation(context)` unions that with
+`AvailableSlotsByCity`'s own keys (an already-won-but-unused slot is
+equally no reason to bid again — that field already existed, just
+wasn't consulted by gateway search). Both gateway-finder functions add
+one `.Where` clause excluding it. `FullGameRunner.cs` computes the new
+field each quarter from its own `landingBoard.Pending` (already built
+there). Deliberately not touched: `BaselineAi.DecideOrders`/
+`FindBestUnservedGateway` (dead/demo-only since M39, frozen by
+established convention) and `AeroNext.Sim`'s M13 loop (still never
+builds a real `LandingRightsBoard` at all — a separate, already-flagged
+gap; it passes nothing for the new field and keeps its pre-M41 behavior,
+confirmed below, not assumed).
+
+**Done when:** the new field/helper exist with a permissive default;
+both gateway-finders skip an already-pursued city; a test proves a
+pending bid causes the next-best gateway to be targeted instead of
+re-bid; a test proves the same for an already-held unused slot; the
+repeat-bid pattern is directly confirmed gone via the same instrumented
+trace; both real loops are re-measured.
+
+Done. 549 tests total (4 new, 2 per strategy test file), `StrategyContext`
+and `DomesticProfitOptimizerStrategy` at 100%/100% coverage; `AiToolkit`
+and `RapidExpansionStrategy`'s only partial branches are the exact same
+confirmed-structurally-unreachable ones M39 already documented (line
+numbers only shifted by the new code inserted above them). Overall
+project coverage **99.89%/99.31%**. Re-ran the same instrumented trace
+after the fix: negotiation targets now diversify every quarter (jfk →
+lhr → ams → lax → gru → syd → cai → ...) instead of repeating.
+
+**Campaign trajectory — the single biggest measured shift this session.**
+The M13 loop came back byte-for-byte identical to M39/M40 (confirmed
+directly, not assumed) — it never builds a real `LandingRightsBoard`, so
+it has nothing to populate the new field with, exactly as scoped. The
+150-game QA harness sweep moved dramatically:
+
+| Metric | M40 | M41 |
+|---|---|---|
+| Clean games with a win before quarter 244 | 0/150 | **118/150** (avg quarter 25.3) |
+| NorthAmerica bankrupt / wins | 140/144, 6 | 118/144, 14 |
+| Europe bankrupt / wins | 95/95, 2 | 79/95, 4 |
+| EastAsia bankrupt / wins | 9/142, 132 | 15/142, 88 |
+| SouthWestAsia bankrupt / wins | 55/55, 0 | 17/55, 18 |
+| AustralAsia bankrupt / wins | 41/45, 8 | 23/45, 7 |
+| SouthAmerica bankrupt / wins | 119/119, 2 | 62/119, 19 |
+
+Every region got measurably healthier, and the game actually produces a
+winner most of the time now (0% → 79% of clean games), something no
+milestone this session had achieved in this harness before. The
+regional imbalance M39/M40 flagged didn't disappear — EastAsia still
+wins the most (88/118) — but it's meaningfully less extreme (was
+132/150, effectively unbeatable; SouthWestAsia went from *never*
+winning to 18 wins, SouthAmerica from 2 to 19). Consistent with the
+diagnosis: most of what looked like "regional economics" was actually
+every region's airlines bleeding out on the same self-inflicted,
+easily-avoidable mistake — fixing the mistake let the underlying
+region-vs-region picture show through far more clearly than before, and
+that remaining picture is still worth investigating in a future
+milestone, not this one.
 
 ---
 

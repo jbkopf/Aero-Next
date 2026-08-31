@@ -15,6 +15,16 @@ namespace AeroNext.Core.Ai;
 /// prior milestone's own new parameter followed on the legacy
 /// BaselineAi.DecideOrders signature, which this record does not replace
 /// — see BaselineAi's own class doc comment.
+///
+/// M41: PendingNegotiationCityIds, also nullable/permissive-default —
+/// null (the pre-M41 default) reproduces the exact bug M41 fixes
+/// (re-bidding a gateway with a negotiation already in flight there), so
+/// every existing test/caller that doesn't populate it keeps its old
+/// behavior unchanged rather than silently gaining the fix. Only
+/// FullGameRunner.cs populates it for real today — AeroNext.Sim's M13
+/// loop still never builds a real LandingRightsBoard at all (a separate,
+/// already-documented gap), so it has nothing real to populate this
+/// from.
 /// </summary>
 public sealed record StrategyContext(
     IReadOnlyList<Route> CurrentRoutes,
@@ -26,4 +36,5 @@ public sealed record StrategyContext(
     Region HomeRegion,
     IReadOnlyDictionary<string, int>? AvailableSlotsByCity = null,
     Money? AvailableCash = null,
-    Money? CurrentDebtBalance = null);
+    Money? CurrentDebtBalance = null,
+    IReadOnlySet<string>? PendingNegotiationCityIds = null);

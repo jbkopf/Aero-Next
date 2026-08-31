@@ -26,6 +26,37 @@ internal static class AiToolkit
     /// as a same-quarter RefinanceOrder, since QuarterEngine's cash gate
     /// doesn't see it (M29's own established point).
     /// </summary>
+    /// <summary>
+    /// M41: every gateway city this airline has already spent real
+    /// money pursuing and shouldn't bid on again — a NegotiationOrder's
+    /// full bid is deducted the instant it's submitted (M28,
+    /// FinancialResolver.ComputeRevenue's own negotiationBidCost), win or
+    /// lose, so re-bidding a city with a still-pending negotiation is a
+    /// straight, avoidable loss, not a second chance. Unions
+    /// PendingNegotiationCityIds (bids already in flight, not yet
+    /// resolved) with AvailableSlotsByCity's own keys (a slot already won
+    /// there but not yet turned into a route - also no reason to bid
+    /// again). Both source fields are nullable/permissive - a caller that
+    /// doesn't populate either gets an empty set here, reproducing the
+    /// pre-M41 unfixed behavior exactly.
+    /// </summary>
+    public static IReadOnlySet<string> CitiesAlreadyPursuedForNegotiation(StrategyContext context)
+    {
+        var ids = new HashSet<string>(StringComparer.Ordinal);
+
+        if (context.PendingNegotiationCityIds is not null)
+        {
+            ids.UnionWith(context.PendingNegotiationCityIds);
+        }
+
+        if (context.AvailableSlotsByCity is not null)
+        {
+            ids.UnionWith(context.AvailableSlotsByCity.Keys);
+        }
+
+        return ids;
+    }
+
     public static void NegotiateOrBorrow(StrategyContext context, City? bestGateway, List<QuarterOrder> orders, ref int spent)
     {
         if (bestGateway is null || spent + 1 > context.ActionCap)

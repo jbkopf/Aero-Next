@@ -87,6 +87,53 @@ public class RapidExpansionStrategyTests
     }
 
     [Fact]
+    public void DecideOrders_SkipsGatewayWithAPendingNegotiation_TargetsNextBestInstead()
+    {
+        // "best" would normally win (cross-region, higher demand weight -
+        // same ranking shape as DecideOrders_NegotiatesForACrossRegionGateway...
+        // above), but a negotiation is already pending there, so it's
+        // skipped in favor of "next" - proving the AI stops re-bidding a
+        // city it's already spent real money pursuing (M41).
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
+        var best = MakeCity("best", Region.Europe, 2, 2, 90, isGateway: true);
+        var next = MakeCity("next", Region.Europe, 3, 3, 50, isGateway: true);
+        var cities = new[] { home, best, next };
+
+        var context = new StrategyContext(
+            Array.Empty<Route>(), 3, cities, DemandModel, Array.Empty<AircraftType>(), AirlineFleet.Empty, Region.NorthAmerica,
+            AvailableCash: Money.FromDollars(10_000_000),
+            PendingNegotiationCityIds: new HashSet<string> { "best" });
+
+        var orders = Strategy.DecideOrders(context);
+
+        var negotiation = Assert.Single(orders.OfType<NegotiationOrder>());
+        Assert.Equal("next", negotiation.TargetCity.Id);
+    }
+
+    [Fact]
+    public void DecideOrders_SkipsGatewayWithAnAlreadyHeldUnusedSlot_TargetsNextBestInstead()
+    {
+        // Same shape, but the exclusion signal is an already-won,
+        // not-yet-used slot (AvailableSlotsByCity) rather than a pending
+        // bid - no reason to spend another $2M bidding for more of what's
+        // already held and unused.
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
+        var best = MakeCity("best", Region.Europe, 2, 2, 90, isGateway: true);
+        var next = MakeCity("next", Region.Europe, 3, 3, 50, isGateway: true);
+        var cities = new[] { home, best, next };
+
+        var context = new StrategyContext(
+            Array.Empty<Route>(), 3, cities, DemandModel, Array.Empty<AircraftType>(), AirlineFleet.Empty, Region.NorthAmerica,
+            AvailableSlotsByCity: new Dictionary<string, int> { ["best"] = 1 },
+            AvailableCash: Money.FromDollars(10_000_000));
+
+        var orders = Strategy.DecideOrders(context);
+
+        var negotiation = Assert.Single(orders.OfType<NegotiationOrder>());
+        Assert.Equal("next", negotiation.TargetCity.Id);
+    }
+
+    [Fact]
     public void DecideOrders_NoRouteCap_KeepsGrowingWellBeyondFiveRoutes()
     {
         var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);

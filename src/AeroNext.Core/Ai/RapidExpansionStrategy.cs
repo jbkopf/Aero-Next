@@ -24,6 +24,13 @@ namespace AeroNext.Core.Ai;
 /// same idle unit and get one of the two RouteOrders rejected at
 /// resolution, exactly the "attempt and fail" outcome this whole AI is
 /// built to avoid.
+///
+/// M41: gateway negotiation now skips any city already pursued (a
+/// pending bid in flight, or a won-but-unused slot) instead of re-bidding
+/// the same top-ranked gateway every quarter — diagnosed as the real
+/// driver of this strategy's own early cash burn (one QA-harness game
+/// traced directly: $2M bid on the same gateway 6 consecutive quarters),
+/// not aircraft spending. See AiToolkit.CitiesAlreadyPursuedForNegotiation.
 /// </summary>
 public sealed class RapidExpansionStrategy : IAiStrategy
 {
@@ -181,9 +188,10 @@ public sealed class RapidExpansionStrategy : IAiStrategy
         var touchedCityIds = context.CurrentRoutes
             .SelectMany(r => new[] { r.Origin.Id, r.Destination.Id })
             .ToHashSet();
+        var alreadyPursued = AiToolkit.CitiesAlreadyPursuedForNegotiation(context);
 
         return context.AllCities
-            .Where(c => c.IsGateway && !touchedCityIds.Contains(c.Id))
+            .Where(c => c.IsGateway && !touchedCityIds.Contains(c.Id) && !alreadyPursued.Contains(c.Id))
             .OrderByDescending(c => c.Region != context.HomeRegion)
             .ThenByDescending(c => c.DemandWeight)
             .ThenBy(c => c.Id, StringComparer.Ordinal)

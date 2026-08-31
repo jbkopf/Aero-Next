@@ -156,9 +156,20 @@ public static class FullGameRunner
                     // per airline (initial assignment then re-evaluated
                     // once per in-game year) rather than BaselineAi's own
                     // single fixed heuristic.
+                    //
+                    // M41: also tells the strategy which gateways it
+                    // already has a negotiation pending at, so it stops
+                    // re-bidding the same one every quarter - this loop
+                    // already builds a real landingBoard, so it's the one
+                    // real call site that can populate this for real.
+                    var pendingNegotiationCityIds = landingBoard.Pending
+                        .Where(p => p.Airline.Name == name)
+                        .Select(p => p.TargetCity.Id)
+                        .ToHashSet(StringComparer.Ordinal);
                     var strategyContext = new StrategyContext(
                         routes[name], caps[name], cities, yearDemandModel, availableFleet, fleets[name], homeRegionByName[name],
-                        AvailableSlotsByCity: availableSlotsByCity, AvailableCash: finances[name].CashBalance, CurrentDebtBalance: finances[name].DebtBalance);
+                        AvailableSlotsByCity: availableSlotsByCity, AvailableCash: finances[name].CashBalance, CurrentDebtBalance: finances[name].DebtBalance,
+                        PendingNegotiationCityIds: pendingNegotiationCityIds);
                     var strategy = BaselineAi.SelectStrategy(currentStrategyByName[name], q, strategyContext);
                     currentStrategyByName[name] = strategy;
                     orders = strategy.DecideOrders(strategyContext);

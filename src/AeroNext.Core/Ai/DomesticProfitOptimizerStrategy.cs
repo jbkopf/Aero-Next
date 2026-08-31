@@ -31,6 +31,12 @@ namespace AeroNext.Core.Ai;
 /// connects to an already-served city really would carry extra,
 /// currently-uncounted passengers at this leg's own fare — see
 /// EstimatedHubBonusDemand for exactly which demand that is and why.
+///
+/// M41: domestic gateway negotiation now skips any city already pursued
+/// (a pending bid in flight, or a won-but-unused slot) instead of
+/// re-bidding the same top-ranked gateway every quarter — the same
+/// latent bug RapidExpansionStrategy was measurably losing real cash to;
+/// see AiToolkit.CitiesAlreadyPursuedForNegotiation.
 /// </summary>
 public sealed class DomesticProfitOptimizerStrategy : IAiStrategy
 {
@@ -122,9 +128,10 @@ public sealed class DomesticProfitOptimizerStrategy : IAiStrategy
         var touchedCityIds = context.CurrentRoutes
             .SelectMany(r => new[] { r.Origin.Id, r.Destination.Id })
             .ToHashSet();
+        var alreadyPursued = AiToolkit.CitiesAlreadyPursuedForNegotiation(context);
 
         return context.AllCities
-            .Where(c => c.Region == context.HomeRegion && c.IsGateway && !touchedCityIds.Contains(c.Id))
+            .Where(c => c.Region == context.HomeRegion && c.IsGateway && !touchedCityIds.Contains(c.Id) && !alreadyPursued.Contains(c.Id))
             .OrderByDescending(c => c.DemandWeight)
             .ThenBy(c => c.Id, StringComparer.Ordinal)
             .FirstOrDefault();
