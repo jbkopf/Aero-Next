@@ -35,11 +35,12 @@ War as a second, permanent, far more severe Baghdad episode, window
 this sample), M21 round 15 done (Eyjafjallajokull 2010 + Arab Spring
 2011, window 12 — Cairo's fourth independent event layer; 2015
 confirmed needing nothing — **the 13-window sweep is now complete**),
-M22 not
+M21 round 16 done (China's opening (Beijing + Shanghai Trends) and the
+1997 Asian Financial Crisis — the sweep's last two reserved
+candidates; **the largest QA-sweep swing in the whole series**, flagged
+to the user for a magnitude decision), M22 not
 started.**
-China's
-opening and the 1997 Asian Financial Crisis remain named, not-yet-
-authored future rounds. Builds on the completed sim core
+Builds on the completed sim core
 (`docs/SIM_CORE_ROADMAP.md`, M0–M14) and game setup system
 (`docs/GAME_SETUP_ROADMAP.md`, M15–M19, plus its ongoing city-expansion
 series). Continues the shared milestone numbering from M20, since this is
@@ -210,7 +211,7 @@ entries (M21's job), so nothing behavioral could have changed yet.
 
 ---
 
-## M21 — Author real historical trends and events (round 1: architecture + Dubai; round 2: global curve redesign; round 3: trend/event split; round 4: every Olympic Games + a real perf fix; round 5: remaining Games via same-country substitution; round 6: Suez Crisis, window 1 of a 13-window historical sweep; round 7: Cuba embargo, window 2; round 8: Suez Canal closure 1967-75, window 3; round 9: Camp David Peace Treaty 1979, window 5; round 10: Iran-Iraq War 1980-88, window 6; round 11: Chernobyl + Berlin Wall falls, window 7; round 12: USSR dissolution, window 8; round 13: Hong Kong Handover, window 9; round 14: SARS + Iraq War 2003, window 10; round 15: Eyjafjallajokull + Arab Spring, window 12 — sweep complete) ✅
+## M21 — Author real historical trends and events (round 1: architecture + Dubai; round 2: global curve redesign; round 3: trend/event split; round 4: every Olympic Games + a real perf fix; round 5: remaining Games via same-country substitution; round 6: Suez Crisis, window 1 of a 13-window historical sweep; round 7: Cuba embargo, window 2; round 8: Suez Canal closure 1967-75, window 3; round 9: Camp David Peace Treaty 1979, window 5; round 10: Iran-Iraq War 1980-88, window 6; round 11: Chernobyl + Berlin Wall falls, window 7; round 12: USSR dissolution, window 8; round 13: Hong Kong Handover, window 9; round 14: SARS + Iraq War 2003, window 10; round 15: Eyjafjallajokull + Arab Spring, window 12 — sweep complete; round 16: China's opening + Asian Financial Crisis, the last two reserved candidates) ✅
 
 Content, not mechanics — the same shape as the aircraft-catalog and
 city-expansion series, and expected to become its own ongoing round-by-round
@@ -229,25 +230,22 @@ series:
   sharply through the 2000s. The single clearest "this is exactly the
   gap this roadmap exists to close" case, named directly in the
   conversation that started this roadmap.
-- **China's opening (Beijing, Shanghai)** — *not yet authored, a future
-  round.* Muted through the Cultural Revolution era, a real inflection
-  after 1978's opening-up reforms, continuing to climb through the
-  1990s–2000s boom.
+- **China's opening (Beijing, Shanghai)** ✅ (round 16) — muted through
+  the Maoist/Cultural Revolution era, a real inflection after 1978's
+  reforms, continuing to climb through the 1990s–2000s boom to 2015.
+  See round 16's own writeup below.
 - **A global shock** ✅ (round 2) — redefined from "just the 1973 oil
   crisis" to the whole baseline curve, on the user's own direction: not
   one isolated event layered onto the old smooth 4-point line, but the
   curve's real shape end to end — jet-age growth, the 1973 oil crisis,
   the 1979-81 second shock, the 1991 Gulf War, 2001, and 2008-09 all
   included. See round 2's own writeup below.
-- **1997 Asian Financial Crisis** — *not yet authored, a future round.*
-  Real and dateable, but concentrated enough in impact
-  (EastAsia/AustralAsia) that it reads better as a region-scoped round
-  (`data/historical_events.json`) than diluted into the global curve —
-  named here during round 2's own research so it isn't lost.
-- **China's opening (Beijing, Shanghai)** — *not yet authored, a future
-  round.* Muted through the Cultural Revolution era, a real inflection
-  after 1978's opening-up reforms, continuing to climb through the
-  1990s–2000s boom.
+- **1997 Asian Financial Crisis** ✅ (round 16) — real and dateable,
+  and concentrated enough in impact that it's a region-scoped event
+  (`data/historical_events.json`, `Region.EastAsia`) rather than
+  diluted into the global curve, exactly as anticipated when it was
+  first named during round 2's own research. See round 16's own
+  writeup below.
 - Further candidates deliberately left open rather than pre-committed —
   each should be picked and authored the way each aircraft/city round
   was: one real, well-documented story at a time, verified against the
@@ -792,9 +790,10 @@ pick events ad hoc.
 | 2010-14 | Eyjafjallajökull eruption (2010); Arab Spring (2011) | **Authored round 15** — Europe region-wide shutdown; Cairo's 4th layer |
 | 2015 | — | **Confirmed round 15** — campaign's final year, no room for a reversion arc, not worth authoring |
 
-China's opening and the 1997 Asian Financial Crisis stay reserved for
-their own dedicated rounds (named since round 1/2), not folded into
-this sweep. Windows are implemented one at a time, on the user's own
+China's opening and the 1997 Asian Financial Crisis were kept reserved
+for their own dedicated rounds (named since round 1/2), not folded
+into this sweep — both authored in round 16, after the sweep itself
+closed. Windows are implemented one at a time, on the user's own
 direction — this round closes window 1 only.
 
 **Suez Crisis (1956):** Egypt nationalizes the canal in July, the
@@ -1355,6 +1354,88 @@ established for Cairo (Africa isn't among the home regions these
 particular 150 seeded games draw), and the same "correctness proven
 directly, not visible in this sample" story as Hong Kong (round 13)
 and Baghdad's own 2003 event (round 14).
+
+### Round 16: China's opening + the 1997 Asian Financial Crisis — the last two reserved candidates ⚠️
+
+**China's opening.** Deng Xiaoping's reforms (Third Plenum, Dec 1978)
+through Special Economic Zones (Shenzhen, 1980), the 1992 "Southern
+Tour" that broadened reform nationally, WTO accession (2001), and
+continued growth to 2015 — the same real story authored as a permanent
+city Trend on **both** real Chinese cities in the dataset, Beijing
+(`pek`) and Shanghai (`pvg`), the same multi-city/same-shape pattern
+already established for the Iran-Iraq War. Unlike Berlin's or Moscow's
+comparatively modest magnitudes, this one deliberately climbs to
+`3.5x` by 2015 — closer to Dubai's own outsized story than to Berlin's
+or Moscow's, because China's real economic transformation over these
+60 years was genuinely one of the most dramatic in modern history, not
+a comparably modest structural shift. Beijing is also this series'
+**first real case of a Trend and an Event composing on the same
+city** — its own China-opening Trend alongside its existing 2008
+Olympics Event — confirmed directly by a dedicated proof test rather
+than assumed from the global-scope tests alone.
+
+**1997 Asian Financial Crisis** — the sweep's fourth Region-scoped
+event, on `Region.EastAsia`. The Thai baht's collapse (July 1997)
+spread through Indonesia, South Korea, and Malaysia; recovery, aided
+by IMF programs, took about two years. -20% (`0.80`), 1997-1999 —
+deliberately kept as its own independent `EventGroup`
+(`asian-financial-crisis-1997`), separate from the same-year Hong Kong
+Handover (`hong-kong-handover-1997`), since they're genuinely
+different real causes that happen to share a year; Hong Kong itself
+now carries both, composing independently.
+
+Three new proof tests.
+`RealDataset_ChinasOpening_GrowsBeijingAndShanghai_AcrossReformEra`
+loops both cities, isolating each one's own Trend via a same-year
+reference with only that city's Trend entries removed (Beijing's own
+Olympics Event stays in the reference, so only the Trend layer is
+isolated). `RealDataset_BeijingTrendAndOlympicsEvent_
+ComposeIndependently` confirms the Olympics' own authored 1.2x is
+still exactly recoverable on top of whatever the Trend alone
+contributes in 2008. `RealDataset_AsianFinancialCrisis1997_
+DipsEastAsiaOnly_RecoveredBy1999` also confirms Hong Kong is
+suppressed *further* by the region-wide crisis on top of its own
+Handover dip — proof that the two independent groups compose rather
+than one clobbering the other. All three passed on their first run.
+594 tests, up from 591, all passing; coverage gate re-run and
+unchanged (same accepted baseline as every round).
+
+**Measured — M13 unchanged again (both cities' Trends start at 1955,
+so this is a real check, not a timing triviality; confirmed
+byte-identical to round 15 regardless). The 150-game sweep, though,
+produced by far the largest swing in this entire 16-round series —
+reported in full, not smoothed over, and flagged to the user rather
+than quietly accepted:**
+
+| Metric | Round 15 | Round 16 |
+|---|---|---|
+| Clean games with a win (avg quarter) | 113/150 (19.6) | **98/150 (23.1)** |
+| Total bankrupt games | 144 | 145 |
+| NorthAmerica bankrupt / avg cash / wins | 116/144, $19.64M, 16 | 123/144, **$59.12M**, 14 |
+| Europe bankrupt / avg cash / wins | 84/95, $4.55M, 3 | 86/95, **$9.25M**, 6 |
+| EastAsia bankrupt / avg cash / wins | 16/142, $133.67M, **89** | 24/142, $46.83M, **63** |
+| SouthWestAsia bankrupt / avg cash / wins | 29/55, $112.54M, 16 | 32/55, **$30.30M**, 18 |
+| AustralAsia bankrupt / avg cash / wins | 21/45, $92.88M, 7 | 22/45, $67.75M, **16** |
+| SouthAmerica bankrupt / avg cash / wins | 62/119, $63.61M, 19 | 58/119, $93.58M, **34** |
+
+Every region moved, several dramatically: EastAsia's own win count
+collapsed by nearly a third (89→63) even as its bankruptcy rate ticked
+up, while SouthAmerica's wins nearly doubled (19→34) and AustralAsia's
+more than doubled (7→16) — and the overall clean-win rate itself
+dropped from 113/150 to 98/150, meaning **15 more games out of 150 now
+end without any airline reaching the win condition** within the
+244-quarter campaign. This is a real, explainable, but genuinely
+different *kind* of result than any prior round: China's opening
+applies a large, multi-decade multiplier to two of the highest-weight
+cities in the entire dataset (Beijing 95, Shanghai 90), inside the
+region that already dominated the sweep — reshaping the relative
+economic balance of the whole simulated world rather than perturbing
+one region's own local statistics. Correctness at the per-pair level
+is proven directly by the proof tests above, independent of this
+aggregate result; what's genuinely open is whether a swing this large
+is the intended scale for this milestone, or whether the authored
+magnitude (`3.5x`) should be dialed back. Flagged to the user rather
+than decided unilaterally.
 
 ---
 

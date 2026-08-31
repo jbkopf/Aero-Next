@@ -151,5 +151,20 @@
   { "year": 2010, "globalMultiplier": 0.88, "region": "Europe", "kind": "Event", "eventGroup": "eyjafjallajokull-2010", "name": "Eyjafjallajokull eruption (April 2010): unprecedented shutdown of European airspace for over a week, a purely aviation-driven disruption spread across the whole year's demand" },
   { "year": 2011, "globalMultiplier": 1.0,  "region": "Europe", "kind": "Event", "eventGroup": "eyjafjallajokull-2010", "name": "European airspace fully reopens; disruption resolved" },
 
-  { "year": 2011, "globalMultiplier": 0.70, "cityId": "cai", "kind": "Event", "eventGroup": "arab-spring-2011", "name": "Egyptian Revolution / Arab Spring (Jan-Feb 2011): Mubarak's ouster, followed by sustained political instability (transitional military rule, the 2013 coup) - tourism collapses and does not meaningfully recover within the campaign's own remaining timeframe, a fourth independent event layer on Cairo" }
+  { "year": 2011, "globalMultiplier": 0.70, "cityId": "cai", "kind": "Event", "eventGroup": "arab-spring-2011", "name": "Egyptian Revolution / Arab Spring (Jan-Feb 2011): Mubarak's ouster, followed by sustained political instability (transitional military rule, the 2013 coup) - tourism collapses and does not meaningfully recover within the campaign's own remaining timeframe, a fourth independent event layer on Cairo" },
+
+  { "year": 1955, "globalMultiplier": 0.3, "cityId": "pek", "name": "Beijing: Maoist-era closed economy, minimal international travel/trade" },
+  { "year": 1978, "globalMultiplier": 0.4, "cityId": "pek", "name": "Deng Xiaoping's reforms begin (Third Plenum, Dec 1978); Special Economic Zones follow in 1980" },
+  { "year": 1992, "globalMultiplier": 0.8, "cityId": "pek", "name": "Deng's 'Southern Tour' accelerates market reforms; opening broadens nationally" },
+  { "year": 2001, "globalMultiplier": 1.5, "cityId": "pek", "name": "WTO accession (Dec 2001): major inflection point for international trade and travel" },
+  { "year": 2015, "globalMultiplier": 3.5, "cityId": "pek", "name": "Beijing: established major global economic and aviation hub" },
+
+  { "year": 1955, "globalMultiplier": 0.3, "cityId": "pvg", "name": "Shanghai: Maoist-era closed economy, minimal international travel/trade" },
+  { "year": 1978, "globalMultiplier": 0.4, "cityId": "pvg", "name": "Deng Xiaoping's reforms begin (Third Plenum, Dec 1978); Special Economic Zones follow in 1980" },
+  { "year": 1992, "globalMultiplier": 0.8, "cityId": "pvg", "name": "Deng's 'Southern Tour' accelerates market reforms; Pudong New Area development begins" },
+  { "year": 2001, "globalMultiplier": 1.5, "cityId": "pvg", "name": "WTO accession (Dec 2001): major inflection point for international trade and travel" },
+  { "year": 2015, "globalMultiplier": 3.5, "cityId": "pvg", "name": "Shanghai: established major global financial and aviation hub" },
+
+  { "year": 1997, "globalMultiplier": 0.80, "region": "EastAsia", "kind": "Event", "eventGroup": "asian-financial-crisis-1997", "name": "Asian Financial Crisis (Thai baht collapses July 1997, spreads through Indonesia, South Korea, Malaysia): sharp regional economic dip, distinct from the same-year Hong Kong Handover" },
+  { "year": 1999, "globalMultiplier": 1.0,  "region": "EastAsia", "kind": "Event", "eventGroup": "asian-financial-crisis-1997", "name": "Regional recovery, aided by IMF programs" }
 ]

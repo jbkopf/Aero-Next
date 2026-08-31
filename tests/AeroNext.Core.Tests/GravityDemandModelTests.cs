@@ -821,6 +821,115 @@ public class GravityDemandModelTests
     }
 
     [Fact]
+    public void RealDataset_ChinasOpening_GrowsBeijingAndShanghai_AcrossReformEra()
+    {
+        // China's opening - reserved since round 1/2, authored here:
+        // Deng Xiaoping's reforms (Third Plenum, Dec 1978) through WTO
+        // accession (2001) to 2015, modeled as the same permanent
+        // Trend shape on both real Chinese cities in the dataset,
+        // Beijing and Shanghai - the same multi-city, same-shape
+        // pattern already established for the Iran-Iraq War.
+        var cities = CityCatalog.LoadFile(Path.Combine(AppContext.BaseDirectory, "data", "cities.json"));
+        var byId = cities.ToDictionary(c => c.Id);
+        var schedule = DemandGrowthCatalog.LoadCampaignSchedule(Path.Combine(AppContext.BaseDirectory, "data"));
+        var farAway = byId["gru"];
+
+        foreach (var chinaCityId in new[] { "pek", "pvg" })
+        {
+            var chinaCity = byId[chinaCityId];
+            // Remove only this city's own Trend entries - Beijing also
+            // carries its own 2008 Olympics Event, which must stay in
+            // place so the ratio isolates the Trend layer specifically.
+            var withoutChinaTrend = schedule
+                .Where(p => !(p.CityId == chinaCityId && p.Kind == DemandGrowthPointKind.Trend))
+                .ToList();
+
+            double ChinaRatio(int year)
+            {
+                var withTrend = new GravityDemandModel(schedule: schedule, year: year).ForPair(farAway, chinaCity).PassengersPerQuarter;
+                var withoutTrend = new GravityDemandModel(schedule: withoutChinaTrend, year: year).ForPair(farAway, chinaCity).PassengersPerQuarter;
+                return withTrend / (double)withoutTrend;
+            }
+
+            var maoistEra = ChinaRatio(1955);
+            var reformsBegin = ChinaRatio(1978);
+            var wtoEra = ChinaRatio(2001);
+            var established = ChinaRatio(2015);
+
+            Assert.True(reformsBegin > maoistEra, $"{chinaCityId}: 1978 should exceed 1955");
+            Assert.True(wtoEra > reformsBegin, $"{chinaCityId}: 2001 should exceed 1978");
+            Assert.True(established > wtoEra, $"{chinaCityId}: 2015 should exceed 2001");
+        }
+    }
+
+    [Fact]
+    public void RealDataset_BeijingTrendAndOlympicsEvent_ComposeIndependently()
+    {
+        // First real case in this series of a Trend and an Event on
+        // the SAME city: Beijing carries both China's opening (a
+        // permanent Trend) and its own 2008 Olympics host-year boost
+        // (a temporary Event). They should compose multiplicatively,
+        // exactly like Trend x Event already compose at every other
+        // scope - confirmed directly here rather than assumed from the
+        // global-scope tests alone.
+        var cities = CityCatalog.LoadFile(Path.Combine(AppContext.BaseDirectory, "data", "cities.json"));
+        var byId = cities.ToDictionary(c => c.Id);
+        var schedule = DemandGrowthCatalog.LoadCampaignSchedule(Path.Combine(AppContext.BaseDirectory, "data"));
+        var farAway = byId["gru"];
+        var beijing = byId["pek"];
+
+        var withoutOlympics = schedule.Where(p => p.EventGroup != "olympics-2008-summer").ToList();
+
+        var during2008WithBoth = new GravityDemandModel(schedule: schedule, year: 2008).ForPair(farAway, beijing).PassengersPerQuarter;
+        var during2008TrendOnly = new GravityDemandModel(schedule: withoutOlympics, year: 2008).ForPair(farAway, beijing).PassengersPerQuarter;
+
+        // The Olympics boost is still visible on top of whatever the
+        // China-opening Trend alone contributes in 2008 - the trend
+        // doesn't swallow or get swallowed by the event.
+        Assert.True(during2008WithBoth > during2008TrendOnly);
+
+        var ratio = during2008WithBoth / (double)during2008TrendOnly;
+        Assert.InRange(ratio, 1.19, 1.21); // the Olympics' own authored 1.2x, isolated
+    }
+
+    [Fact]
+    public void RealDataset_AsianFinancialCrisis1997_DipsEastAsiaOnly_RecoveredBy1999()
+    {
+        // The 1997 Asian Financial Crisis - reserved since round 1/2,
+        // authored here: deliberately kept separate from the same-year
+        // Hong Kong Handover, a different real cause. The sweep's
+        // fourth Region-scoped event.
+        var cities = CityCatalog.LoadFile(Path.Combine(AppContext.BaseDirectory, "data", "cities.json"));
+        var byId = cities.ToDictionary(c => c.Id);
+        var schedule = DemandGrowthCatalog.LoadCampaignSchedule(Path.Combine(AppContext.BaseDirectory, "data"));
+        var withoutCrisis = schedule.Where(p => p.EventGroup != "asian-financial-crisis-1997").ToList();
+        var farAway = byId["gru"];
+        // Seoul (icn) - EastAsia, own Olympics event is 1988, well
+        // clear of this window.
+        var eastAsiaCity = byId["icn"];
+
+        double CrisisRatio(int year)
+        {
+            var withEvent = new GravityDemandModel(schedule: schedule, year: year).ForPair(farAway, eastAsiaCity).PassengersPerQuarter;
+            var withoutEvent = new GravityDemandModel(schedule: withoutCrisis, year: year).ForPair(farAway, eastAsiaCity).PassengersPerQuarter;
+            return withEvent / (double)withoutEvent;
+        }
+
+        Assert.True(CrisisRatio(1997) < 1.0, "1997 should be suppressed relative to a crisis-free reference");
+        Assert.Equal(1.0, CrisisRatio(1999));
+
+        // Confirms this composes independently from Hong Kong's own
+        // city-scoped Handover event, both active in 1997: Hong Kong
+        // should be suppressed further by the region-wide crisis on
+        // top of its own handover dip, not have one silently override
+        // the other.
+        var hongKong = byId["hkg"];
+        var hongKongBoth1997 = new GravityDemandModel(schedule: schedule, year: 1997).ForPair(farAway, hongKong).PassengersPerQuarter;
+        var hongKongHandoverOnly = new GravityDemandModel(schedule: withoutCrisis, year: 1997).ForPair(farAway, hongKong).PassengersPerQuarter;
+        Assert.True(hongKongBoth1997 < hongKongHandoverOnly, "Hong Kong in 1997 should be suppressed further by the region-wide crisis on top of its own handover dip");
+    }
+
+    [Fact]
     public void RealDataset_ArabSpring2011_PermanentlyCollapsesCairo_FourthIndependentLayer()
     {
         // Also window 12: the Arab Spring is Cairo's fourth
