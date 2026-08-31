@@ -27,6 +27,27 @@ namespace AeroNext.Core.World;
 /// modeling, not money, so the determinism rule against float/double
 /// (CLAUDE.md rule #1) doesn't apply; deterministic floating-point ops given
 /// identical inputs still reproduce identical quarters.
+///
+/// M20: growth over time was previously only ever a single flat
+/// <see cref="_globalMultiplier"/> baked in at construction — the same
+/// number applied identically to every pair on earth. `schedule`
+/// (paired with `year`) generalizes this without changing that
+/// existing behavior's shape: when provided, the *global* portion is
+/// resolved from the schedule's own global-scoped breakpoints (via
+/// <see cref="Timeline.DemandMultiplierForYear"/> — the exact computation
+/// every real call site already did upstream, now done once, inside the
+/// model, instead of twice), applied once per pair exactly as
+/// <see cref="_globalMultiplier"/> always has been. Region- and
+/// city-scoped breakpoints are a genuinely new, *separate* per-city factor
+/// (1.0 when a city carries no override) multiplied in on top, once per
+/// city in the pair — deliberately not folded into the global figure
+/// itself, since doing so would make an unscoped pair's growth apply
+/// *twice* (once per city) instead of the flat once-per-pair effect this
+/// class has always had, breaking byte-identical output for every existing
+/// caller that doesn't use scoped breakpoints yet. When `schedule`
+/// is null (every existing call site, and any new one that doesn't need
+/// this), behavior is unchanged: <see cref="_globalMultiplier"/> applies
+/// exactly as it always has, and the region/city factor is always 1.0.
 /// </summary>
 public sealed class GravityDemandModel
 {
@@ -40,23 +61,32 @@ public sealed class GravityDemandModel
     private readonly double _exponent;
     private readonly double _crossRegionMultiplier;
     private readonly double _globalMultiplier;
+    private readonly IReadOnlyList<DemandGrowthPoint>? _schedule;
+    private readonly int? _year;
 
     /// <summary>
     /// globalMultiplier is M13's historical growth knob — the campaign
     /// constructs a new model each year with the era's multiplier from
     /// Timeline.DemandMultiplierForYear, reusing the same tuned scale,
-    /// exponent, and cross-region multiplier throughout.
+    /// exponent, and cross-region multiplier throughout. M20:
+    /// schedule/year supersede globalMultiplier entirely when both are
+    /// provided (the richer, scope-aware path); leave them null to keep
+    /// today's exact flat-multiplier behavior.
     /// </summary>
     public GravityDemandModel(
         double scale = DefaultScale,
         double exponent = DefaultExponent,
         double crossRegionMultiplier = DefaultCrossRegionMultiplier,
-        double globalMultiplier = DefaultGlobalMultiplier)
+        double globalMultiplier = DefaultGlobalMultiplier,
+        IReadOnlyList<DemandGrowthPoint>? schedule = null,
+        int? year = null)
     {
         _scale = scale;
         _exponent = exponent;
         _crossRegionMultiplier = crossRegionMultiplier;
         _globalMultiplier = globalMultiplier;
+        _schedule = schedule;
+        _year = year;
     }
 
     public PairDemand ForPair(City a, City b)
@@ -69,11 +99,35 @@ public sealed class GravityDemandModel
             raw *= _crossRegionMultiplier;
         }
 
-        raw *= _globalMultiplier;
+        raw *= GlobalMultiplierForPair();
+        raw *= EffectiveMultiplier(a) * EffectiveMultiplier(b);
 
         var passengers = (long)Math.Round(raw, MidpointRounding.AwayFromZero);
 
         return new PairDemand(a, b, distanceKm, passengers);
+    }
+
+    /// <summary>Applied once per pair, exactly as _globalMultiplier always has been — the schedule's own global-scoped breakpoints when available, else the constructor's flat value.</summary>
+    private double GlobalMultiplierForPair() =>
+        _schedule is not null && _year is not null
+            ? Timeline.DemandMultiplierForYear(_schedule, _year.Value)
+            : _globalMultiplier;
+
+    /// <summary>M20: the region/city-scoped portion only, resolved per city (1.0 when no schedule, or no breakpoint in either scope applies to this city).</summary>
+    private double EffectiveMultiplier(City city)
+    {
+        if (_schedule is null || _year is null)
+        {
+            return 1.0;
+        }
+
+        var regionMatches = _schedule.Where(p => p.Region == city.Region && p.CityId is null);
+        var cityMatches = _schedule.Where(p => p.CityId == city.Id);
+
+        var regionMultiplier = Timeline.LatestAtOrBefore(regionMatches, _year.Value)?.GlobalMultiplier ?? 1.0;
+        var cityMultiplier = Timeline.LatestAtOrBefore(cityMatches, _year.Value)?.GlobalMultiplier ?? 1.0;
+
+        return regionMultiplier * cityMultiplier;
     }
 
     /// <summary>

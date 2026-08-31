@@ -99,7 +99,7 @@ public static class FullGameRunner
         {
             var year = Timeline.YearForQuarter(q);
             var availableFleet = Timeline.AvailableAircraft(fleetCatalog, year);
-            var yearDemandModel = new GravityDemandModel(globalMultiplier: Timeline.DemandMultiplierForYear(growthSchedule, year));
+            var yearDemandModel = new GravityDemandModel(schedule: growthSchedule, year: year); // M20: model resolves global (and any region/city-scoped) growth itself
             var appliedOrdersByName = new Dictionary<string, IReadOnlyList<QuarterOrder>>();
             var retiredUnitsByName = new Dictionary<string, IReadOnlyList<FleetUnit>>();
 

@@ -129,6 +129,133 @@ public class GravityDemandModelTests
     }
 
     [Fact]
+    public void ForPair_ScheduleWithOnlyAGlobalEntry_MatchesFlatGlobalMultiplier_ByteIdentical()
+    {
+        // The core M20 backward-compatibility proof: a schedule with no
+        // region/city scoping produces the exact same output as today's
+        // flat globalMultiplier constructor path - not just "close",
+        // byte-identical.
+        var a = MakeCity("a", 0, 0, 50, Region.NorthAmerica);
+        var b = MakeCity("b", 10, 10, 60, Region.Europe);
+        var schedule = new[] { new DemandGrowthPoint(1955, 2.5) };
+
+        var flat = new GravityDemandModel(globalMultiplier: 2.5).ForPair(a, b);
+        var scheduled = new GravityDemandModel(schedule: schedule, year: 1955).ForPair(a, b);
+
+        Assert.Equal(flat.PassengersPerQuarter, scheduled.PassengersPerQuarter);
+    }
+
+    [Fact]
+    public void ForPair_RegionScopedBreakpoint_OnlyAffectsPairsTouchingThatRegion()
+    {
+        var home = MakeCity("home", 0, 0, 50, Region.NorthAmerica);
+        var eastAsiaCity = MakeCity("hnd", 10, 10, 60, Region.EastAsia);
+        var europeCity = MakeCity("lhr", 10, 10, 60, Region.Europe); // same distance/weight as hnd - only region differs
+        var schedule = new[]
+        {
+            new DemandGrowthPoint(1955, 1.0),
+            new DemandGrowthPoint(1955, 3.0, Region: Region.EastAsia),
+        };
+        var model = new GravityDemandModel(schedule: schedule, year: 1955);
+        var baseline = new GravityDemandModel(schedule: new[] { new DemandGrowthPoint(1955, 1.0) }, year: 1955);
+
+        var affected = model.ForPair(home, eastAsiaCity).PassengersPerQuarter;
+        var unaffected = model.ForPair(home, europeCity).PassengersPerQuarter;
+        var unaffectedBaseline = baseline.ForPair(home, europeCity).PassengersPerQuarter;
+
+        // EastAsia-touching pair scales by the region factor (3.0); the
+        // Europe-touching pair is completely untouched by EastAsia's own
+        // scoped breakpoint.
+        Assert.InRange(affected, unaffectedBaseline * 3 - 1, unaffectedBaseline * 3 + 1);
+        Assert.Equal(unaffectedBaseline, unaffected);
+    }
+
+    [Fact]
+    public void ForPair_CityScopedBreakpoint_OnlyAffectsPairsTouchingThatCity()
+    {
+        var home = MakeCity("home", 0, 0, 50, Region.NorthAmerica);
+        var dubai = MakeCity("dxb", 10, 10, 60, Region.SouthWestAsia);
+        var otherSameRegion = MakeCity("ruh", 10, 10, 60, Region.SouthWestAsia); // same region, distance, weight - only the city id differs
+        var schedule = new[]
+        {
+            new DemandGrowthPoint(1955, 1.0),
+            new DemandGrowthPoint(1955, 5.0, CityId: "dxb"),
+        };
+        var model = new GravityDemandModel(schedule: schedule, year: 1955);
+        var baseline = new GravityDemandModel(schedule: new[] { new DemandGrowthPoint(1955, 1.0) }, year: 1955);
+
+        var affected = model.ForPair(home, dubai).PassengersPerQuarter;
+        var unaffected = model.ForPair(home, otherSameRegion).PassengersPerQuarter;
+        var unaffectedBaseline = baseline.ForPair(home, otherSameRegion).PassengersPerQuarter;
+
+        Assert.InRange(affected, unaffectedBaseline * 5 - 5, unaffectedBaseline * 5 + 5);
+        Assert.Equal(unaffectedBaseline, unaffected);
+    }
+
+    [Fact]
+    public void ForPair_BothEndpointsCityScoped_MultipliersCompound()
+    {
+        // Two cities that each individually boomed - the pair between
+        // them should reflect both, not just one (the real "two thriving
+        // hubs connect to each other" story M21 wants to author later).
+        var dubai = MakeCity("dxb", 0, 0, 50, Region.SouthWestAsia);
+        var shanghai = MakeCity("pvg", 10, 10, 60, Region.EastAsia);
+        var schedule = new[]
+        {
+            new DemandGrowthPoint(1955, 1.0),
+            new DemandGrowthPoint(1955, 2.0, CityId: "dxb"),
+            new DemandGrowthPoint(1955, 3.0, CityId: "pvg"),
+        };
+        var model = new GravityDemandModel(schedule: schedule, year: 1955);
+        var baseline = new GravityDemandModel(schedule: new[] { new DemandGrowthPoint(1955, 1.0) }, year: 1955);
+
+        var compounded = model.ForPair(dubai, shanghai).PassengersPerQuarter;
+        var unscaled = baseline.ForPair(dubai, shanghai).PassengersPerQuarter;
+
+        // 2.0 x 3.0 = 6x, not 2x or 3x alone.
+        Assert.InRange(compounded, unscaled * 6 - 6, unscaled * 6 + 6);
+    }
+
+    [Fact]
+    public void ForPair_RegionAndCityScopeOnTheSameCity_BothApply()
+    {
+        var home = MakeCity("home", 0, 0, 50, Region.NorthAmerica);
+        var dubai = MakeCity("dxb", 10, 10, 60, Region.SouthWestAsia);
+        var schedule = new[]
+        {
+            new DemandGrowthPoint(1955, 1.0),
+            new DemandGrowthPoint(1955, 2.0, Region: Region.SouthWestAsia),
+            new DemandGrowthPoint(1955, 3.0, CityId: "dxb"),
+        };
+        var model = new GravityDemandModel(schedule: schedule, year: 1955);
+        var baseline = new GravityDemandModel(schedule: new[] { new DemandGrowthPoint(1955, 1.0) }, year: 1955);
+
+        var affected = model.ForPair(home, dubai).PassengersPerQuarter;
+        var unscaled = baseline.ForPair(home, dubai).PassengersPerQuarter;
+
+        // Dubai's own region (2.0) x its own city entry (3.0) = 6x.
+        Assert.InRange(affected, unscaled * 6 - 6, unscaled * 6 + 6);
+    }
+
+    [Fact]
+    public void ForPair_ScheduleGrowsAcrossYears_PiecewiseConstant()
+    {
+        var a = MakeCity("home", 0, 0, 50, Region.NorthAmerica);
+        var dubai = MakeCity("dxb", 10, 10, 60, Region.SouthWestAsia);
+        var schedule = new[]
+        {
+            new DemandGrowthPoint(1955, 1.0),
+            new DemandGrowthPoint(1955, 1.0, CityId: "dxb"),
+            new DemandGrowthPoint(1985, 8.0, CityId: "dxb"), // Dubai's own later inflection
+        };
+
+        var before = new GravityDemandModel(schedule: schedule, year: 1980).ForPair(a, dubai).PassengersPerQuarter;
+        var after = new GravityDemandModel(schedule: schedule, year: 1985).ForPair(a, dubai).PassengersPerQuarter;
+
+        Assert.InRange(after, before * 8 - 8, before * 8 + 8);
+    }
+
+    [Fact]
     public void RealDataset_MajorMarketDwarfsChokepointPair()
     {
         var dataPath = Path.Combine(AppContext.BaseDirectory, "data", "cities.json");

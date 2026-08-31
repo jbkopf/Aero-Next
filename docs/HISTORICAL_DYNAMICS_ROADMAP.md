@@ -1,6 +1,6 @@
 # Historical Dynamics Roadmap
 
-**Status: not started.** Builds on the completed sim core
+**Status: M20 done, M21-M22 not started.** Builds on the completed sim core
 (`docs/SIM_CORE_ROADMAP.md`, M0–M14) and game setup system
 (`docs/GAME_SETUP_ROADMAP.md`, M15–M19, plus its ongoing city-expansion
 series). Continues the shared milestone numbering from M20, since this is
@@ -51,7 +51,7 @@ line.
 
 ---
 
-## M20 — Generalize the demand schedule to region and city scope
+## M20 — Generalize the demand schedule to region and city scope ✅
 
 Extend the existing global-only mechanism rather than build a parallel
 one. `DemandGrowthPoint` (`AeroNext.Core.World`) currently has just `(int
@@ -101,6 +101,73 @@ region with no override is provably unaffected — re-run the full M13
 pinned figures in `docs/SIM_CORE_ROADMAP.md`'s M13 section before
 considering this milestone done, exactly as the city-expansion series has
 done at every step.
+
+Done. **A real ambiguity in this section's own text, resolved with the
+user before writing any code:** "the product of global × region × city
+scopes," read literally, makes *global* a per-city factor too — for an
+unscoped pair that turns today's flat `global` effect into `global²`
+(2015's 4.0x would become 16x), breaking this very section's own
+backward-compatibility requirement. Settled: global stays exactly what
+it is today — one flat, pair-level multiplier, unchanged; region/city
+scopes are a genuinely new, *separate* per-city factor (1.0 when
+unscoped) multiplied in on top, once per city — trivially byte-identical
+when nothing is scoped, and a pair between two boomed cities still
+compounds (the real "Dubai took off" story M21 wants).
+
+**Query-shape decision**, investigated rather than assumed: the model
+resolves per-city multipliers at query time, not via a precomputed
+rescaled city list. Checked every real `GravityDemandModel` construction
+call site first (`Program.cs`, `FullGameRunner.cs`, `StartingConditions.cs`,
+plus 104 call sites across 6 test files) — a rescaled-city-list approach
+would need every function in the sim that takes `IReadOnlyList<City>` to
+know to use a special per-year list instead of the canonical static one,
+and `City.DemandWeight` is an `int` that would compound rounding loss if
+rescaled repeatedly. Resolving inside `GravityDemandModel` itself keeps
+the blast radius to one class plus its 4 real construction call sites;
+the 104 test call sites that don't pass a schedule are untouched.
+
+`DemandGrowthPoint` gained `Region?`/`CityId?` (mutually exclusive,
+validated); `DemandGrowthCatalog` also now requires at least one global
+breakpoint to exist (`Timeline.DemandMultiplierForYear`'s own fallback
+relies on one always being there) and treats a duplicate year as a
+same-*scope* duplicate, not a same-year one, since two breakpoints can
+now legitimately share a year in different scopes. `GravityDemandModel`
+gained optional `schedule`/`year` constructor parameters superseding
+`globalMultiplier` when both are provided; `Timeline.DemandMultiplierForYear`
+now correctly filters to the global-scoped portion only (a real
+correctness fix this generalization required, not optional) so a
+region/city breakpoint can never be mistaken for the global figure.
+
+561 tests total (18 new, across `TimelineTests`/`GravityDemandModelTests`),
+numerically pre-verified before writing — a region-scoped breakpoint
+measurably changes only pairs touching that region; a city-scoped one
+only pairs touching that city; both endpoints scoped compounds (6x from
+2.0×3.0, not 2x or 3x alone); region+city on the same city both apply;
+piecewise-constant resolution holds per scope independently. The core
+backward-compatibility proof: a schedule carrying only a single global
+entry produces **byte-identical** `PassengersPerQuarter` to the existing
+flat-`globalMultiplier` constructor path, not just close. 100% line
+coverage on every touched file; the one remaining partial branch
+(`DemandGrowthCatalog`'s all-scoped check) is the same class of
+confirmed structurally-unreachable short-circuit case M39-M41 already
+documented — a `||`'s left-true branch collapses two theoretical slots
+into one real outcome regardless of the right operand's value. Overall
+project coverage **99.89%/99.20%**.
+
+**Re-verified, not assumed:** `AeroNext.Sim`'s M13 loop re-run and
+confirmed byte-for-byte identical to its own established current output
+(quarters 1/4/7/10, Continental Wings wins at quarter 10) — **not**
+`docs/SIM_CORE_ROADMAP.md`'s own M13 section, which predates M39
+entirely (still describes the old M8 fixed-bump heuristic and a
+quarter-19 bankruptcy) and was already stale for reasons unrelated to
+this milestone; that section's own "Done when" byte-identical target is
+no longer a meaningful baseline to check against and should be
+re-pointed at `BASELINE_AI_ROADMAP.md`'s current figures whenever that
+doc is next touched, not silently treated as this milestone's own
+target. The 150-game QA harness sweep came back identical to M41's own
+numbers too (118/150 wins, avg quarter 25.3) — expected and confirmed
+directly: `demand_growth.json` itself still carries no region/city
+entries (M21's job), so nothing behavioral could have changed yet.
 
 ---
 

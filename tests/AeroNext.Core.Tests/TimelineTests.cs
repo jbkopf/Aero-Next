@@ -69,6 +69,92 @@ public class TimelineTests
     }
 
     [Fact]
+    public void DemandMultiplierForYear_IgnoresRegionAndCityScopedBreakpoints()
+    {
+        // M20: a schedule can now mix scopes - DemandMultiplierForYear
+        // must resolve the *global* portion only, even when a
+        // region/city-scoped breakpoint would otherwise look like the
+        // latest one for that year.
+        var schedule = new[]
+        {
+            new DemandGrowthPoint(1955, 1.0),
+            new DemandGrowthPoint(1990, 2.5),
+            new DemandGrowthPoint(1995, 99.0, Region: Region.EastAsia), // would win "latest at or before 2000" if scope were ignored
+            new DemandGrowthPoint(1996, 88.0, CityId: "dxb"),
+        };
+
+        Assert.Equal(2.5, Timeline.DemandMultiplierForYear(schedule, 2000));
+    }
+
+    [Fact]
+    public void DemandGrowthCatalog_Load_ThrowsWhenBothRegionAndCityIdSet()
+    {
+        const string json = """
+        [
+          { "year": 1955, "globalMultiplier": 1.0 },
+          { "year": 1970, "globalMultiplier": 2.0, "region": "EastAsia", "cityId": "dxb" }
+        ]
+        """;
+
+        Assert.Throws<InvalidDataException>(() => DemandGrowthCatalog.Load(json));
+    }
+
+    [Fact]
+    public void DemandGrowthCatalog_Load_ThrowsWhenNoGlobalBreakpointExists()
+    {
+        const string json = """[{ "year": 1970, "globalMultiplier": 2.0, "cityId": "dxb" }]""";
+
+        Assert.Throws<InvalidDataException>(() => DemandGrowthCatalog.Load(json));
+    }
+
+    [Fact]
+    public void DemandGrowthCatalog_Load_AllowsTheSameYearAcrossDifferentScopes()
+    {
+        const string json = """
+        [
+          { "year": 1955, "globalMultiplier": 1.0 },
+          { "year": 1970, "globalMultiplier": 1.5 },
+          { "year": 1970, "globalMultiplier": 3.0, "region": "EastAsia" },
+          { "year": 1970, "globalMultiplier": 5.0, "cityId": "dxb" }
+        ]
+        """;
+
+        var schedule = DemandGrowthCatalog.Load(json);
+
+        Assert.Equal(4, schedule.Count);
+    }
+
+    [Fact]
+    public void DemandGrowthCatalog_Load_ThrowsOnDuplicateYearWithinTheSameCityScope()
+    {
+        const string json = """
+        [
+          { "year": 1955, "globalMultiplier": 1.0 },
+          { "year": 1970, "globalMultiplier": 2.0, "cityId": "dxb" },
+          { "year": 1970, "globalMultiplier": 3.0, "cityId": "dxb" }
+        ]
+        """;
+
+        Assert.Throws<InvalidDataException>(() => DemandGrowthCatalog.Load(json));
+    }
+
+    [Fact]
+    public void DemandGrowthCatalog_Load_DoesNotThrowOnSameYearDifferentRegions()
+    {
+        const string json = """
+        [
+          { "year": 1955, "globalMultiplier": 1.0 },
+          { "year": 1970, "globalMultiplier": 2.0, "region": "EastAsia" },
+          { "year": 1970, "globalMultiplier": 3.0, "region": "Europe" }
+        ]
+        """;
+
+        var schedule = DemandGrowthCatalog.Load(json);
+
+        Assert.Equal(3, schedule.Count);
+    }
+
+    [Fact]
     public void DemandGrowthCatalog_LoadFile_LoadsRepoSchedule_Increasing()
     {
         var schedule = DemandGrowthCatalog.LoadFile(DemandGrowthDataPath);

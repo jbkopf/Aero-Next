@@ -1,15 +1,25 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace AeroNext.Core.World;
 
 /// <summary>
 /// Loads the demand growth schedule — piecewise-constant breakpoints, not
 /// interpolated, so a given year's multiplier is simple and deterministic:
-/// whichever breakpoint's year is the latest one at or before it.
+/// whichever breakpoint's year is the latest one at or before it. M20:
+/// breakpoints can now be global, region-scoped, or city-scoped
+/// (<see cref="DemandGrowthPoint"/>) — "latest at or before" resolution
+/// applies independently within each scope, not across all of them at
+/// once, so two breakpoints sharing a year in different scopes are both
+/// valid, not a duplicate.
 /// </summary>
 public static class DemandGrowthCatalog
 {
-    private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+        Converters = { new JsonStringEnumConverter() }, // M20: Region is now a possible field, same converter CityCatalog already uses
+    };
 
     public static IReadOnlyList<DemandGrowthPoint> Load(string json)
     {
@@ -30,15 +40,32 @@ public static class DemandGrowthCatalog
             throw new InvalidDataException("Demand growth data contained no breakpoints.");
         }
 
-        var duplicateYears = points
-            .GroupBy(p => p.Year)
+        if (points.All(p => p.Region is not null || p.CityId is not null))
+        {
+            throw new InvalidDataException("Demand growth data must include at least one global (unscoped) breakpoint — Timeline.DemandMultiplierForYear's own fallback relies on one always existing.");
+        }
+
+        var scopedTwice = points.Where(p => p.Region is not null && p.CityId is not null).ToList();
+
+        if (scopedTwice.Count > 0)
+        {
+            throw new InvalidDataException(
+                $"Demand growth breakpoints for year(s) {string.Join(", ", scopedTwice.Select(p => p.Year))} set both Region and CityId — a breakpoint must be global, region-scoped, or city-scoped, never more than one.");
+        }
+
+        // M20: two breakpoints may now legitimately share a year if
+        // they're in different scopes (e.g. a global 1970 entry and an
+        // EastAsia-scoped 1970 entry) - a duplicate is the same year
+        // *and* the same scope, not just the same year.
+        var duplicateScopeYears = points
+            .GroupBy(p => (p.Year, p.Region, p.CityId))
             .Where(g => g.Count() > 1)
-            .Select(g => g.Key)
+            .Select(g => g.Key.Year)
             .ToList();
 
-        if (duplicateYears.Count > 0)
+        if (duplicateScopeYears.Count > 0)
         {
-            throw new InvalidDataException($"Duplicate demand growth years: {string.Join(", ", duplicateYears)}");
+            throw new InvalidDataException($"Duplicate demand growth years within the same scope: {string.Join(", ", duplicateScopeYears)}");
         }
 
         foreach (var point in points)
