@@ -421,6 +421,31 @@ public class GravityDemandModelTests
     }
 
     [Fact]
+    public void RealDataset_SuezCrisis_DipsCairoIn1956_RecoveredBy1958()
+    {
+        // The first window of the 5-year historical sweep: the Suez
+        // Crisis (Egypt nationalizes the canal, invasion, canal blocked
+        // ~5 months) is modeled as a Cairo-scoped dip, not a global one -
+        // it was a real, Egypt-centered event, not a worldwide shock on
+        // the scale of an oil crisis or 9/11.
+        var cities = CityCatalog.LoadFile(Path.Combine(AppContext.BaseDirectory, "data", "cities.json"));
+        var byId = cities.ToDictionary(c => c.Id);
+        var schedule = DemandGrowthCatalog.LoadCampaignSchedule(Path.Combine(AppContext.BaseDirectory, "data"));
+        var farAway = byId["gru"];
+
+        var before = new GravityDemandModel(schedule: schedule, year: 1955).ForPair(farAway, byId["cai"]).PassengersPerQuarter;
+        var duringCrisis = new GravityDemandModel(schedule: schedule, year: 1956).ForPair(farAway, byId["cai"]).PassengersPerQuarter;
+        var afterReopening = new GravityDemandModel(schedule: schedule, year: 1958).ForPair(farAway, byId["cai"]).PassengersPerQuarter;
+
+        Assert.True(duringCrisis < before, "1956 should dip below 1955");
+        // The trend curve itself is flat between 1955 and 1970 (no
+        // breakpoint in between), so 1958 should land back at exactly
+        // the same value as 1955, not just "recovered somewhat" -
+        // proving the reversion is complete, not partial.
+        Assert.Equal(before, afterReopening);
+    }
+
+    [Fact]
     public void RealDataset_OlympicsEvents_BoostHostYearOnly_NotAdjacentYears()
     {
         // Stress-tests the trend/event architecture against a real,

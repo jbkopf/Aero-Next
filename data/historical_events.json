@@ -109,5 +109,8 @@
   { "year": 2007, "globalMultiplier": 1.0, "cityId": "mil", "kind": "Event", "eventGroup": "olympics-2006-winter-proxy", "name": "Post-Olympics reversion" },
 
   { "year": 2014, "globalMultiplier": 1.2, "cityId": "rov", "kind": "Event", "eventGroup": "olympics-2014-winter-proxy", "name": "2014 Sochi Winter Olympics (host city not in dataset - nearest same-country city, Rostov, 404km)" },
-  { "year": 2015, "globalMultiplier": 1.0, "cityId": "rov", "kind": "Event", "eventGroup": "olympics-2014-winter-proxy", "name": "Post-Olympics reversion" }
+  { "year": 2015, "globalMultiplier": 1.0, "cityId": "rov", "kind": "Event", "eventGroup": "olympics-2014-winter-proxy", "name": "Post-Olympics reversion" },
+
+  { "year": 1956, "globalMultiplier": 0.80, "cityId": "cai", "kind": "Event", "eventGroup": "suez-crisis-1956", "name": "Suez Crisis: Egypt nationalizes the canal, Anglo-French-Israeli invasion, canal blocked" },
+  { "year": 1957, "globalMultiplier": 1.0,  "cityId": "cai", "kind": "Event", "eventGroup": "suez-crisis-1956", "name": "Canal reopens (April 1957) after UN clearance operations" }
 ]

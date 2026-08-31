@@ -9,7 +9,9 @@ host city in the dataset; found and fixed a real performance regression
 — a 150-game sweep that looked hung now runs in 53s), M21 round 5 done
 (the remaining 14 Games, mapped to the nearest same-country dataset
 city; 1984 Sarajevo skipped on the user's own direction — no dataset
-city is in Bosnia/former Yugoslavia), M22 not started.** China's
+city is in Bosnia/former Yugoslavia), M21 round 6 done (Suez Crisis
+1956, first window of a 13-window sweep of 1955-2015 built to cover
+every year with no gaps), M22 not started.** China's
 opening and the 1997 Asian Financial Crisis remain named, not-yet-
 authored future rounds. Builds on the completed sim core
 (`docs/SIM_CORE_ROADMAP.md`, M0–M14) and game setup system
@@ -182,7 +184,7 @@ entries (M21's job), so nothing behavioral could have changed yet.
 
 ---
 
-## M21 — Author real historical trends and events (round 1: architecture + Dubai; round 2: global curve redesign; round 3: trend/event split; round 4: every Olympic Games + a real perf fix; round 5: remaining Games via same-country substitution) ✅
+## M21 — Author real historical trends and events (round 1: architecture + Dubai; round 2: global curve redesign; round 3: trend/event split; round 4: every Olympic Games + a real perf fix; round 5: remaining Games via same-country substitution; round 6: Suez Crisis, window 1 of a 13-window historical sweep) ✅
 
 Content, not mechanics — the same shape as the aircraft-catalog and
 city-expansion series, and expected to become its own ongoing round-by-round
@@ -736,6 +738,85 @@ three (Milan ×2, Vienna ×2, Nice ×2 — six event-slots but only three
 distinct cities) and no change at all for the regions that picked up
 none (EastAsia, SouthWestAsia, SouthAmerica essentially flat). A real,
 explainable, region-count-proportional effect, not noise.
+
+### Round 6: the 5-year historical sweep, window 1 (Suez Crisis 1956) ✅
+
+Rounds 1-5 authored events opportunistically (Dubai, then whatever the
+global curve's own research turned up, then a single stress-test batch
+of Olympics). Before continuing further, the user asked whether a
+5-year window is a reasonable unit to search for real, travel-relevant
+history without leaving gaps — confirmed yes, then this round built the
+actual list: every one of the 61 campaign years (1955-2015) sorted into
+13 five-year buckets, so the series has a map instead of continuing to
+pick events ad hoc.
+
+| Window | Candidate(s) | Status |
+|---|---|---|
+| 1955-59 | Suez Crisis (1956) | **Authored this round** — Cairo (`cai`), city-scoped |
+| 1960-64 | US embargo on Cuba (1962) | Named, not yet authored — `hav`, permanent step-down |
+| 1965-69 | Six-Day War → Suez Canal closed (1967-75) | Named, spans into windows 4-5; scope not yet decided |
+| 1970-74 | (747, Munich/Sapporo Olympics, first oil crisis) | Already covered by rounds 3-4 |
+| 1975-79 | Suez reopens (1975); Camp David / Egypt-Israel peace (1979) | Named — Cairo bookend + boost |
+| 1980-84 | Iran-Iraq War (1980-88) | Named, spans into window 7 — `thr`, `bgw` |
+| 1985-89 | Chernobyl (1986); Berlin Wall falls (1989) | Named — Europe-wide dip; `ber` trend-shift |
+| 1990-94 | USSR dissolves (1991) | Named — `mow` |
+| 1995-99 | Hong Kong Handover (1997) | Named — `hkg`, flagged as historically mild |
+| 2000-04 | SARS (2003); Iraq War (2003) | Named — first real **Region**-scope candidate (EastAsia); `bgw` |
+| 2005-09 | — | No standout beyond what rounds 3-4 already cover (Beijing, financial crisis) |
+| 2010-14 | Eyjafjallajökull eruption (2010); Arab Spring (2011) | Named — Europe-wide airspace shutdown; Cairo/North Africa |
+| 2015 | — | Campaign's final year — no room for a reversion arc, not worth authoring |
+
+China's opening and the 1997 Asian Financial Crisis stay reserved for
+their own dedicated rounds (named since round 1/2), not folded into
+this sweep. Windows are implemented one at a time, on the user's own
+direction — this round closes window 1 only.
+
+**Suez Crisis (1956):** Egypt nationalizes the canal in July, the
+Anglo-French-Israeli invasion and blockade follow, the canal reopens
+after UN clearance in April 1957. Modeled as a **city-scoped** event on
+Cairo (`cai`) rather than global — a deliberate departure from every
+prior shock in this series (oil crises, wars, 9/11, the financial
+crisis), all of which were genuinely worldwide. Suez was not: it was an
+Egypt-centered nationalization and invasion, so diluting it into a
+global multiplier would misrepresent its real reach. -20% (`0.80`) for
+1956, reverting to neutral in 1957 — the same sharp-shock/explicit-
+reversion shape used for every other temporary event this series has
+authored, sized the same as the Olympics boost for consistency (event
+magnitudes throughout this series are *(proposed, tunable)*, not
+individually researched — the base trend curve already carries how
+much bigger overall demand is by any given year).
+
+One new proof test,
+`RealDataset_SuezCrisis_DipsCairoIn1956_RecoveredBy1958`: confirms 1956
+dips below 1955 for a Cairo pair, and — since the trend curve itself is
+flat between 1955 and 1970 with no breakpoint in between — 1958 lands
+back at *exactly* the same value as 1955, proving the reversion is
+complete, not partial. 579 tests, up from 578, all passing; coverage
+gate re-run and unchanged (same accepted baseline gaps as every prior
+round: `BriefingGenerator`, `QuarterOrder`, `AiToolkit`, `BaselineAi`,
+`RapidExpansionStrategy`, `NetworkPlanner` — `GravityDemandModel`,
+`DemandGrowthCatalog`, `Timeline` stay at 100%).
+
+**Measured, and genuinely unchanged this time — a real "no effect"
+result, not an unmeasured assumption.** Both the M13 loop and the
+150-game QA sweep came back byte-for-byte identical to round 5's own
+numbers:
+
+- M13 loop: quarters 1, 4, 7, and 10 (1955-57) match round 5 exactly
+  (Atlas Air still 111,384 pax/qtr at quarter 7, Continental Wings
+  still wins at quarter 10) — this loop's own deterministic early
+  routes don't happen to touch Cairo.
+- 150-game sweep: 113/150 clean wins (avg quarter 19.9), and every
+  regional row (NorthAmerica 118/144 bankrupt $14.83M avg cash 15
+  wins; Europe 80/95 $4.11M 4 wins; EastAsia 14/142 $140.60M 88 wins;
+  SouthWestAsia 29/55 $113.44M 17 wins; AustralAsia 22/45 $92.58M 7
+  wins; SouthAmerica 62/119 $63.61M 19 wins) matches round 5 exactly.
+  Africa (Cairo's own region) isn't among the 6 regions this breakdown
+  even lists — none of the 4 competing airlines in these particular
+  150 seeded games happen to call it home or route through it, so a
+  Cairo-scoped dip has nothing to move. Consistent with this project's
+  own chokepoint design pillar: a gate only matters when someone is
+  actually contesting it.
 
 ---
 
