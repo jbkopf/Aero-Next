@@ -2,5 +2,22 @@
   { "year": 1955, "globalMultiplier": 0.3,  "cityId": "dxb", "name": "Dubai: minor regional trading post" },
   { "year": 1985, "globalMultiplier": 1.5,  "cityId": "dxb", "name": "Dubai: Emirates founded, free-trade-zone/aviation-hub strategy begins" },
   { "year": 2000, "globalMultiplier": 4.0,  "cityId": "dxb", "name": "Dubai: hub build-out through the 1990s" },
-  { "year": 2015, "globalMultiplier": 10.0, "cityId": "dxb", "name": "Dubai: DXB among the world's busiest airports" }
+  { "year": 2015, "globalMultiplier": 10.0, "cityId": "dxb", "name": "Dubai: DXB among the world's busiest airports" },
+
+  { "year": 1970, "globalMultiplier": 1.15, "kind": "Event", "eventGroup": "747", "name": "Boeing 747 enters service - permanent cost/capacity step-up (no reversion)" },
+
+  { "year": 1973, "globalMultiplier": 0.85, "kind": "Event", "eventGroup": "oil-crisis-1973", "name": "1973 oil embargo begins" },
+  { "year": 1976, "globalMultiplier": 1.0,  "kind": "Event", "eventGroup": "oil-crisis-1973", "name": "Recovery from the 1973 oil crisis" },
+
+  { "year": 1979, "globalMultiplier": 0.90, "kind": "Event", "eventGroup": "oil-shock-1979", "name": "Second oil shock (Iranian Revolution) + early-80s recession" },
+  { "year": 1984, "globalMultiplier": 1.0,  "kind": "Event", "eventGroup": "oil-shock-1979", "name": "Recovery from the second oil shock" },
+
+  { "year": 1991, "globalMultiplier": 0.90, "kind": "Event", "eventGroup": "gulf-war-1991", "name": "Gulf War + early-90s recession" },
+  { "year": 1993, "globalMultiplier": 1.0,  "kind": "Event", "eventGroup": "gulf-war-1991", "name": "Recovery from the Gulf War" },
+
+  { "year": 2001, "globalMultiplier": 0.75, "kind": "Event", "eventGroup": "9-11", "name": "September 11 - sharpest single-year shock in the whole span" },
+  { "year": 2005, "globalMultiplier": 1.0,  "kind": "Event", "eventGroup": "9-11", "name": "Recovery from September 11" },
+
+  { "year": 2009, "globalMultiplier": 0.88, "kind": "Event", "eventGroup": "financial-crisis-2008", "name": "Global financial crisis" },
+  { "year": 2011, "globalMultiplier": 1.0,  "kind": "Event", "eventGroup": "financial-crisis-2008", "name": "Recovery from the financial crisis" }
 ]

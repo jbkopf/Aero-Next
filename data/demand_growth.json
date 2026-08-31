@@ -1,19 +1,6 @@
 [
   { "year": 1955, "globalMultiplier": 1.0, "name": "Baseline" },
-  { "year": 1960, "globalMultiplier": 1.6, "name": "Early jet age (707/DC-8, 1958-59) - strong real growth" },
-  { "year": 1969, "globalMultiplier": 2.0, "name": "Continued 1960s boom, pre-747" },
-  { "year": 1970, "globalMultiplier": 2.6, "name": "Boeing 747 enters service (Pan Am JFK-LHR, Jan 1970) - real, documented demand-creating spike" },
-  { "year": 1973, "globalMultiplier": 2.8, "name": "Growth continues into the oil crisis" },
-  { "year": 1975, "globalMultiplier": 2.3, "name": "1973 oil embargo + 1974-75 recession" },
-  { "year": 1979, "globalMultiplier": 2.7, "name": "Recovery" },
-  { "year": 1981, "globalMultiplier": 2.4, "name": "Second oil shock (Iranian Revolution) + early-80s recession" },
-  { "year": 1985, "globalMultiplier": 2.9, "name": "Recovery" },
-  { "year": 1990, "globalMultiplier": 3.3, "name": "Continued 1980s growth" },
-  { "year": 1991, "globalMultiplier": 3.0, "name": "Gulf War + early-90s recession" },
-  { "year": 2000, "globalMultiplier": 3.9, "name": "Sustained 1990s growth" },
-  { "year": 2001, "globalMultiplier": 3.4, "name": "September 11 - the sharpest single-year shock in the whole span" },
-  { "year": 2004, "globalMultiplier": 3.9, "name": "Recovery" },
-  { "year": 2008, "globalMultiplier": 4.4, "name": "Continued 2000s growth" },
-  { "year": 2009, "globalMultiplier": 3.9, "name": "Global financial crisis" },
-  { "year": 2015, "globalMultiplier": 4.8, "name": "Recovery + continued growth to campaign end" }
+  { "year": 1970, "globalMultiplier": 2.2, "name": "Post-war jet age: structurally faster growth pre-1970 than post-1970 (ICAO)" },
+  { "year": 1990, "globalMultiplier": 3.2, "name": "Continued growth, more moderate pace" },
+  { "year": 2015, "globalMultiplier": 4.5, "name": "Continued growth to campaign end" }
 ]

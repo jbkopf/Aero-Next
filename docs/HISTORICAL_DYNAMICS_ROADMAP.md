@@ -1,9 +1,12 @@
 # Historical Dynamics Roadmap
 
 **Status: M20 done, M21 round 1 done (Dubai), M21 round 2 done (global
-curve redesign — real 1955-2015 growth/shock history), M22 not started.**
-China's opening and the 1997 Asian Financial Crisis remain named,
-not-yet-authored future rounds. Builds on the completed sim core
+curve redesign — real 1955-2015 growth/shock history), M21 round 3 done
+(trend/event split — a real mechanism extension, not just content;
+found and fixed a genuine event-composition bug during its own
+verification), M22 not started.** China's opening and the 1997 Asian
+Financial Crisis remain named, not-yet-authored future rounds. Builds
+on the completed sim core
 (`docs/SIM_CORE_ROADMAP.md`, M0–M14) and game setup system
 (`docs/GAME_SETUP_ROADMAP.md`, M15–M19, plus its ongoing city-expansion
 series). Continues the shared milestone numbering from M20, since this is
@@ -174,7 +177,7 @@ entries (M21's job), so nothing behavioral could have changed yet.
 
 ---
 
-## M21 — Author real historical trends and events (round 1: architecture + Dubai; round 2: global curve redesign) ✅
+## M21 — Author real historical trends and events (round 1: architecture + Dubai; round 2: global curve redesign; round 3: trend/event split) ✅
 
 Content, not mechanics — the same shape as the aircraft-catalog and
 city-expansion series, and expected to become its own ongoing round-by-round
@@ -399,6 +402,129 @@ partially offsets, without erasing, the harsh starting-city side effect
 round 1 already flagged. The regional-dominance imbalance M39-M41 first
 flagged is still present (EastAsia still wins the most, 94/123) and
 remains open for a future round, not addressed here.
+
+### Round 3: split trend from event — a real mechanism extension, not just content ✅
+
+Round 2 authored real history into one merged curve, but merging it
+was itself the wrong shape: every `DemandGrowthPoint` resolves by
+"whichever breakpoint is latest wins," once per scope — so a base-growth
+breakpoint and a shock-event breakpoint sharing a scope would silently
+*clobber* each other, never compose. The user's own direction: split
+them into two genuine concepts — an underlying base growth **trend**
+or, later, growth or a shock **event modifier**, applicable globally
+or per city, that multiplies on top of the trend rather than replacing
+it.
+
+**New `DemandGrowthPointKind` enum** (`Trend`/`Event`) on
+`DemandGrowthPoint`, defaulting to `Trend` (every entry authored before
+this round — the base curve, Dubai's own 4 points — needed zero data
+migration). Resolution changed from one flat "latest wins" pool per
+scope to two, resolved and composed independently:
+```
+pair-level global factor = globalTrend(year) x globalEvent(year)
+per-city factor(city)    = regionTrend(city.Region, year) x regionEvent(city.Region, year)
+                          x cityTrend(city.Id, year)       x cityEvent(city.Id, year)
+```
+Trend resolution is exactly M20's own unchanged behavior (falls back to
+the earliest trend breakpoint if queried before the schedule starts).
+Event resolution reuses the same "latest breakpoint at or before year"
+lookup but always defaults to neutral (1.0) when none is active, at
+every scope including global — this is what lets an event revert
+cleanly (a second event breakpoint at `1.0`) or stay permanent (no
+reversion breakpoint at all, for a real structural shift like the 747).
+
+**Two validation fixes the split actually required, not incidental:**
+"at least one global breakpoint" now specifically means at least one
+global *Trend* — a schedule with only global Events (exactly what this
+round adds) would otherwise wrongly satisfy the old, looser check, and
+`Timeline.DemandMultiplierForYear`'s own fallback would have nothing
+real to fall back to. The duplicate-(year, scope) check now includes
+`Kind` too — 1970 legitimately carries both a global Trend breakpoint
+(the base curve) and a global Event breakpoint (the 747) the same year,
+which the old check would have wrongly flagged as a duplicate.
+
+**The data, redistributed from round 2's own research** (no
+re-research needed): `data/demand_growth.json` is now a clean 4-point
+smooth *trend* only (`1955:1.0 → 1970:2.2 → 1990:3.2 → 2015:4.5`, no
+shocks baked in). `data/historical_events.json` keeps Dubai's own 4
+city-`Trend` points unchanged (a sustained multi-decade shift is
+genuinely a trend, not a temporary event — correctly classified
+already) and gains 11 new global `Event` entries: the 747 (1970, a
+permanent +15% step-up, no reversion), the 1973 oil crisis (dip,
+recovers 1976), the 1979-81 second oil shock (dip, recovers 1984), the
+1991 Gulf War (dip, recovers 1993), 9/11 (2001, the sharpest dip in the
+set, recovers 2005), and the 2008-09 financial crisis (dip, recovers
+2011) — each a *relative* modifier now (e.g. 0.75 for 9/11's -25%)
+rather than round 2's absolute replacement values.
+
+573 tests total (14 new). Numerically pre-verified before writing, same
+discipline as every round: trend and event compose multiplicatively,
+not additively or by replacement; an event with an explicit reversion
+returns *exactly* to the trend-only value, not approximately; an event
+with no reversion stays active decades later; a city can carry both its
+own trend and its own event, composing; the real repo files load with
+both a global trend and at least one global event present. 100%
+coverage on every touched file — the trend/event split's own validation
+fix (`ThrowsWhenOnlyGlobalEventsExist`) closed a pre-existing partial
+branch in `DemandGrowthCatalog` that predated this round, not just kept
+it at parity. Overall project coverage **99.89%/99.34%**.
+
+**Measured, not assumed.** `AeroNext.Sim`'s M13 loop stayed
+byte-for-byte identical again — reasoned through why, not just
+observed: that loop resolves entirely within 1955-1957, and neither
+the new trend curve nor any authored event has a second breakpoint
+before 1970, so the effective multiplier for this loop's whole window
+is unchanged at 1.0.
+
+**A real bug was found and fixed during this round's own QA harness
+verification, not glossed over.** The first version of this split
+resolved global Events from one flat "latest breakpoint wins" pool —
+functionally identical to the exact bug the trend/event split was
+built to fix, just moved down one level (event vs. event, instead of
+trend vs. event). Confirmed directly (not assumed) by computing the
+multiplier trajectory through a scripted scenario: the 747's permanent
++15% (`1970`, no reversion) was silently *erased* the instant the 1973
+oil-crisis breakpoint fired, and never returned — not even after the
+crisis's own 1976 reversion, which reset all the way back to the plain
+baseline instead of back to the 747-boosted figure. **Fixed with a new
+required `EventGroup` field** on every Event breakpoint
+(`DemandGrowthCatalog` now validates it's present) — independent events
+are grouped and resolved separately, then every group's own result
+multiplies together, rather than sharing one pool. Verified the fix
+against the same scripted scenario before re-measuring anything: the
+747's own effect now correctly persists through and after the oil
+crisis. 4 more tests added for this specifically (577 total, up from
+573), including a direct regression test for the exact bug
+(`ForPair_TwoIndependentGlobalEvents_ComposeInstead_OfOneOverwritingTheOther`).
+
+Re-measured the 150-game QA harness sweep with the fix in place:
+
+| Metric | Round 2 (single curve) | Round 3 (trend/event, fixed) |
+|---|---|---|
+| Clean games with a win | 123/150 (avg quarter 19.2) | 113/150 (avg quarter 19.9) |
+| NorthAmerica bankrupt / avg cash / wins | 117/144, $23.8M, 15 | 119/144, $4.4M, 14 |
+| Europe bankrupt / avg cash / wins | 76/95, $17.0M, 2 | 80/95, $4.1M, 5 |
+| EastAsia bankrupt / avg cash / wins | 12/142, $139.5M, 94 | 14/142, $138.3M, 88 |
+| SouthWestAsia bankrupt / avg cash / wins | 28/55, $104.4M, 17 | 29/55, $113.4M, 17 |
+| AustralAsia bankrupt / avg cash / wins | 21/45, $236.7M, 9 | 23/45, $83.6M, 7 |
+| SouthAmerica bankrupt / avg cash / wins | 59/119, $59.3M, 13 | 62/119, $63.7M, 19 |
+
+Win rate and NorthAmerica/Europe's own average cash both dropped versus
+round 2 — expected, not a regression to chase: round 2's single merged
+curve had every authored shock permanently *raise the floor* by
+construction (each recovery breakpoint was an absolute value at or
+above the previous peak, e.g. 2001's dip recovered to a *higher*
+absolute figure by 2004 than 1990's own value), while round 3's events
+are genuine *relative* dips that multiply the trend back down and then
+release it, a more historically honest shape but a less generous one
+game-balance-wise. Comparing round 3's own before/after-fix numbers
+directly confirms the fix moved things in the expected direction without
+changing the overall picture much (e.g. NorthAmerica cash $3.8M→$4.4M,
+AustralAsia $75.9M→$83.6M) — most QA-harness games apparently resolve
+(via bankruptcy or a win) before reaching a point where two overlapping
+global events would have mattered as much as the isolated debugging
+scenario suggested, so the bug was real and worth fixing correctly, but
+wasn't the single dominant driver of this round's own headline numbers.
 
 ---
 

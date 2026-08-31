@@ -48,6 +48,17 @@ namespace AeroNext.Core.World;
 /// is null (every existing call site, and any new one that doesn't need
 /// this), behavior is unchanged: <see cref="_globalMultiplier"/> applies
 /// exactly as it always has, and the region/city factor is always 1.0.
+///
+/// M21 (trend/event split): each of the global, region, and city factors
+/// above is itself now a composition of two independently-resolved
+/// layers — <see cref="DemandGrowthPointKind.Trend"/> (the sustained
+/// secular curve, unchanged resolution/fallback from M20) times
+/// <see cref="DemandGrowthPointKind.Event"/> (a 747/oil-crisis/9-11
+/// style discrete shock, always defaulting to neutral 1.0 when none is
+/// active, at every scope including global) — rather than one flat pool
+/// per scope where a trend breakpoint and an event breakpoint at the
+/// same scope would otherwise silently clobber each other instead of
+/// composing.
 /// </summary>
 public sealed class GravityDemandModel
 {
@@ -107,13 +118,36 @@ public sealed class GravityDemandModel
         return new PairDemand(a, b, distanceKm, passengers);
     }
 
-    /// <summary>Applied once per pair, exactly as _globalMultiplier always has been — the schedule's own global-scoped breakpoints when available, else the constructor's flat value.</summary>
-    private double GlobalMultiplierForPair() =>
-        _schedule is not null && _year is not null
-            ? Timeline.DemandMultiplierForYear(_schedule, _year.Value)
-            : _globalMultiplier;
+    /// <summary>
+    /// Applied once per pair, exactly as _globalMultiplier always has
+    /// been — the global Trend curve (the schedule's own global-scoped
+    /// breakpoints when available, else the constructor's flat value)
+    /// times a separate global *Event* layer (M21: a 747/oil-crisis/9-11
+    /// style shock that composes on top of the trend rather than
+    /// replacing it - 1.0/neutral whenever none is active).
+    /// </summary>
+    private double GlobalMultiplierForPair()
+    {
+        if (_schedule is null || _year is null)
+        {
+            return _globalMultiplier;
+        }
 
-    /// <summary>M20: the region/city-scoped portion only, resolved per city (1.0 when no schedule, or no breakpoint in either scope applies to this city).</summary>
+        var trend = Timeline.DemandMultiplierForYear(_schedule, _year.Value);
+        var globalEvents = _schedule.Where(p => p.Region is null && p.CityId is null);
+
+        return trend * ResolveEvents(globalEvents);
+    }
+
+    /// <summary>
+    /// M20: the region/city-scoped portion, resolved per city (1.0 when
+    /// no schedule, or nothing applies to this city in any scope/kind).
+    /// M21 (trend/event split): each of region and city now composes its
+    /// own Trend x Event, same reasoning as the global pair-level factor
+    /// above - a region or city can carry a sustained trend (Dubai) and
+    /// a separate, composable event on top, not one pool where the two
+    /// would silently clobber each other.
+    /// </summary>
     private double EffectiveMultiplier(City city)
     {
         if (_schedule is null || _year is null)
@@ -124,11 +158,35 @@ public sealed class GravityDemandModel
         var regionMatches = _schedule.Where(p => p.Region == city.Region && p.CityId is null);
         var cityMatches = _schedule.Where(p => p.CityId == city.Id);
 
-        var regionMultiplier = Timeline.LatestAtOrBefore(regionMatches, _year.Value)?.GlobalMultiplier ?? 1.0;
-        var cityMultiplier = Timeline.LatestAtOrBefore(cityMatches, _year.Value)?.GlobalMultiplier ?? 1.0;
+        double ResolveTrend(IEnumerable<DemandGrowthPoint> candidates) =>
+            Timeline.LatestAtOrBefore(candidates.Where(p => p.Kind == DemandGrowthPointKind.Trend), _year!.Value)?.GlobalMultiplier ?? 1.0;
 
-        return regionMultiplier * cityMultiplier;
+        return ResolveTrend(regionMatches) * ResolveEvents(regionMatches)
+            * ResolveTrend(cityMatches) * ResolveEvents(cityMatches);
     }
+
+    /// <summary>
+    /// M21 (correctness fix found during round 3's own verification,
+    /// not incidental): every *independent* event active for this scope
+    /// composes, rather than only the single most recent event
+    /// breakpoint winning — grouped by `EventGroup`
+    /// (`DemandGrowthCatalog` requires one on every Event breakpoint),
+    /// each group resolved via the same "latest at or before this year"
+    /// rule (1.0 if that specific event hasn't started, or has already
+    /// reverted), then every group's own result multiplied together.
+    /// Confirmed the bug directly before writing this: without grouping,
+    /// a later, entirely unrelated event's own breakpoint (e.g. the 1973
+    /// oil crisis) silently overwrote an earlier event's value (the
+    /// 747's permanent +15%) rather than composing with it — and that
+    /// earlier event never came back, even past its own reversion year,
+    /// since the "latest breakpoint" was now the later event's.
+    /// </summary>
+    private double ResolveEvents(IEnumerable<DemandGrowthPoint> candidates) =>
+        candidates
+            .Where(p => p.Kind == DemandGrowthPointKind.Event)
+            .GroupBy(p => p.EventGroup)
+            .Select(group => Timeline.LatestAtOrBefore(group, _year!.Value)?.GlobalMultiplier ?? 1.0)
+            .Aggregate(1.0, (product, multiplier) => product * multiplier);
 
     /// <summary>
     /// Every unordered city pair, sorted by origin id then destination id for

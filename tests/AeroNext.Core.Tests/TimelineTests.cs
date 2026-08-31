@@ -126,6 +126,118 @@ public class TimelineTests
     }
 
     [Fact]
+    public void DemandGrowthCatalog_Load_AllowsTheSameYearForTrendAndEventInTheSameScope()
+    {
+        // M21's trend/event split's own real shape: 1970 legitimately
+        // carries both a global Trend breakpoint (the base curve) and a
+        // global Event breakpoint (the 747) - not a duplicate, since
+        // they resolve and compose independently.
+        const string json = """
+        [
+          { "year": 1955, "globalMultiplier": 1.0 },
+          { "year": 1970, "globalMultiplier": 2.2 },
+          { "year": 1970, "globalMultiplier": 1.15, "kind": "Event", "eventGroup": "747" }
+        ]
+        """;
+
+        var schedule = DemandGrowthCatalog.Load(json);
+
+        Assert.Equal(3, schedule.Count);
+    }
+
+    [Fact]
+    public void DemandGrowthCatalog_Load_ThrowsOnDuplicateYearForTheSameKindScopeAndEventGroup()
+    {
+        const string json = """
+        [
+          { "year": 1955, "globalMultiplier": 1.0 },
+          { "year": 1970, "globalMultiplier": 1.15, "kind": "Event", "eventGroup": "747" },
+          { "year": 1970, "globalMultiplier": 1.20, "kind": "Event", "eventGroup": "747" }
+        ]
+        """;
+
+        Assert.Throws<InvalidDataException>(() => DemandGrowthCatalog.Load(json));
+    }
+
+    [Fact]
+    public void DemandGrowthCatalog_Load_AllowsTheSameYearForTwoIndependentEventGroups()
+    {
+        // Two entirely independent events can legitimately both start
+        // the same year at the same scope - not a duplicate, each is
+        // its own group.
+        const string json = """
+        [
+          { "year": 1955, "globalMultiplier": 1.0 },
+          { "year": 1973, "globalMultiplier": 0.85, "kind": "Event", "eventGroup": "oil-crisis" },
+          { "year": 1973, "globalMultiplier": 1.10, "kind": "Event", "eventGroup": "unrelated-boom" }
+        ]
+        """;
+
+        var schedule = DemandGrowthCatalog.Load(json);
+
+        Assert.Equal(3, schedule.Count);
+    }
+
+    [Fact]
+    public void DemandGrowthCatalog_Load_ThrowsWhenAnEventBreakpointHasNoEventGroup()
+    {
+        // The real fix this round's own verification required: without
+        // a required EventGroup, independent events would share one
+        // flat pool and silently overwrite each other instead of
+        // composing.
+        const string json = """
+        [
+          { "year": 1955, "globalMultiplier": 1.0 },
+          { "year": 1970, "globalMultiplier": 1.15, "kind": "Event" }
+        ]
+        """;
+
+        Assert.Throws<InvalidDataException>(() => DemandGrowthCatalog.Load(json));
+    }
+
+    [Fact]
+    public void DemandGrowthCatalog_Load_ThrowsWhenATrendBreakpointHasAnEventGroup()
+    {
+        const string json = """
+        [
+          { "year": 1955, "globalMultiplier": 1.0 },
+          { "year": 1970, "globalMultiplier": 2.2, "eventGroup": "should-not-be-here" }
+        ]
+        """;
+
+        Assert.Throws<InvalidDataException>(() => DemandGrowthCatalog.Load(json));
+    }
+
+    [Fact]
+    public void DemandGrowthCatalog_Load_ThrowsWhenOnlyGlobalEventsExist_NoGlobalTrend()
+    {
+        // A global Event alone doesn't satisfy "at least one global
+        // breakpoint" - it composes on top of a trend, it doesn't
+        // replace the need for one. Timeline.DemandMultiplierForYear's
+        // own fallback has nothing to fall back to otherwise.
+        const string json = """[{ "year": 1970, "globalMultiplier": 1.15, "kind": "Event", "eventGroup": "747" }]""";
+
+        Assert.Throws<InvalidDataException>(() => DemandGrowthCatalog.Load(json));
+    }
+
+    [Fact]
+    public void DemandGrowthCatalog_Load_RoundTripsKindAndEventGroup_DefaultsToTrendWhenAbsent()
+    {
+        const string json = """
+        [
+          { "year": 1955, "globalMultiplier": 1.0 },
+          { "year": 1970, "globalMultiplier": 1.15, "kind": "Event", "eventGroup": "747" }
+        ]
+        """;
+
+        var schedule = DemandGrowthCatalog.Load(json);
+        Assert.Equal("747", schedule.Single(p => p.Year == 1970).EventGroup);
+
+        Assert.Equal(DemandGrowthPointKind.Trend, schedule.Single(p => p.Year == 1955).Kind);
+        Assert.Equal(DemandGrowthPointKind.Event, schedule.Single(p => p.Year == 1970).Kind);
+    }
+
+    [Fact]
     public void DemandGrowthCatalog_Load_ThrowsOnDuplicateYearWithinTheSameCityScope()
     {
         const string json = """
@@ -204,34 +316,31 @@ public class TimelineTests
         var schedule = DemandGrowthCatalog.LoadCampaignSchedule(DataDirectory);
 
         Assert.Contains(schedule, p => p.CityId == "dxb");
-        Assert.Contains(schedule, p => p.Region is null && p.CityId is null); // the global baseline is still present
+        Assert.Contains(schedule, p => p.Region is null && p.CityId is null && p.Kind == DemandGrowthPointKind.Trend); // the global baseline trend is still present
+        Assert.Contains(schedule, p => p.Region is null && p.CityId is null && p.Kind == DemandGrowthPointKind.Event); // and at least one real global event (747, an oil crisis, ...)
     }
 
     [Fact]
-    public void DemandGrowthCatalog_LoadFile_LoadsRepoSchedule_StartsLow_EndsHigh_ContainsRealDips()
+    public void DemandGrowthCatalog_LoadFile_LoadsRepoSchedule_SmoothTrend_StartsLow_EndsHigh()
     {
-        // M21 round 2: the repo schedule is no longer a smooth,
-        // monotonically-increasing line - it's grounded in real
-        // aviation history, which includes real demand contractions
-        // (the 1973 oil crisis, 9/11, the 2008-09 financial crisis,
-        // ...). A flat "always increasing" assertion would be actively
-        // wrong for this curve now; check what should actually still be
-        // true instead: overall growth from start to end, sorted by
-        // year, and at least one real dip somewhere in between.
+        // M21's trend/event split: demand_growth.json alone (loaded via
+        // LoadFile, not the combined LoadCampaignSchedule) is the base
+        // *trend* only - a smooth secular curve, no shocks baked in
+        // anymore (those moved to historical_events.json as a separate
+        // Event layer - see LoadCampaignSchedule_RealRepoFiles_ below
+        // for where the real dips actually show up once composed).
         var schedule = DemandGrowthCatalog.LoadFile(DemandGrowthDataPath);
 
         Assert.NotEmpty(schedule);
         Assert.Equal(1.0, schedule[0].GlobalMultiplier);
         Assert.True(schedule[^1].GlobalMultiplier > schedule[0].GlobalMultiplier);
+        Assert.All(schedule, p => Assert.Equal(DemandGrowthPointKind.Trend, p.Kind));
 
         for (var i = 1; i < schedule.Count; i++)
         {
             Assert.True(schedule[i].Year > schedule[i - 1].Year);
+            Assert.True(schedule[i].GlobalMultiplier >= schedule[i - 1].GlobalMultiplier);
         }
-
-        Assert.Contains(
-            Enumerable.Range(1, schedule.Count - 1),
-            i => schedule[i].GlobalMultiplier < schedule[i - 1].GlobalMultiplier);
     }
 
     [Fact]

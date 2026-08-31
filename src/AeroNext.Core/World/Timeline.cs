@@ -20,21 +20,24 @@ public static class Timeline
         fleet.Where(a => IsAvailable(a, year)).ToList();
 
     /// <summary>
-    /// The *global*-scoped portion of the schedule only (M20: a schedule
-    /// can now also carry region/city-scoped breakpoints -
-    /// <see cref="GravityDemandModel"/> resolves those itself via
-    /// <see cref="LatestAtOrBefore"/>). Whichever global breakpoint's year
-    /// is the latest one at or before the given year (piecewise-constant,
-    /// not interpolated); falls back to the earliest global breakpoint if
-    /// none is at or before it yet, matching this method's own
-    /// pre-existing behavior for a schedule that starts after `year`.
+    /// The global-scoped *Trend* portion of the schedule only (M20: a
+    /// schedule can now also carry region/city-scoped breakpoints;
+    /// M21's trend/event split adds a separate global *Event* layer too
+    /// - both resolved by <see cref="GravityDemandModel"/> itself, via
+    /// <see cref="LatestAtOrBefore"/>, and composed on top of this
+    /// method's own result rather than folded into it). Whichever global
+    /// trend breakpoint's year is the latest one at or before the given
+    /// year (piecewise-constant, not interpolated); falls back to the
+    /// earliest global trend breakpoint if none is at or before it yet,
+    /// matching this method's own pre-existing behavior for a schedule
+    /// that starts after `year`.
     /// </summary>
     public static double DemandMultiplierForYear(IReadOnlyList<DemandGrowthPoint> schedule, int year)
     {
-        var global = schedule.Where(p => p.Region is null && p.CityId is null).ToList();
-        var applicable = LatestAtOrBefore(global, year);
+        var globalTrend = schedule.Where(p => p.Region is null && p.CityId is null && p.Kind == DemandGrowthPointKind.Trend).ToList();
+        var applicable = LatestAtOrBefore(globalTrend, year);
 
-        return applicable?.GlobalMultiplier ?? global.OrderBy(p => p.Year).First().GlobalMultiplier;
+        return applicable?.GlobalMultiplier ?? globalTrend.OrderBy(p => p.Year).First().GlobalMultiplier;
     }
 
     /// <summary>

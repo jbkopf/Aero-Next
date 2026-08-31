@@ -256,6 +256,136 @@ public class GravityDemandModelTests
     }
 
     [Fact]
+    public void ForPair_GlobalEvent_ComposesWithTrend_NotReplacesIt()
+    {
+        // The whole point of the trend/event split: a global Event dip
+        // multiplies on top of whatever the trend already says, rather
+        // than the two clobbering each other in one "latest wins" pool.
+        // Trend stays flat at 1.0 the entire time here, isolating the
+        // event's own effect.
+        var a = MakeCity("a", 0, 0, 50, Region.NorthAmerica);
+        var b = MakeCity("b", 10, 10, 60, Region.NorthAmerica);
+        var schedule = new[]
+        {
+            new DemandGrowthPoint(1955, 1.0),
+            new DemandGrowthPoint(1973, 0.5, Kind: DemandGrowthPointKind.Event, EventGroup: "shock"),
+        };
+
+        var beforeEvent = new GravityDemandModel(schedule: schedule, year: 1970).ForPair(a, b).PassengersPerQuarter;
+        var duringEvent = new GravityDemandModel(schedule: schedule, year: 1973).ForPair(a, b).PassengersPerQuarter;
+
+        Assert.InRange(duringEvent, beforeEvent / 2 - 1, beforeEvent / 2 + 1);
+    }
+
+    [Fact]
+    public void ForPair_GlobalEvent_WithReversion_ReturnsExactlyToTrendOnlyValue()
+    {
+        var a = MakeCity("a", 0, 0, 50, Region.NorthAmerica);
+        var b = MakeCity("b", 10, 10, 60, Region.NorthAmerica);
+        var trendOnly = new[] { new DemandGrowthPoint(1955, 1.0) };
+        var withEvent = new[]
+        {
+            new DemandGrowthPoint(1955, 1.0),
+            new DemandGrowthPoint(1973, 0.5, Kind: DemandGrowthPointKind.Event, EventGroup: "shock"),
+            new DemandGrowthPoint(1976, 1.0, Kind: DemandGrowthPointKind.Event, EventGroup: "shock"), // reverts to neutral
+        };
+
+        var trendOnlyDemand = new GravityDemandModel(schedule: trendOnly, year: 1980).ForPair(a, b).PassengersPerQuarter;
+        var duringEvent = new GravityDemandModel(schedule: withEvent, year: 1973).ForPair(a, b).PassengersPerQuarter;
+        var afterReversion = new GravityDemandModel(schedule: withEvent, year: 1980).ForPair(a, b).PassengersPerQuarter;
+
+        Assert.NotEqual(trendOnlyDemand, duringEvent); // the dip is real while active
+        Assert.Equal(trendOnlyDemand, afterReversion); // exactly back to trend-only once reverted, not approximately
+    }
+
+    [Fact]
+    public void ForPair_GlobalEvent_WithNoReversion_StaysPermanentlyActive()
+    {
+        // The 747's own real shape: a structural step-up with no
+        // reversion breakpoint at all - it should still be active
+        // decades later, not silently expire.
+        var a = MakeCity("a", 0, 0, 50, Region.NorthAmerica);
+        var b = MakeCity("b", 10, 10, 60, Region.NorthAmerica);
+        var schedule = new[]
+        {
+            new DemandGrowthPoint(1955, 1.0),
+            new DemandGrowthPoint(1970, 1.15, Kind: DemandGrowthPointKind.Event, EventGroup: "747"),
+        };
+        var trendOnly = new[] { new DemandGrowthPoint(1955, 1.0) };
+
+        var trendOnlyDemand = new GravityDemandModel(schedule: trendOnly, year: 2015).ForPair(a, b).PassengersPerQuarter;
+        var farFuture = new GravityDemandModel(schedule: schedule, year: 2015).ForPair(a, b).PassengersPerQuarter;
+
+        Assert.InRange(farFuture, (long)(trendOnlyDemand * 1.15) - 2, (long)(trendOnlyDemand * 1.15) + 2);
+    }
+
+    [Fact]
+    public void ForPair_TwoIndependentGlobalEvents_ComposeInstead_OfOneOverwritingTheOther()
+    {
+        // The real bug found and fixed while verifying this round: a
+        // permanent event (the 747, no reversion) and a later, entirely
+        // unrelated temporary event (an oil crisis) both being global
+        // must resolve *independently* (grouped by EventGroup) and
+        // multiply together - not share one "latest wins" pool, which
+        // would let the oil crisis breakpoint silently erase the 747's
+        // own effect, permanently, even past the crisis's own reversion.
+        var a = MakeCity("a", 0, 0, 50, Region.NorthAmerica);
+        var b = MakeCity("b", 10, 10, 60, Region.NorthAmerica);
+        var schedule = new[]
+        {
+            new DemandGrowthPoint(1955, 1.0),
+            new DemandGrowthPoint(1970, 1.15, Kind: DemandGrowthPointKind.Event, EventGroup: "747"),
+            new DemandGrowthPoint(1973, 0.85, Kind: DemandGrowthPointKind.Event, EventGroup: "oil-crisis"),
+            new DemandGrowthPoint(1976, 1.0, Kind: DemandGrowthPointKind.Event, EventGroup: "oil-crisis"),
+        };
+        var only747 = new[]
+        {
+            new DemandGrowthPoint(1955, 1.0),
+            new DemandGrowthPoint(1970, 1.15, Kind: DemandGrowthPointKind.Event, EventGroup: "747"),
+        };
+
+        var during747Only = new GravityDemandModel(schedule: schedule, year: 1971).ForPair(a, b).PassengersPerQuarter;
+        var duringBoth = new GravityDemandModel(schedule: schedule, year: 1973).ForPair(a, b).PassengersPerQuarter;
+        var after747Alone = new GravityDemandModel(schedule: only747, year: 1980).ForPair(a, b).PassengersPerQuarter; // 747-only reference
+        var afterCrisisReverts = new GravityDemandModel(schedule: schedule, year: 1980).ForPair(a, b).PassengersPerQuarter;
+
+        // Both active: strictly less than the 747-alone figure, since
+        // the oil crisis's own 0.85 factor is genuinely multiplying in,
+        // not just being ignored.
+        Assert.True(duringBoth < during747Only);
+        // The 747's own effect is still real once the crisis passes -
+        // back to exactly the 747-only reference, not the plain
+        // baseline (proves the 747 was never actually lost).
+        Assert.Equal(after747Alone, afterCrisisReverts);
+    }
+
+    [Fact]
+    public void ForPair_CityTrendAndCityEvent_ComposeTogether()
+    {
+        // A city can carry both a sustained trend (Dubai's own shape)
+        // and a separate, composable event on top - not one pool where
+        // the two would clobber each other.
+        var home = MakeCity("home", 0, 0, 50, Region.NorthAmerica);
+        var dubai = MakeCity("dxb", 10, 10, 60, Region.SouthWestAsia);
+        var trendOnly = new[]
+        {
+            new DemandGrowthPoint(1955, 1.0),
+            new DemandGrowthPoint(1955, 2.0, CityId: "dxb"),
+        };
+        var withEvent = new[]
+        {
+            new DemandGrowthPoint(1955, 1.0),
+            new DemandGrowthPoint(1955, 2.0, CityId: "dxb"),
+            new DemandGrowthPoint(1991, 0.5, CityId: "dxb", Kind: DemandGrowthPointKind.Event, EventGroup: "local-shock"), // a hypothetical local shock
+        };
+
+        var trendOnlyDemand = new GravityDemandModel(schedule: trendOnly, year: 1991).ForPair(home, dubai).PassengersPerQuarter;
+        var withEventDemand = new GravityDemandModel(schedule: withEvent, year: 1991).ForPair(home, dubai).PassengersPerQuarter;
+
+        Assert.InRange(withEventDemand, trendOnlyDemand / 2 - 2, trendOnlyDemand / 2 + 2);
+    }
+
+    [Fact]
     public void RealDataset_MajorMarketDwarfsChokepointPair()
     {
         var dataPath = Path.Combine(AppContext.BaseDirectory, "data", "cities.json");
