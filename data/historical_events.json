@@ -119,5 +119,11 @@
   { "year": 1967, "globalMultiplier": 0.75, "cityId": "cai", "kind": "Event", "eventGroup": "suez-closure-1967", "name": "Six-Day War (June 1967): Egypt closes the Suez Canal, sustained regional conflict suppresses travel to Cairo" },
   { "year": 1975, "globalMultiplier": 1.0,  "cityId": "cai", "kind": "Event", "eventGroup": "suez-closure-1967", "name": "Suez Canal reopens (June 1975) after clearance; Sinai disengagement process underway" },
 
-  { "year": 1979, "globalMultiplier": 1.15, "cityId": "cai", "kind": "Event", "eventGroup": "camp-david-1979", "name": "Egypt-Israel Peace Treaty (March 1979): normalization ends the state of war, permanent stability boost for Cairo - no reversion" }
+  { "year": 1979, "globalMultiplier": 1.15, "cityId": "cai", "kind": "Event", "eventGroup": "camp-david-1979", "name": "Egypt-Israel Peace Treaty (March 1979): normalization ends the state of war, permanent stability boost for Cairo - no reversion" },
+
+  { "year": 1980, "globalMultiplier": 0.65, "cityId": "thr", "kind": "Event", "eventGroup": "iran-iraq-war-1980", "name": "Iran-Iraq War begins (Iraq invades Iran, Sept 1980): sustained conflict, including the 'War of the Cities' missile campaign, suppresses travel to Tehran" },
+  { "year": 1988, "globalMultiplier": 1.0,  "cityId": "thr", "kind": "Event", "eventGroup": "iran-iraq-war-1980", "name": "Ceasefire (UN Resolution 598, Aug 1988) ends the war" },
+
+  { "year": 1980, "globalMultiplier": 0.65, "cityId": "bgw", "kind": "Event", "eventGroup": "iran-iraq-war-1980", "name": "Iran-Iraq War begins (Iraq invades Iran, Sept 1980): sustained conflict, including the 'War of the Cities' missile campaign, suppresses travel to Baghdad" },
+  { "year": 1988, "globalMultiplier": 1.0,  "cityId": "bgw", "kind": "Event", "eventGroup": "iran-iraq-war-1980", "name": "Ceasefire (UN Resolution 598, Aug 1988) ends the war" }
 ]

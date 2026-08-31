@@ -17,7 +17,10 @@ regional shift measured in the QA sweep), M21 round 8 done (Suez
 Canal closure 1967-75, window 3 — a second, longer Cairo episode;
 both loops unchanged, a genuine no-effect result), M21 round 9 done
 (Camp David Peace Treaty 1979, window 5 — a permanent Cairo boost,
-window 4 needed nothing new), M22 not started.**
+window 4 needed nothing new), M21 round 10 done (Iran-Iraq War
+1980-88, window 6 — the sweep's first two-city event, Tehran and
+Baghdad both; a small, real SouthWestAsia effect measured), M22 not
+started.**
 China's
 opening and the 1997 Asian Financial Crisis remain named, not-yet-
 authored future rounds. Builds on the completed sim core
@@ -191,7 +194,7 @@ entries (M21's job), so nothing behavioral could have changed yet.
 
 ---
 
-## M21 — Author real historical trends and events (round 1: architecture + Dubai; round 2: global curve redesign; round 3: trend/event split; round 4: every Olympic Games + a real perf fix; round 5: remaining Games via same-country substitution; round 6: Suez Crisis, window 1 of a 13-window historical sweep; round 7: Cuba embargo, window 2; round 8: Suez Canal closure 1967-75, window 3; round 9: Camp David Peace Treaty 1979, window 5) ✅
+## M21 — Author real historical trends and events (round 1: architecture + Dubai; round 2: global curve redesign; round 3: trend/event split; round 4: every Olympic Games + a real perf fix; round 5: remaining Games via same-country substitution; round 6: Suez Crisis, window 1 of a 13-window historical sweep; round 7: Cuba embargo, window 2; round 8: Suez Canal closure 1967-75, window 3; round 9: Camp David Peace Treaty 1979, window 5; round 10: Iran-Iraq War 1980-88, window 6) ✅
 
 Content, not mechanics — the same shape as the aircraft-catalog and
 city-expansion series, and expected to become its own ongoing round-by-round
@@ -764,7 +767,7 @@ pick events ad hoc.
 | 1965-69 | Six-Day War → Suez Canal closed (1967-75) | **Authored round 8** — Cairo (`cai`), city-scoped, spans into windows 4-5 |
 | 1970-74 | (747, Munich/Sapporo Olympics, first oil crisis) | **Confirmed round 9** — already covered by rounds 3-4, nothing new needed |
 | 1975-79 | Suez reopens (1975, round 8's own bookend); Camp David / Egypt-Israel peace (1979) | **Authored round 9** — Cairo (`cai`), permanent boost |
-| 1980-84 | Iran-Iraq War (1980-88) | Named, spans into window 7 — `thr`, `bgw` |
+| 1980-84 | Iran-Iraq War (1980-88) | **Authored round 10** — `thr` + `bgw`, spans into window 7 |
 | 1985-89 | Chernobyl (1986); Berlin Wall falls (1989) | Named — Europe-wide dip; `ber` trend-shift |
 | 1990-94 | USSR dissolves (1991) | Named — `mow` |
 | 1995-99 | Hong Kong Handover (1997) | Named — `hkg`, flagged as historically mild |
@@ -985,6 +988,64 @@ bankrupt $19.61M avg cash 16 wins). Expected, not a concern — Africa
 genuinely isn't touched by this particular sweep's random seed draws,
 and the effect's correctness is already proven directly by the new
 proof test's own before/after and reference-schedule comparisons.
+
+### Round 10: the sweep, window 6 (Iran-Iraq War, 1980-88) ✅
+
+**Iran-Iraq War:** Iraq invades Iran in September 1980; the war grinds
+on for eight years — including the "War of the Cities" ballistic
+missile campaign that directly targeted Tehran and Baghdad — until the
+UN-brokered ceasefire (Resolution 598) in August 1988. This is the
+sweep's **first event to touch two cities at once**: Tehran (`thr`)
+and Baghdad (`bgw`), both real dataset cities, both in SouthWestAsia.
+Modeled as two city-scoped `Event` entries sharing one `EventGroup`
+name (`iran-iraq-war-1980`) — safe to share, since `GravityDemandModel`
+resolves each city's own event layer from only that city's own
+schedule entries; there's no cross-city grouping to worry about, only
+same-city grouping (which is what `EventGroup` protects against
+within one scope).
+
+Magnitude -35% (`0.65`) for both cities, matching the Cuba embargo's
+own severity class (a real war with sustained bombardment of both
+capitals, more severe than the Suez closure's -25% regional tension)
+but with an explicit 1988 reversion, since — unlike Cuba — the war
+did actually end within the campaign's own timeframe. Same uniform
+magnitude for both cities, deliberately, matching this series' own
+established convention of not over-fitting per-city severity.
+
+New proof test,
+`RealDataset_IranIraqWar_DipsBothTehranAndBaghdad_RecoveredAfter1988Ceasefire`,
+loops over both cities. **A real authoring bug was caught during its
+own first run, not shipped**: the initial "before" year (1979)
+happened to land exactly on the global second oil shock's own onset
+breakpoint (`oil-shock-1979`, an unrelated event authored back in
+round 3) — an entirely coincidental year collision between two
+independently-researched real events, not a schedule bug. The test
+failed with a real, correctly-computed numeric mismatch (not a crash),
+which is exactly what a same-year "before" reference is supposed to
+catch. Fixed by moving the "before" year to 1977, clear of every other
+event's own window, and re-verified the fix passes for both cities.
+583 tests, up from 582, all passing; coverage gate re-run and
+unchanged (same accepted baseline as every round).
+
+**Measured — M13 unchanged (resolves by 1957, 23 years before this
+war starts), but the 150-game sweep moved for real this time, small
+and concentrated exactly where expected:**
+
+| Metric | Round 9 | Round 10 |
+|---|---|---|
+| Clean games with a win | 113/150 (avg quarter 19.9) | 113/150 (avg quarter 19.9) |
+| SouthWestAsia bankrupt / bankrupt-quarter / wins | 29/55, 16.7, 17 | 29/55, 16.7, 17 |
+| SouthWestAsia avg cash | $113.44M | $112.66M (-0.7%) |
+| NorthAmerica / Europe / EastAsia / AustralAsia / SouthAmerica | unchanged | unchanged |
+
+A small, real, honestly-reported effect — not a "no effect" result
+like rounds 6, 8, and 9, but not a dramatic one either: Tehran and
+Baghdad are comparatively minor cities within a region whose AI
+strategies aren't centered on them (unlike Havana's own outsized
+effect on NorthAmerica in round 7), so the dip shows up only in the
+region's average cash, not in its bankruptcy rate or win count. Exactly
+the kind of proportionate, explainable movement this sweep is meant to
+produce.
 
 ---
 

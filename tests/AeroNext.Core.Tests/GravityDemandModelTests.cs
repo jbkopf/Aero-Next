@@ -550,6 +550,43 @@ public class GravityDemandModelTests
     }
 
     [Fact]
+    public void RealDataset_IranIraqWar_DipsBothTehranAndBaghdad_RecoveredAfter1988Ceasefire()
+    {
+        // Window 6 (spanning into window 7) of the historical sweep:
+        // the Iran-Iraq War (Sept 1980 - Aug 1988) is the first event
+        // in this sweep to touch two cities at once - Tehran and
+        // Baghdad, both real dataset cities, both in SouthWestAsia.
+        // Same EventGroup name for both city-scoped entries (the same
+        // real historical episode), which is safe: GravityDemandModel
+        // resolves each city's own event layer from only that city's
+        // own schedule entries, so there's no cross-city grouping to
+        // worry about.
+        var cities = CityCatalog.LoadFile(Path.Combine(AppContext.BaseDirectory, "data", "cities.json"));
+        var byId = cities.ToDictionary(c => c.Id);
+        var schedule = DemandGrowthCatalog.LoadCampaignSchedule(Path.Combine(AppContext.BaseDirectory, "data"));
+        var farAway = byId["gru"];
+
+        foreach (var warCityId in new[] { "thr", "bgw" })
+        {
+            var warCity = byId[warCityId];
+
+            // 1977 and 1989 both fall within the global trend's own
+            // flat 1970-1990 step *and* outside every other global
+            // event's own window (the second oil shock runs
+            // 1979-1984, so 1979 itself is not a clean "before" year -
+            // 1977 is) - a plain before/during/after comparison then
+            // isolates the war's own effect without needing a
+            // reference-schedule trick.
+            var before1977 = new GravityDemandModel(schedule: schedule, year: 1977).ForPair(farAway, warCity).PassengersPerQuarter;
+            var during1983 = new GravityDemandModel(schedule: schedule, year: 1983).ForPair(farAway, warCity).PassengersPerQuarter;
+            var after1989 = new GravityDemandModel(schedule: schedule, year: 1989).ForPair(farAway, warCity).PassengersPerQuarter;
+
+            Assert.True(during1983 < before1977, $"1983 should dip below 1977 for {warCityId}");
+            Assert.Equal(before1977, after1989);
+        }
+    }
+
+    [Fact]
     public void RealDataset_OlympicsEvents_BoostHostYearOnly_NotAdjacentYears()
     {
         // Stress-tests the trend/event architecture against a real,
