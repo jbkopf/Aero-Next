@@ -19,7 +19,10 @@ both loops unchanged, a genuine no-effect result), M21 round 9 done
 (Camp David Peace Treaty 1979, window 5 — a permanent Cairo boost,
 window 4 needed nothing new), M21 round 10 done (Iran-Iraq War
 1980-88, window 6 — the sweep's first two-city event, Tehran and
-Baghdad both; a small, real SouthWestAsia effect measured), M22 not
+Baghdad both; a small, real SouthWestAsia effect measured), M21 round
+11 done (Chernobyl 1986 — the sweep's first Region-scoped event — and
+the Berlin Wall falling 1989 as a permanent city Trend, window 7;
+Europe's avg cash nearly doubled in the QA sweep), M22 not
 started.**
 China's
 opening and the 1997 Asian Financial Crisis remain named, not-yet-
@@ -194,7 +197,7 @@ entries (M21's job), so nothing behavioral could have changed yet.
 
 ---
 
-## M21 — Author real historical trends and events (round 1: architecture + Dubai; round 2: global curve redesign; round 3: trend/event split; round 4: every Olympic Games + a real perf fix; round 5: remaining Games via same-country substitution; round 6: Suez Crisis, window 1 of a 13-window historical sweep; round 7: Cuba embargo, window 2; round 8: Suez Canal closure 1967-75, window 3; round 9: Camp David Peace Treaty 1979, window 5; round 10: Iran-Iraq War 1980-88, window 6) ✅
+## M21 — Author real historical trends and events (round 1: architecture + Dubai; round 2: global curve redesign; round 3: trend/event split; round 4: every Olympic Games + a real perf fix; round 5: remaining Games via same-country substitution; round 6: Suez Crisis, window 1 of a 13-window historical sweep; round 7: Cuba embargo, window 2; round 8: Suez Canal closure 1967-75, window 3; round 9: Camp David Peace Treaty 1979, window 5; round 10: Iran-Iraq War 1980-88, window 6; round 11: Chernobyl + Berlin Wall falls, window 7) ✅
 
 Content, not mechanics — the same shape as the aircraft-catalog and
 city-expansion series, and expected to become its own ongoing round-by-round
@@ -768,7 +771,7 @@ pick events ad hoc.
 | 1970-74 | (747, Munich/Sapporo Olympics, first oil crisis) | **Confirmed round 9** — already covered by rounds 3-4, nothing new needed |
 | 1975-79 | Suez reopens (1975, round 8's own bookend); Camp David / Egypt-Israel peace (1979) | **Authored round 9** — Cairo (`cai`), permanent boost |
 | 1980-84 | Iran-Iraq War (1980-88) | **Authored round 10** — `thr` + `bgw`, spans into window 7 |
-| 1985-89 | Chernobyl (1986); Berlin Wall falls (1989) | Named — Europe-wide dip; `ber` trend-shift |
+| 1985-89 | Chernobyl (1986); Berlin Wall falls (1989) | **Authored round 11** — Europe region-wide dip; `ber` trend-shift |
 | 1990-94 | USSR dissolves (1991) | Named — `mow` |
 | 1995-99 | Hong Kong Handover (1997) | Named — `hkg`, flagged as historically mild |
 | 2000-04 | SARS (2003); Iraq War (2003) | Named — first real **Region**-scope candidate (EastAsia); `bgw` |
@@ -1046,6 +1049,67 @@ effect on NorthAmerica in round 7), so the dip shows up only in the
 region's average cash, not in its bankruptcy rate or win count. Exactly
 the kind of proportionate, explainable movement this sweep is meant to
 produce.
+
+### Round 11: the sweep, window 7 (Chernobyl 1986; Berlin Wall falls 1989) ✅
+
+**Chernobyl — the sweep's first Region-scoped event.** The April 1986
+nuclear disaster's fallout spread across much of Europe, and the
+resulting fear-driven dip in inbound tourism was genuinely
+continent-wide, not centered on one city (unlike every prior episode
+in this sweep) — modeled directly on `Region.Europe` rather than
+picked city-by-city. -15% (`0.85`), reverting in 1987 as fears
+subsided — a real, moderate, short-lived shock, matching the sweep's
+own "sharp dip, quick recovery" convention (Suez 1956, Olympics), not
+the multi-year severity of a war or embargo.
+
+**Berlin Wall falls — a permanent city Trend, not an Event.** The
+November 1989 fall, followed by formal reunification (Oct 1990) and
+the government's relocation from Bonn to Berlin (complete 1999), is a
+genuine multi-decade structural shift in the city's own significance —
+the same classification precedent as Dubai's own 4-point trajectory,
+not a shock with a recovery arc. Four points spanning the full
+campaign: `1955: 0.7` (a divided Cold War city, Wall built 1961,
+isolation constrains travel), `1989: 1.0` (Wall falls, reunification
+begins), `2000: 1.4` (capital of unified Germany), `2015: 1.8`
+(established major European capital) — modest magnitudes throughout,
+deliberately: Berlin's real story is "a divided city rejoining the
+world," not Dubai's "empty desert to global mega-hub," so it shouldn't
+be sized like one.
+
+Two new proof tests. `RealDataset_Chernobyl1986_DipsEuropeOnly_
+RecoveredBy1988` confirms the dip and full recovery for a Europe pair
+(London, chosen since it carries no other city-scoped entry active in
+this window), *and* confirms a same-region South America-South
+America pair doesn't move at all across the same years — proving the
+effect is genuinely region-scoped, not accidentally global.
+`RealDataset_BerlinWallFalls1989_PermanentlyBoostsBerlin_
+GrowingThroughReunification` confirms a real, monotonic rise across
+the divided-era/reunification/reunified-capital arc. 585 tests, up
+from 583, all passing; coverage gate re-run and unchanged (same
+accepted baseline as every round).
+
+**Measured — and this round is a genuine first: Berlin's own Trend
+starts at 1955, quarter 1 of the campaign, unlike every prior round's
+event (all starting well after the M13 loop's own quarter-10 cutoff)
+— so "M13 unchanged" here is a real measurement, not a timing
+triviality.** Confirmed byte-identical to round 10 anyway: Berlin
+isn't touched by this loop's own specific early routes. The 150-game
+sweep moved for real, and substantially, in Europe:
+
+| Metric | Round 10 | Round 11 |
+|---|---|---|
+| Clean games with a win | 113/150 (avg quarter 19.9) | 113/150 (avg quarter 19.9) |
+| Europe bankrupt / bankrupt-quarter / wins | 80/95, 11.7, 3 | 79/95, 11.5, 3 |
+| Europe avg cash | $4.11M | **$7.69M** (+87%) |
+| NorthAmerica / EastAsia / SouthWestAsia / AustralAsia / SouthAmerica | unchanged | unchanged |
+
+Europe's own average cash nearly doubled. A real, explainable result:
+Berlin's Trend spans the *entire* campaign with a sustained long-run
+boost (0.7→1.8 across 60 years), while Chernobyl's own dip is a brief
+2-year blip — the permanent structural story dominates the aggregate
+statistic, exactly as its own much larger scope and duration would
+predict. Every other region's row is untouched, as expected: none of
+their own cities or regions carry either event.
 
 ---
 

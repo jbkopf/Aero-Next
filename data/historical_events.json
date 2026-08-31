@@ -125,5 +125,13 @@
   { "year": 1988, "globalMultiplier": 1.0,  "cityId": "thr", "kind": "Event", "eventGroup": "iran-iraq-war-1980", "name": "Ceasefire (UN Resolution 598, Aug 1988) ends the war" },
 
   { "year": 1980, "globalMultiplier": 0.65, "cityId": "bgw", "kind": "Event", "eventGroup": "iran-iraq-war-1980", "name": "Iran-Iraq War begins (Iraq invades Iran, Sept 1980): sustained conflict, including the 'War of the Cities' missile campaign, suppresses travel to Baghdad" },
-  { "year": 1988, "globalMultiplier": 1.0,  "cityId": "bgw", "kind": "Event", "eventGroup": "iran-iraq-war-1980", "name": "Ceasefire (UN Resolution 598, Aug 1988) ends the war" }
+  { "year": 1988, "globalMultiplier": 1.0,  "cityId": "bgw", "kind": "Event", "eventGroup": "iran-iraq-war-1980", "name": "Ceasefire (UN Resolution 598, Aug 1988) ends the war" },
+
+  { "year": 1986, "globalMultiplier": 0.85, "region": "Europe", "kind": "Event", "eventGroup": "chernobyl-1986", "name": "Chernobyl nuclear disaster (April 1986): fallout spreads across Europe, fear-driven dip in inbound tourism continent-wide" },
+  { "year": 1987, "globalMultiplier": 1.0,  "region": "Europe", "kind": "Event", "eventGroup": "chernobyl-1986", "name": "European tourism recovers as fears subside" },
+
+  { "year": 1955, "globalMultiplier": 0.7, "cityId": "ber", "name": "Berlin: divided city, Cold War isolation (Wall built 1961) constrains travel and business" },
+  { "year": 1989, "globalMultiplier": 1.0, "cityId": "ber", "name": "Berlin Wall falls (November 1989): reunification process begins" },
+  { "year": 2000, "globalMultiplier": 1.4, "cityId": "ber", "name": "Berlin: capital of unified Germany, government relocation from Bonn complete (1999)" },
+  { "year": 2015, "globalMultiplier": 1.8, "cityId": "ber", "name": "Berlin: established major European capital" }
 ]

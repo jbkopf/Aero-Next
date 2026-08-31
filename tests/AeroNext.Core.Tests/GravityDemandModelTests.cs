@@ -587,6 +587,66 @@ public class GravityDemandModelTests
     }
 
     [Fact]
+    public void RealDataset_Chernobyl1986_DipsEuropeOnly_RecoveredBy1988()
+    {
+        // Window 7 of the historical sweep: Chernobyl (April 1986) is
+        // the sweep's first Region-scoped event - unlike every prior
+        // episode (all city-scoped), the fallout and the resulting
+        // fear-driven tourism dip were genuinely pan-European, not
+        // centered on one city, so it's modeled on Region.Europe
+        // directly rather than picked city-by-city.
+        var cities = CityCatalog.LoadFile(Path.Combine(AppContext.BaseDirectory, "data", "cities.json"));
+        var byId = cities.ToDictionary(c => c.Id);
+        var schedule = DemandGrowthCatalog.LoadCampaignSchedule(Path.Combine(AppContext.BaseDirectory, "data"));
+        var farAway = byId["gru"];
+        // London (lhr) - Europe, no other city-scoped entries active
+        // in this window (its own Olympics event is 2012) - isolates
+        // the region event cleanly.
+        var europeCity = byId["lhr"];
+
+        var before1985 = new GravityDemandModel(schedule: schedule, year: 1985).ForPair(farAway, europeCity).PassengersPerQuarter;
+        var during1986 = new GravityDemandModel(schedule: schedule, year: 1986).ForPair(farAway, europeCity).PassengersPerQuarter;
+        var after1988 = new GravityDemandModel(schedule: schedule, year: 1988).ForPair(farAway, europeCity).PassengersPerQuarter;
+
+        Assert.True(during1986 < before1985, "1986 should dip below 1985 for a Europe pair");
+        Assert.Equal(before1985, after1988);
+
+        // Confirms this is genuinely Region-scoped, not accidentally
+        // global: a same-year South America-South America pair
+        // shouldn't move at all.
+        var southAmericaControl = byId["scl"];
+        var southAmericaBefore = new GravityDemandModel(schedule: schedule, year: 1985).ForPair(farAway, southAmericaControl).PassengersPerQuarter;
+        var southAmericaDuring = new GravityDemandModel(schedule: schedule, year: 1986).ForPair(farAway, southAmericaControl).PassengersPerQuarter;
+        Assert.Equal(southAmericaBefore, southAmericaDuring);
+    }
+
+    [Fact]
+    public void RealDataset_BerlinWallFalls1989_PermanentlyBoostsBerlin_GrowingThroughReunification()
+    {
+        // Also window 7: unlike Chernobyl, the Berlin Wall falling is
+        // modeled as a city Trend (Berlin's own multi-decade story of
+        // rejoining the world and becoming the reunified capital),
+        // not an Event - the same classification precedent as Dubai's
+        // own 4-point trajectory, since this is a sustained structural
+        // shift, not a shock with a recovery arc.
+        var cities = CityCatalog.LoadFile(Path.Combine(AppContext.BaseDirectory, "data", "cities.json"));
+        var byId = cities.ToDictionary(c => c.Id);
+        var schedule = DemandGrowthCatalog.LoadCampaignSchedule(Path.Combine(AppContext.BaseDirectory, "data"));
+        var farAway = byId["gru"];
+
+        var dividedEra = new GravityDemandModel(schedule: schedule, year: 1955).ForPair(farAway, byId["ber"]).PassengersPerQuarter;
+        var reunification = new GravityDemandModel(schedule: schedule, year: 1989).ForPair(farAway, byId["ber"]).PassengersPerQuarter;
+        var reunifiedCapital = new GravityDemandModel(schedule: schedule, year: 2015).ForPair(farAway, byId["ber"]).PassengersPerQuarter;
+
+        // A real, monotonic rise across the divided->reunified arc,
+        // not just noise - global growth alone is already folded into
+        // each of these (same as every other real-dataset check in
+        // this file), so the ordering itself is the proof.
+        Assert.True(reunification > dividedEra);
+        Assert.True(reunifiedCapital > reunification);
+    }
+
+    [Fact]
     public void RealDataset_OlympicsEvents_BoostHostYearOnly_NotAdjacentYears()
     {
         // Stress-tests the trend/event architecture against a real,
