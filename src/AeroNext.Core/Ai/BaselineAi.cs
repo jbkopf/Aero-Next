@@ -78,7 +78,7 @@ namespace AeroNext.Core.Ai;
 /// </summary>
 public static class BaselineAi
 {
-    private static readonly Money NegotiationBidAmount = Money.FromDollars(2_000_000);
+    internal static readonly Money NegotiationBidAmount = Money.FromDollars(2_000_000);
 
     /// <summary>
     /// M35 (proposed, tunable): below this, a served route reads as
@@ -88,7 +88,7 @@ public static class BaselineAi
     /// comment's own reasoning against reopening the same pair next
     /// quarter).
     /// </summary>
-    private const double CloseRouteLoadFactorFloor = 0.5;
+    internal const double CloseRouteLoadFactorFloor = 0.5;
 
     /// <summary>
     /// M36 (proposed, tunable): pay down debt only once cash comfortably
@@ -98,16 +98,16 @@ public static class BaselineAi
     /// same quarter. No explicit mutual-exclusion check needed; the
     /// thresholds themselves guarantee it.
     /// </summary>
-    private static readonly Money PayDownCashBuffer = Money.FromDollars(10_000_000);
+    internal static readonly Money PayDownCashBuffer = Money.FromDollars(10_000_000);
 
     /// <summary>M37 (proposed, tunable): at or above this, a served route reads as essentially sold out — the reactive correction is to raise its fare toward FareRaiseFraction above the computed default.</summary>
-    private const double SaturatedLoadFactorCeiling = 0.95;
+    internal const double SaturatedLoadFactorCeiling = 0.95;
 
     /// <summary>M37 (proposed, tunable): how far above the computed default a saturated route's fare gets raised.</summary>
-    private const double FareRaiseFraction = 0.15;
+    internal const double FareRaiseFraction = 0.15;
 
     /// <summary>M37 (proposed, tunable): how far below the computed default an underperforming route's fare gets cut — see the class doc comment for why this is currently revenue-negative under today's demand model, built anyway to exercise the full mechanic.</summary>
-    private const double FareCutFraction = 0.20;
+    internal const double FareCutFraction = 0.20;
 
     /// <summary>
     /// M38 (proposed, tunable): order instead of lease only when cash
@@ -119,7 +119,7 @@ public static class BaselineAi
     /// </summary>
     private const int AircraftOrderCashComfortMultiplier = 3;
 
-    private static Money ComfortableOrderCost(AircraftType type) => type.Cost * AircraftOrderCashComfortMultiplier;
+    internal static Money ComfortableOrderCost(AircraftType type) => type.Cost * AircraftOrderCashComfortMultiplier;
 
     /// <param name="eraAvailableTypes">
     /// The full aircraft catalog available to lease this era (e.g.
@@ -422,6 +422,58 @@ public static class BaselineAi
     }
 
     /// <summary>
+    /// M39 (docs/BASELINE_AI_ROADMAP.md): the fixed 2-item strategy
+    /// roster. Order doesn't matter — Strategies() is only ever consulted
+    /// through SelectStrategy, which sorts by Suitability with a
+    /// deterministic Name tie-break, never by roster position.
+    /// </summary>
+    public static IReadOnlyList<IAiStrategy> Strategies { get; } = new IAiStrategy[]
+    {
+        new DomesticProfitOptimizerStrategy(),
+        new RapidExpansionStrategy(),
+    };
+
+    /// <summary>
+    /// M39: unifies initial assignment and later switching into one
+    /// path. Re-evaluates only when nothing is assigned yet (current is
+    /// null — quarter 1, or a seat that's never run a strategy before)
+    /// or quarterNumber starts a new in-game year (4 quarters); otherwise
+    /// returns current unchanged. Filters the roster to strategies whose
+    /// ApplicableEras contains the current GameEra, picks the highest
+    /// Suitability among eligible ones (deterministic Name tie-break).
+    /// If nothing is eligible for this era (a real, deliberate gap with
+    /// only two strategies, both Starting-only or Starting/MidGame —
+    /// nothing yet exists for a LateGame-only slot), keeps current rather
+    /// than throwing — the era tag exists so a future milestone can add
+    /// era-native strategies into this same roster without touching this
+    /// method.
+    /// </summary>
+    public static IAiStrategy SelectStrategy(IAiStrategy? current, int quarterNumber, StrategyContext context)
+    {
+        var isYearBoundary = (quarterNumber - 1) % 4 == 0;
+
+        if (current is not null && !isYearBoundary)
+        {
+            return current;
+        }
+
+        var era = GameEras.ForQuarter(quarterNumber);
+        var eligible = Strategies
+            .Where(s => s.ApplicableEras.Contains(era))
+            .OrderByDescending(s => s.Suitability(context))
+            .ThenBy(s => s.Name, StringComparer.Ordinal)
+            .ToList();
+
+        if (eligible.Count == 0)
+        {
+            return current ?? throw new InvalidOperationException(
+                $"No strategy is eligible for {era} and no current strategy exists to fall back to — the roster must cover every era at least once for quarter 1.");
+        }
+
+        return eligible[0];
+    }
+
+    /// <summary>
     /// The best unserved pair reachable using any type this airline
     /// currently has an idle unit of — searched per distinct idle type,
     /// then the single best result kept, so a smaller idle jet doesn't get
@@ -429,7 +481,7 @@ public static class BaselineAi
     /// reservedUnitIds excludes units another step in this same planning
     /// pass already claimed (see DecideOrders).
     /// </summary>
-    private static (PairDemand Pair, AircraftType Aircraft)? FindBestUnservedPairUsingIdleFleet(
+    internal static (PairDemand Pair, AircraftType Aircraft)? FindBestUnservedPairUsingIdleFleet(
         IReadOnlyList<Route> currentRoutes, IReadOnlyList<City> allCities, GravityDemandModel demandModel, AirlineFleet ownFleet, IReadOnlySet<int> reservedUnitIds)
     {
         var candidates = ownFleet.Idle
@@ -455,7 +507,7 @@ public static class BaselineAi
         return (best.Pair!, best.Aircraft);
     }
 
-    private static PairDemand? FindBestUnservedPair(
+    internal static PairDemand? FindBestUnservedPair(
         IReadOnlyList<Route> currentRoutes, IReadOnlyList<City> allCities, GravityDemandModel demandModel, AircraftType aircraft)
     {
         var served = currentRoutes
@@ -471,7 +523,7 @@ public static class BaselineAi
             .FirstOrDefault();
     }
 
-    private static Route? FindBestPerformingRoute(IReadOnlyList<Route> currentRoutes, GravityDemandModel demandModel)
+    internal static Route? FindBestPerformingRoute(IReadOnlyList<Route> currentRoutes, GravityDemandModel demandModel)
     {
         return RouteEvaluator.EvaluateNetwork(currentRoutes, demandModel)
             .OrderByDescending(l => l.LoadFactor)
@@ -482,21 +534,21 @@ public static class BaselineAi
     }
 
     /// <summary>M37: FareCalculator's own default, grossed up by FareRaiseFraction — the standard double-then-round-once cents pattern FareCalculator itself already uses.</summary>
-    private static Money RaisedFare(Route route)
+    internal static Money RaisedFare(Route route)
     {
         var cents = (long)Math.Round(FareCalculator.SuggestedFarePerPassenger(route).Cents * (1 + FareRaiseFraction), MidpointRounding.AwayFromZero);
         return new Money(cents);
     }
 
     /// <summary>M37: FareCalculator's own default, cut by FareCutFraction — same rounding pattern as RaisedFare.</summary>
-    private static Money CutFare(Route route)
+    internal static Money CutFare(Route route)
     {
         var cents = (long)Math.Round(FareCalculator.SuggestedFarePerPassenger(route).Cents * (1 - FareCutFraction), MidpointRounding.AwayFromZero);
         return new Money(cents);
     }
 
     /// <summary>M33: true when availableSlotsByCity is null (permissive), or this airline has a slot left at every gateway origin/destination touches.</summary>
-    private static bool HasSlotAtEveryGateway(City origin, City destination, IReadOnlyDictionary<string, int>? availableSlotsByCity, Dictionary<string, int> slotsReservedByCity)
+    internal static bool HasSlotAtEveryGateway(City origin, City destination, IReadOnlyDictionary<string, int>? availableSlotsByCity, Dictionary<string, int> slotsReservedByCity)
     {
         if (availableSlotsByCity is null)
         {
@@ -508,7 +560,7 @@ public static class BaselineAi
             .All(c => availableSlotsByCity.GetValueOrDefault(c.Id) - slotsReservedByCity.GetValueOrDefault(c.Id) > 0);
     }
 
-    private static void ReserveSlots(City origin, City destination, Dictionary<string, int> slotsReservedByCity)
+    internal static void ReserveSlots(City origin, City destination, Dictionary<string, int> slotsReservedByCity)
     {
         foreach (var city in new[] { origin, destination }.Where(c => c.GateCapacity is not null))
         {
@@ -516,7 +568,7 @@ public static class BaselineAi
         }
     }
 
-    private static City? FindBestUnservedGateway(IReadOnlyList<Route> currentRoutes, IReadOnlyList<City> allCities)
+    internal static City? FindBestUnservedGateway(IReadOnlyList<Route> currentRoutes, IReadOnlyList<City> allCities)
     {
         var touchedCityIds = currentRoutes
             .SelectMany(r => new[] { r.Origin.Id, r.Destination.Id })

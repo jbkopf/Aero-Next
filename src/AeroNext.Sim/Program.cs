@@ -542,20 +542,48 @@ var growthSchedule = DemandGrowthCatalog.LoadFile(Path.Combine(AppContext.BaseDi
 
 const int campaignQuarters = 244; // 1955 Q1 through 2015 Q4
 var campaignAirlineNames = new[] { "Atlas Air", "Meridian", "Skyward", "Continental Wings" };
+
+// M39: real per-region starting conditions, mirroring GameSetup.CreateSeats's
+// own AI-region-picking algorithm (top 4 HomeRegions by RegionalEconomics.Factor,
+// tie-broken by region name, each paired with its own top EligibleStartingCities
+// entry by DemandWeight) - zipped against this loop's existing flavor names
+// rather than renamed to "$Region Air", so every prior quarter's own writeup
+// below (which names these airlines directly) stays valid. This replaces the
+// prior deliberately-flat/symmetric setup (same cash, same aircraft, no
+// region) - a reversal the M39 roadmap section itself already flagged.
+// Deliberately NOT adopting FullGameRunner.cs's M18 guaranteed-quarter-1-route
+// seed here - M39's own region-aware strategies already pick a sensible
+// quarter-1 target on their own (unlike the old flat BaselineAi.DecideOrders
+// call this replaced), and layering the guaranteed-route mechanic on top
+// would be a second, separable change; if quarter-1 convergence is still
+// observed once this is measured, that's a finding to report, not a bug to
+// silently chase inside this same milestone.
+var campaignRegions = HomeRegions.All
+    .Select(r => (Region: r, Factor: RegionalEconomics.Factor(r, cities)))
+    .OrderByDescending(x => x.Factor)
+    .ThenBy(x => x.Region.ToString(), StringComparer.Ordinal)
+    .Take(4)
+    .Select(x => x.Region)
+    .ToList();
+
+var campaignSeats = campaignAirlineNames.Zip(campaignRegions, (name, region) =>
+{
+    var startingCity = HomeRegions.EligibleStartingCities(region, cities)
+        .OrderByDescending(c => c.DemandWeight)
+        .ThenBy(c => c.Id, StringComparer.Ordinal)
+        .First();
+    return new AirlineSeat(name, IsHuman: false, region, startingCity);
+}).ToDictionary(s => s.AirlineName);
+
+var campaignConditions = campaignAirlineNames.ToDictionary(n => n, n => StartingConditionsResolver.Resolve(campaignSeats[n], cities, fleetCatalog));
+var campaignHomeRegionByName = campaignAirlineNames.ToDictionary(n => n, n => campaignSeats[n].HomeRegion);
 var campaignRoutes = campaignAirlineNames.ToDictionary(n => n, _ => (IReadOnlyList<Route>)Array.Empty<Route>());
 var campaignCaps = campaignAirlineNames.ToDictionary(n => n, _ => QuarterEngine.BaseActionCap);
-var campaignFinances = campaignAirlineNames.ToDictionary(n => n, _ => FinancialState.Start(Money.FromDollars(20_000_000), Money.FromDollars(0), interestRatePerQuarter: 0.02));
+var campaignFinances = campaignAirlineNames.ToDictionary(n => n, n => FinancialState.Start(campaignConditions[n].StartingCash, Money.FromDollars(0), interestRatePerQuarter: 0.02));
+var campaignCurrentStrategyByName = campaignAirlineNames.ToDictionary(n => n, n => (IAiStrategy?)null);
 
-// M13's campaign is deliberately flat/symmetric (no GameSetup/region
-// distinction, matching its own established design) - all 4 airlines get
-// the same smallest-range 1955-available type, at M18's same starting
-// quantity (2), owned outright.
-var campaignStartingAircraft = Timeline.AvailableAircraft(fleetCatalog, Timeline.StartYear)
-    .OrderBy(a => a.RangeKm)
-    .ThenBy(a => a.Id, StringComparer.Ordinal)
-    .First();
 var campaignFleets = campaignAirlineNames.ToDictionary(n => n, n => FleetLedger.ApplyDelivery(
-    AirlineFleet.Empty, campaignStartingAircraft, StartingConditionsResolver.StartingAircraftQuantity, FleetOwnershipMode.Owned));
+    AirlineFleet.Empty, campaignConditions[n].StartingAircraft, StartingConditionsResolver.StartingAircraftQuantity, FleetOwnershipMode.Owned));
 var campaignAircraftOrderBoard = AircraftOrderBoard.Empty;
 
 // Reference chokepoint check: does the era's best available aircraft still
@@ -651,7 +679,24 @@ string ChokepointStatus(int year)
 // M38's own "Done" writeup - eliminating leasing's recurring 4%/quarter
 // fee compounds meaningfully over a long campaign regardless of how
 // harsh the starting conditions are.
-var checkpoints = new HashSet<int> { 1, 44, 56, 121, campaignQuarters };
+//
+// M39 (strategy framework) replaces this loop's setup outright, not just
+// its AI: the flat "$20M/smallest-1955-type for everyone" starting
+// conditions above the M31-M38 trajectory was measured under are gone,
+// replaced by real per-region StartingConditionsResolver figures, and
+// BaselineAi.DecideOrders's own single global-best-pair heuristic is
+// replaced by a per-airline IAiStrategy, region-aware from quarter 1. The
+// specific dollar figures above (all measured pre-M39) no longer describe
+// what this loop actually runs - see M39's own "Done" writeup in
+// docs/BASELINE_AI_ROADMAP.md for the re-measured trajectory.
+// M39 re-measured: with real per-region starting conditions and
+// region-aware strategies (replacing the prior flat setup this loop's own
+// M31-M38 history above was measured under), this loop no longer runs
+// anywhere near its old quarter-17-to-56 bankruptcy range at all - every
+// airline grows steadily with zero bankruptcies, and Continental Wings
+// wins outright at quarter 10 (led 3+ regions for 4+ consecutive
+// quarters). Checkpoints below show that whole short arc.
+var checkpoints = new HashSet<int> { 1, 4, 7, 10 };
 
 var campaignDominance = RegionalDominanceState.Empty;
 string? campaignWinner = null;
@@ -696,7 +741,12 @@ for (var q = 1; q <= campaignQuarters; q++)
         // same boat, though — this loop already tracks real per-airline
         // cash, so BaselineAi's negotiation step becomes genuinely
         // cash-aware here too.
-        var orders = BaselineAi.DecideOrders(campaignRoutes[name], campaignCaps[name], cities, yearDemandModel, availableFleet, campaignFleets[name], availableSlotsByCity: null, availableCash: campaignFinances[name].CashBalance, currentDebtBalance: campaignFinances[name].DebtBalance);
+        var campaignStrategyContext = new StrategyContext(
+            campaignRoutes[name], campaignCaps[name], cities, yearDemandModel, availableFleet, campaignFleets[name], campaignHomeRegionByName[name],
+            AvailableSlotsByCity: null, AvailableCash: campaignFinances[name].CashBalance, CurrentDebtBalance: campaignFinances[name].DebtBalance);
+        var campaignStrategy = BaselineAi.SelectStrategy(campaignCurrentStrategyByName[name], q, campaignStrategyContext);
+        campaignCurrentStrategyByName[name] = campaignStrategy;
+        var orders = campaignStrategy.DecideOrders(campaignStrategyContext);
         var result = QuarterEngine.RunQuarter(q, campaignRoutes[name], campaignCaps[name], orders, cities, yearDemandModel, campaignFleets[name], availableCash: campaignFinances[name].CashBalance, currentDebtBalance: campaignFinances[name].DebtBalance);
         campaignRoutes[name] = result.Routes;
         campaignCaps[name] = result.ActionCap;

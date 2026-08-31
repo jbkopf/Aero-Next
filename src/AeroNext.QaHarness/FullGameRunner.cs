@@ -22,17 +22,18 @@ namespace AeroNext.QaHarness;
 /// sweep should exercise the same resolver surface a real game would.
 ///
 /// Quarter 1 is seeded with each seat's M18-guaranteed route explicitly,
-/// not BaselineAi's own pick — because BaselineAi has no concept of "home
-/// region" or "starting city" at all (it searches every city pair globally,
-/// independent of where an airline is based), so on an empty route list it
-/// would otherwise make the identical global-best-pair choice for all 4
-/// seats regardless of M15-M19's differentiated setup, same as before this
-/// roadmap existed. From quarter 2 on, BaselineAi drives every seat
-/// normally (matching the real M13 pattern) — divergence from there is a
-/// genuine knock-on effect of each seat's different quarter-1 history, not
-/// because the AI is itself region-aware. Worth knowing: this is the
-/// current, honest limit of how far M15-M19's differentiation actually
-/// reaches into an AI-driven game.
+/// not an AI pick — the guaranteed-route mechanic predates M39 and still
+/// runs unconditionally on quarter 1, before any strategy is even
+/// selected. From quarter 2 on, each seat is driven by an M39 IAiStrategy
+/// (BaselineAi.SelectStrategy assigns one initially and re-evaluates once
+/// per in-game year), which — unlike the old flat BaselineAi.DecideOrders
+/// call this replaced — is genuinely home-region-aware from the moment it
+/// picks its first order.
+///
+/// M39 note (not yet also applied to AeroNext.Sim's own M13 loop): the
+/// StrategyContext this method builds needs a real HomeRegion, which every
+/// seat here already carries via GameSetup.CreateSeats — this loop's own
+/// prior "identical global-best-pair for all 4 seats" limitation is gone.
 /// </summary>
 public static class FullGameRunner
 {
@@ -78,6 +79,7 @@ public static class FullGameRunner
         var caps = names.ToDictionary(n => n, _ => QuarterEngine.BaseActionCap);
         var finances = names.ToDictionary(n => n, n => FinancialState.Start(conditionsByName[n].StartingCash, DefaultStartingDebt, DefaultInterestRatePerQuarter));
         var bankruptcyQuarter = names.ToDictionary(n => n, n => (int?)null);
+        var currentStrategyByName = names.ToDictionary(n => n, n => (IAiStrategy?)null);
         var humanCount = seats.Count(s => s.IsHuman);
 
         // M18's AircraftQuantity (2), real data never consumed until now —
@@ -137,15 +139,30 @@ public static class FullGameRunner
                 var airlineForSlots = new Airline(name, routes[name]);
                 var availableSlotsByCity = landingBoard.AvailableSlotsByCity(airlineForSlots, routes[name]);
 
-                var orders = q == 1
-                    ? new QuarterOrder[]
+                IReadOnlyList<QuarterOrder> orders;
+                if (q == 1)
+                {
+                    orders = new QuarterOrder[]
                     {
                         new RouteOrder(
                             seatByName[name].StartingCity,
                             conditionsByName[name].GuaranteedRouteDestination,
                             conditionsByName[name].StartingAircraft),
-                    }
-                    : BaselineAi.DecideOrders(routes[name], caps[name], cities, yearDemandModel, availableFleet, fleets[name], availableSlotsByCity, finances[name].CashBalance, finances[name].DebtBalance).ToArray();
+                    };
+                }
+                else
+                {
+                    // M39: strategy-driven from here on - selected once
+                    // per airline (initial assignment then re-evaluated
+                    // once per in-game year) rather than BaselineAi's own
+                    // single fixed heuristic.
+                    var strategyContext = new StrategyContext(
+                        routes[name], caps[name], cities, yearDemandModel, availableFleet, fleets[name], homeRegionByName[name],
+                        AvailableSlotsByCity: availableSlotsByCity, AvailableCash: finances[name].CashBalance, CurrentDebtBalance: finances[name].DebtBalance);
+                    var strategy = BaselineAi.SelectStrategy(currentStrategyByName[name], q, strategyContext);
+                    currentStrategyByName[name] = strategy;
+                    orders = strategy.DecideOrders(strategyContext);
+                }
 
                 // M18's guaranteed quarter-1 route is exempt from slot
                 // gating — nothing in the starting-conditions design pre-

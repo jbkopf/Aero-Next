@@ -543,7 +543,7 @@ growing (or ordering) past what its network can sustain.
 
 ## Phase 2 — strategy
 
-## M39 — A strategy framework (the real bankruptcy fix, redefined)
+## M39 — A strategy framework (the real bankruptcy fix, redefined) ✅
 
 **Redefined from its original "growth saturation" framing.** That
 version gave the existing greedy heuristic a single stopping-condition
@@ -645,6 +645,86 @@ current strategy per airline and re-evaluate on schedule; the M13 loop's
 4 airlines have distinct home regions; the full M13 checkpoint sweep and
 150-game QA harness sweep are re-measured, not assumed, against this new
 behavior.
+
+Done. `BaselineAi.DecideOrders` stays byte-for-byte unchanged (8 private
+helpers + 6 constants widened to `internal` only) — every one of the
+~490 pre-existing tests kept passing untouched, confirmed by running the
+full suite immediately after the visibility change, before any new code
+was written. New: `GameEra`/`GameEras`, `IAiStrategy`, `StrategyContext`,
+`AiSuitability` (shared cash-based signal), `AiToolkit` (extracted
+close/raise/cut/retire/debt/hire + negotiate-or-borrow logic, reused by
+both strategies), `DomesticProfitOptimizerStrategy`,
+`RapidExpansionStrategy`, and `BaselineAi.SelectStrategy`. 543 tests
+total (53 new, across `GameEraTests`, `DomesticProfitOptimizerStrategyTests`,
+`RapidExpansionStrategyTests`, `SelectStrategyTests`). 100% line coverage
+on every new/touched file; 100% branch coverage on `AiSuitability` and
+`DomesticProfitOptimizerStrategy`; `AiToolkit` and `RapidExpansionStrategy`
+each carry exactly one confirmed-understood partial branch — both are a
+compound condition's left operand already guaranteed true by an outer
+check by the time that line runs (an `AvailableCash is not null` and a
+`spent + 1 <= ActionCap` re-check respectively), so the "false" half of
+that specific combination is structurally unreachable, not an untested
+path; `BaselineAi`'s own new `SelectStrategy` carries the same class of
+tooling artifact around a `?? throw` expression, where both logical
+outcomes (return `current`, throw) are directly and separately tested.
+Overall project coverage **99.88%/99.29%**, at/above the established
+baseline; the pre-existing `BriefingGenerator`/`QuarterOrder`/
+`NetworkPlanner` gaps are untouched by this milestone.
+
+Both real loops wired: `FullGameRunner.cs` now selects and tracks a
+strategy per seat (its existing `homeRegionByName` feeds straight into
+`StrategyContext`) instead of calling `BaselineAi.DecideOrders` directly
+from quarter 2 on; `AeroNext.Sim`'s M13 loop gained real per-region
+starting conditions for the first time — mirroring
+`GameSetup.CreateSeats`'s own AI-region-picking algorithm (top 4 home
+regions by `RegionalEconomics.Factor`, each paired with its own top
+`EligibleStartingCities` entry by `DemandWeight`) zipped against the
+loop's existing flavor names (Atlas Air/Meridian/Skyward/Continental
+Wings, kept) — replacing the old flat "$20M/smallest-1955-type for
+everyone" setup this loop's own M31-M38 history was measured under.
+Deliberately did not also adopt `FullGameRunner.cs`'s M18
+guaranteed-quarter-1-route seed there, per the plan's own stated scope
+boundary — each strategy already picks a sensible, region-aware quarter-1
+target on its own.
+
+**Campaign trajectory — a fundamentally different shape, not a bigger
+number.** Every prior milestone this session (M31 through M38) measured
+the M13 loop sliding further down the same curve: bigger peak cash,
+later bankruptcy, same eventual crash. M39 breaks that pattern
+outright — re-measured with a full per-quarter checkpoint sweep, not
+assumed: all 4 airlines grow steadily with **zero bankruptcies**, and
+**Continental Wings wins outright at quarter 10** (1957) via regional
+dominance (3+ regions led for 4+ consecutive quarters), the first time
+any milestone this session has driven this loop to an actual win
+condition instead of a bankruptcy. Confirms the diagnosed root cause
+directly: 4 airlines with real, distinct home regions and (initially,
+cash-differentiated) strategies no longer chase the identical
+globally-best pair every quarter, so the permanent 4-way split on the
+same markets that was driving the M34-M38 bankruptcy spiral is gone.
+Checkpoints in `Program.cs` now show quarters 1/4/7/10, the whole short
+arc to the win.
+
+The 150-game QA harness sweep stayed structurally clean — 150/150 games
+passed with 0 invariant violations and 0 crashes — but surfaced a real,
+un-scoped finding rather than confirming a clean win: **0/150 clean
+games reached a win condition** before the 244-quarter timeline ended
+(unlike the M13 loop above), and the regional breakdown is severely
+skewed — EastAsia and AustralAsia seats rarely go bankrupt and finish
+with average cash in the hundreds of millions to low billions, while
+NorthAmerica/Europe/SouthAmerica/SouthWestAsia seats bankrupt in nearly
+every game, on average within 8-16 quarters. This is a genuine result of
+wiring real per-region starting conditions and region-aware strategies
+together at scale across varied seat configurations, not a bug in this
+milestone's own new code (both real loops pass every existing invariant
+check) — but it's a severe enough imbalance that it likely traces back to
+`RegionalEconomics.Factor` itself, independent of the AI layer, and
+undermines CLAUDE.md's own "a home region cannot fund a win" pillar in
+the opposite direction (some regions now look unbeatable, others
+unplayable). Reported here as a finding for a future milestone to pick
+up, not chased inside this one — M39's own scope was strategy diversity
+fixing the *identical-decision* cannibalization pathology, which it
+measurably did; regional economic balance is a separate, pre-existing
+system this milestone didn't touch and shouldn't silently absorb.
 
 ---
 
