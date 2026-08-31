@@ -478,6 +478,44 @@ public class GravityDemandModelTests
     }
 
     [Fact]
+    public void RealDataset_SuezClosure1967_DipsCairoForEightYears_RecoveredBy1980()
+    {
+        // Window 3 (spanning into 4 and 5) of the historical sweep: the
+        // Six-Day War (June 1967) triggers Egypt closing the Suez
+        // Canal, and sustained regional conflict/tension suppresses
+        // travel to Cairo until the canal reopens in June 1975 - a
+        // second, longer, later Cairo-scoped episode than round 6's
+        // own 1956 Suez Crisis, modeled the same way (city-scoped
+        // Event, explicit reversion) since it's the same real entity
+        // (Egypt/the canal), just a longer episode.
+        var cities = CityCatalog.LoadFile(Path.Combine(AppContext.BaseDirectory, "data", "cities.json"));
+        var byId = cities.ToDictionary(c => c.Id);
+        var schedule = DemandGrowthCatalog.LoadCampaignSchedule(Path.Combine(AppContext.BaseDirectory, "data"));
+        var farAway = byId["gru"];
+
+        // Isolate the event's own effect against a same-year reference
+        // with both Suez-related event groups removed - the trend
+        // curve itself also rises across this span (1955->1970 alone
+        // is a step from 1.0x to 2.2x), so a raw before/after
+        // comparison wouldn't isolate the closure's own effect.
+        var withoutAnySuezEvent = schedule
+            .Where(p => p.EventGroup != "suez-crisis-1956" && p.EventGroup != "suez-closure-1967")
+            .ToList();
+
+        var during1970 = new GravityDemandModel(schedule: schedule, year: 1970).ForPair(farAway, byId["cai"]).PassengersPerQuarter;
+        var during1970Reference = new GravityDemandModel(schedule: withoutAnySuezEvent, year: 1970).ForPair(farAway, byId["cai"]).PassengersPerQuarter;
+        Assert.True(during1970 < during1970Reference, "1970 (mid-closure) should be suppressed relative to the same year with no Suez-related event active");
+
+        // Full recovery, well after the 1975 reopening - exact
+        // equality against the same event-free reference, proving
+        // both Suez episodes (1956 and 1967) are fully and correctly
+        // resolved back to neutral by 1980.
+        var after1980 = new GravityDemandModel(schedule: schedule, year: 1980).ForPair(farAway, byId["cai"]).PassengersPerQuarter;
+        var after1980Reference = new GravityDemandModel(schedule: withoutAnySuezEvent, year: 1980).ForPair(farAway, byId["cai"]).PassengersPerQuarter;
+        Assert.Equal(after1980Reference, after1980);
+    }
+
+    [Fact]
     public void RealDataset_OlympicsEvents_BoostHostYearOnly_NotAdjacentYears()
     {
         // Stress-tests the trend/event architecture against a real,

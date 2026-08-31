@@ -13,7 +13,10 @@ city is in Bosnia/former Yugoslavia), M21 round 6 done (Suez Crisis
 1956, first window of a 13-window sweep of 1955-2015 built to cover
 every year with no gaps), M21 round 7 done (Cuba embargo 1962, window
 2 — the first permanent, real-dataset event in the sweep; a real
-regional shift measured in the QA sweep), M22 not started.** China's
+regional shift measured in the QA sweep), M21 round 8 done (Suez
+Canal closure 1967-75, window 3 — a second, longer Cairo episode;
+both loops unchanged, a genuine no-effect result), M22 not started.**
+China's
 opening and the 1997 Asian Financial Crisis remain named, not-yet-
 authored future rounds. Builds on the completed sim core
 (`docs/SIM_CORE_ROADMAP.md`, M0–M14) and game setup system
@@ -186,7 +189,7 @@ entries (M21's job), so nothing behavioral could have changed yet.
 
 ---
 
-## M21 — Author real historical trends and events (round 1: architecture + Dubai; round 2: global curve redesign; round 3: trend/event split; round 4: every Olympic Games + a real perf fix; round 5: remaining Games via same-country substitution; round 6: Suez Crisis, window 1 of a 13-window historical sweep; round 7: Cuba embargo, window 2) ✅
+## M21 — Author real historical trends and events (round 1: architecture + Dubai; round 2: global curve redesign; round 3: trend/event split; round 4: every Olympic Games + a real perf fix; round 5: remaining Games via same-country substitution; round 6: Suez Crisis, window 1 of a 13-window historical sweep; round 7: Cuba embargo, window 2; round 8: Suez Canal closure 1967-75, window 3) ✅
 
 Content, not mechanics — the same shape as the aircraft-catalog and
 city-expansion series, and expected to become its own ongoing round-by-round
@@ -756,7 +759,7 @@ pick events ad hoc.
 |---|---|---|
 | 1955-59 | Suez Crisis (1956) | Authored round 6 — Cairo (`cai`), city-scoped |
 | 1960-64 | US embargo on Cuba (1962) | **Authored this round** — `hav`, permanent step-down |
-| 1965-69 | Six-Day War → Suez Canal closed (1967-75) | Named, spans into windows 4-5; scope not yet decided |
+| 1965-69 | Six-Day War → Suez Canal closed (1967-75) | **Authored round 8** — Cairo (`cai`), city-scoped, spans into windows 4-5 |
 | 1970-74 | (747, Munich/Sapporo Olympics, first oil crisis) | Already covered by rounds 3-4 |
 | 1975-79 | Suez reopens (1975); Camp David / Egypt-Israel peace (1979) | Named — Cairo bookend + boost |
 | 1980-84 | Iran-Iraq War (1980-88) | Named, spans into window 7 — `thr`, `bgw` |
@@ -877,6 +880,60 @@ the kind of causal, legible story CLAUDE.md's own design pillars ask
 for — not noise, and not asserted without the number to back it. Every
 other region's row is untouched, as expected: none of their own cities
 carry this event.
+
+### Round 8: the sweep, window 3 (Suez Canal closure, 1967-75) ✅
+
+**Six-Day War → Suez Canal closure:** Israel's victory in the June
+1967 war left Egypt closing the canal to shipping, and sustained
+regional conflict (the War of Attrition, then the 1973 Yom Kippur War)
+kept it shut until UN-supervised clearance let it reopen in June 1975
+— a real 8-year chokepoint closure, directly resonant with CLAUDE.md's
+own "chokepoints obsolete/move across the campaign" design language,
+even though the sim doesn't model canal transit directly. Modeled as
+the same real entity as round 6's 1956 Suez Crisis — a second, later,
+much longer Cairo-scoped `Event` episode (`suez-closure-1967`), not
+folded into the 1956 episode's own group (they're genuinely separate
+historical episodes 11 years apart, and grouping them would have made
+the 1956 reopening's own 1.0 breakpoint get silently overridden by
+whichever breakpoint sorted "latest" — exactly the composition bug
+round 3 found and fixed once already).
+
+Magnitude (-25%, `0.75`) sits between the two other Cairo/Havana
+events authored so far: more severe than the 1956 Crisis's -20% (a
+multi-year war-adjacent state, not a single blocked-canal incident),
+but well short of the Cuba embargo's -35% permanent collapse (Cairo
+stayed a functioning, reachable destination throughout, unlike a full
+trade embargo). 1967 onset, 1975 reversion — still *(proposed,
+tunable)*, matching every other magnitude in this series.
+
+New proof test,
+`RealDataset_SuezClosure1967_DipsCairoForEightYears_RecoveredBy1980`:
+since the global trend curve itself also rises across this exact span
+(a step from 1.0x to 2.2x right at 1970), a raw before/after comparison
+wouldn't isolate the closure's own effect — so the test instead
+compares against a same-year reference schedule with *both* Suez event
+groups (1956 and 1967) removed, at 1970 (mid-closure, suppressed
+relative to the reference) and again at 1980 (exact equality against
+the reference, proving both episodes fully and correctly resolve back
+to neutral, not just "recovered somewhat"). 581 tests, up from 580,
+all passing; coverage gate re-run and unchanged (same accepted
+baseline as every round).
+
+**Measured — both loops came back genuinely unchanged, a real result
+in both directions for different reasons.** The M13 loop stayed
+byte-identical to round 7 (expected: it resolves and stops printing by
+quarter 10, 1957 — a decade before this event even starts). The
+150-game QA sweep, which does run the full campaign to 2015, also came
+back byte-for-byte identical to round 7's own numbers (113/150 wins
+avg quarter 19.9; every regional row unchanged, NorthAmerica still
+117/144 bankrupt $19.61M avg cash 16 wins) — the same honest "no
+effect" result round 6 found for the 1956 Crisis, for the same reason:
+Africa isn't among the home regions any of the 4 competing airlines
+draw in these particular 150 seeded games, so neither Cairo event has
+a route to move. Two Cairo-scoped events now compose correctly on top
+of each other whenever a game *does* touch Africa — confirmed by the
+proof test's own reference-schedule comparison, just not visible in
+this particular sweep's own random draws.
 
 ---
 

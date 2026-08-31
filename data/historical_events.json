@@ -114,5 +114,8 @@
   { "year": 1956, "globalMultiplier": 0.80, "cityId": "cai", "kind": "Event", "eventGroup": "suez-crisis-1956", "name": "Suez Crisis: Egypt nationalizes the canal, Anglo-French-Israeli invasion, canal blocked" },
   { "year": 1957, "globalMultiplier": 1.0,  "cityId": "cai", "kind": "Event", "eventGroup": "suez-crisis-1956", "name": "Canal reopens (April 1957) after UN clearance operations" },
 
-  { "year": 1962, "globalMultiplier": 0.65, "cityId": "hav", "kind": "Event", "eventGroup": "cuba-embargo-1962", "name": "US trade embargo on Cuba (Kennedy proclamation, Feb 1962): collapse of the dominant US-Cuba passenger market, permanent for the rest of the campaign - no reversion" }
+  { "year": 1962, "globalMultiplier": 0.65, "cityId": "hav", "kind": "Event", "eventGroup": "cuba-embargo-1962", "name": "US trade embargo on Cuba (Kennedy proclamation, Feb 1962): collapse of the dominant US-Cuba passenger market, permanent for the rest of the campaign - no reversion" },
+
+  { "year": 1967, "globalMultiplier": 0.75, "cityId": "cai", "kind": "Event", "eventGroup": "suez-closure-1967", "name": "Six-Day War (June 1967): Egypt closes the Suez Canal, sustained regional conflict suppresses travel to Cairo" },
+  { "year": 1975, "globalMultiplier": 1.0,  "cityId": "cai", "kind": "Event", "eventGroup": "suez-closure-1967", "name": "Suez Canal reopens (June 1975) after clearance; Sinai disengagement process underway" }
 ]
