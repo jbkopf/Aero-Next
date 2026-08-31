@@ -419,4 +419,44 @@ public class GravityDemandModelTests
         // unambiguous margin, not a borderline check.
         Assert.True(late > early * 20);
     }
+
+    [Fact]
+    public void RealDataset_OlympicsEvents_BoostHostYearOnly_NotAdjacentYears()
+    {
+        // Stress-tests the trend/event architecture against a real,
+        // large batch of independent city-scoped events (every Olympic
+        // Games 1956-2015 whose host city exists in cities.json) rather
+        // than just one hand-picked example - every one of them uses the
+        // same EventGroup-based composition this round's own bug fix
+        // depends on, and this proves it holds up at scale, against the
+        // real repo data, not just a small scripted scenario.
+        var cities = CityCatalog.LoadFile(Path.Combine(AppContext.BaseDirectory, "data", "cities.json"));
+        var byId = cities.ToDictionary(c => c.Id);
+        var schedule = DemandGrowthCatalog.LoadCampaignSchedule(Path.Combine(AppContext.BaseDirectory, "data"));
+        var farAway = byId["gru"]; // unrelated to every host city below
+
+        // (hostCityId, hostYear) - one representative per era, not
+        // exhaustively every one of the 16 authored events (that's what
+        // the data file itself documents); early, middle, and late
+        // enough to also prove the pattern holds across very different
+        // trend/other-event backdrops.
+        var hosts = new[]
+        {
+            ("mel", 1956), // Melbourne - earliest, right after the file's own baseline year
+            ("lax", 1984), // Los Angeles - mid-campaign
+            ("pek", 2008), // Beijing - overlaps the very next year with the global financial-crisis event
+            ("lhr", 2012), // London - latest, a city with its own real gateway weight already high
+        };
+
+        foreach (var (hostCityId, hostYear) in hosts)
+        {
+            var host = byId[hostCityId];
+            var before = new GravityDemandModel(schedule: schedule, year: hostYear - 1).ForPair(farAway, host).PassengersPerQuarter;
+            var during = new GravityDemandModel(schedule: schedule, year: hostYear).ForPair(farAway, host).PassengersPerQuarter;
+            var after = new GravityDemandModel(schedule: schedule, year: hostYear + 2).ForPair(farAway, host).PassengersPerQuarter; // +2, past the reversion year
+
+            Assert.True(during > before, $"{hostCityId} {hostYear}: host year should exceed the year before it");
+            Assert.True(during > after, $"{hostCityId} {hostYear}: host year should exceed the year after reversion");
+        }
+    }
 }

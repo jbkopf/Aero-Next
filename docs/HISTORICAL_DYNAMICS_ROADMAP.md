@@ -4,9 +4,11 @@
 curve redesign — real 1955-2015 growth/shock history), M21 round 3 done
 (trend/event split — a real mechanism extension, not just content;
 found and fixed a genuine event-composition bug during its own
-verification), M22 not started.** China's opening and the 1997 Asian
-Financial Crisis remain named, not-yet-authored future rounds. Builds
-on the completed sim core
+verification), M21 round 4 done (every Olympic Games 1956-2015 with a
+host city in the dataset; found and fixed a real performance regression
+— a 150-game sweep that looked hung now runs in 53s), M22 not started.**
+China's opening and the 1997 Asian Financial Crisis remain named,
+not-yet-authored future rounds. Builds on the completed sim core
 (`docs/SIM_CORE_ROADMAP.md`, M0–M14) and game setup system
 (`docs/GAME_SETUP_ROADMAP.md`, M15–M19, plus its ongoing city-expansion
 series). Continues the shared milestone numbering from M20, since this is
@@ -177,7 +179,7 @@ entries (M21's job), so nothing behavioral could have changed yet.
 
 ---
 
-## M21 — Author real historical trends and events (round 1: architecture + Dubai; round 2: global curve redesign; round 3: trend/event split) ✅
+## M21 — Author real historical trends and events (round 1: architecture + Dubai; round 2: global curve redesign; round 3: trend/event split; round 4: every Olympic Games + a real perf fix) ✅
 
 Content, not mechanics — the same shape as the aircraft-catalog and
 city-expansion series, and expected to become its own ongoing round-by-round
@@ -525,6 +527,132 @@ AustralAsia $75.9M→$83.6M) — most QA-harness games apparently resolve
 global events would have mattered as much as the isolated debugging
 scenario suggested, so the bug was real and worth fixing correctly, but
 wasn't the single dominant driver of this round's own headline numbers.
+
+### Round 4: every Olympic Games, 1956-2015 — a stress test of the architecture ✅
+
+The user's own framing: "let's test the system" — a genuinely large batch
+of real, independent, city-scoped events (rather than one at a time),
+to prove the round 3 architecture (and its own `EventGroup` fix) holds
+up at scale, not just in a hand-picked example or a small scripted
+scenario.
+
+**Real, checkable basis, cross-referenced against the actual repo
+dataset, not assumed:** every Summer and Winter Olympic Games from 1956
+through 2015 (real, well-known dates and host cities), checked against
+`data/cities.json`'s own 99-city list. **14 of 15 Summer Games host
+cities are present** (Melbourne, Rome, Tokyo, Mexico City, Munich,
+Moscow, Los Angeles, Seoul, Barcelona, Atlanta, Sydney, Athens,
+Beijing, London — only 1976 Montreal is missing from the dataset).
+**Only 2 of 16 Winter Games host cities are present** (Sapporo 1972,
+Vancouver 2010) — this dataset models major air-travel hubs, and most
+Winter host cities are smaller resort towns (Cortina d'Ampezzo, Squaw
+Valley, Innsbruck, Grenoble, Lake Placid, Sarajevo, Calgary,
+Albertville, Lillehammer, Nagano, Salt Lake City, Turin, Sochi) that
+were never in scope for the city-expansion series. **Reported honestly
+as a real, checkable data gap, not silently patched over with a
+nearby-but-wrong substitute city** — 15 Games (1 Summer, 14 Winter) go
+unauthored, named here so they aren't lost.
+
+**16 events authored** (`data/historical_events.json`), each a
+city-scoped `Event`, its own `EventGroup`
+(`"olympics-{year}-{summer|winter}"`), a real +20% *(proposed, tunable
+— a modest, deliberately uniform figure across every era and city, not
+individually researched per Games, since the trend curve already
+carries how much bigger overall demand is by any given year; the event
+represents relative excitement over that year's own baseline, which
+should be roughly comparable era to era)* boost in the host year,
+reverting the following year — 32 breakpoints total. Directly exercises
+scenarios round 3's own tests only checked individually: **two
+Games can share a scope-adjacent year without colliding** (Munich
+Summer and Sapporo Winter both 1972, different cities, no issue,
+confirmed by the catalog's own validation passing); **a host year can
+overlap a live global event** (Beijing 2008's own reversion year, 2009,
+is also when the global financial-crisis event begins — different
+scopes, compose independently, no interference); **a host year can
+land exactly on another event's own reversion year** (Los Angeles 1984
+is precisely when the global 1979 oil-shock event reverts to neutral —
+both apply correctly in the same year, LA's boost stacking cleanly on
+top of the oil shock's own release).
+
+New test `RealDataset_OlympicsEvents_BoostHostYearOnly_NotAdjacentYears`
+checks four real host cities spanning the full era range (Melbourne
+1956, Los Angeles 1984, Beijing 2008, London 2012) against the actual
+repo data, confirming each host year's demand exceeds both the year
+before and the year after reversion — not a synthetic scenario. 578
+tests total (1 new — the data itself needed no new source code, proving
+the architecture really is data-only for this kind of addition, exactly
+what "easily adding events" was supposed to mean). 100% coverage
+unaffected.
+
+**Measured, not assumed.** `AeroNext.Sim`'s M13 loop stayed
+byte-for-byte identical yet again — even though the 1956 Melbourne
+Games falls inside this loop's own quarter-1-10 (1955-1957) window this
+time, reasoned through why rather than just observed: none of the 4
+competing regions this loop's own seed produces happen to route through
+Melbourne specifically before Continental Wings' own quarter-10 win.
+
+**A second real bug was found — a severe performance regression this
+time, not a correctness one — and it's exactly the kind of thing
+stress-testing at scale was for.** The 150-game QA harness sweep looked
+hung: 20+ minutes with no output, versus every prior round's own
+sub-2-minute runs. Checked whether it actually was hung rather than
+assuming either way — Windows process inspection showed the sweep's own
+process had accumulated barely 1.5 seconds of *CPU* time across 25+
+minutes of wall time, which reads as blocked, not computing, so this
+got treated as seriously as a real hang until proven otherwise.
+Bisected by game count (`--games 1` through `5`) to find the exact
+seed that stalled, then reproduced it in isolation with a scripted
+`FullGameRunner.Run` call and per-quarter/per-seat diagnostic output.
+That confirmed it wasn't actually infinite — one specific `DecideOrders`
+call for one seat, at one quarter, was taking upward of a minute on its
+own (confirmed by simply giving it more time and watching it eventually
+return), while every other call across 20+ prior quarters took a
+fraction of a second.
+
+**Root cause, traced rather than guessed:** every one of
+`GravityDemandModel`'s trend/event factors depends only on the
+schedule and the year, both fixed for a model instance's entire
+lifetime — never on which two cities a given `ForPair` call is about.
+The round 3 implementation recomputed them (a `Where`/`GroupBy` scan of
+the *whole* schedule) on **every single `ForPair` call** anyway.
+`AllPairs` alone calls `ForPair` O(cities²) times a quarter (99 cities
+→ 4,851 pairs), and `BaselineAi.FindBestUnservedPair` — called once per
+*idle fleet unit* inside `AiToolkit.ApplyManagementToolkit`'s own
+stranded-unit check — calls `AllPairs` itself, sometimes several times
+a quarter. Quadrupling `historical_events.json`'s size (16 new Olympics
+entries on top of the existing 15) was enough to push the accumulated,
+needlessly-repeated cost over the edge for specific, unlucky
+combinations of network size and idle-fleet state.
+
+**Fixed by computing each factor exactly once per model instance,
+in the constructor, into a couple of small dictionaries** (`ForPair`
+itself becomes plain lookups) — not a change to any resolution rule or
+fallback behavior, confirmed by the full 578-test suite passing
+completely unchanged and the M13 loop staying byte-for-byte identical.
+The real 150-game sweep, previously indistinguishable from hung, now
+completes in **53 seconds** — back in line with every prior round.
+
+Final, correctly-measured 150-game QA harness sweep, this round's real
+content (all 16 Olympics events) live:
+
+| Metric | Round 3 (no Olympics) | Round 4 (+ Olympics) |
+|---|---|---|
+| Clean games with a win | 113/150 (avg quarter 19.9) | 113/150 (avg quarter 19.8) |
+| NorthAmerica bankrupt / avg cash / wins | 119/144, $4.4M, 14 | 119/144, $4.5M, 14 |
+| Europe bankrupt / avg cash / wins | 80/95, $4.1M, 5 | 80/95, $4.1M, 5 |
+| EastAsia bankrupt / avg cash / wins | 14/142, $138.3M, 88 | 14/142, $140.5M, 88 |
+| SouthWestAsia bankrupt / avg cash / wins | 29/55, $113.4M, 17 | 29/55, $113.4M, 17 |
+| AustralAsia bankrupt / avg cash / wins | 23/45, $83.6M, 7 | 22/45, $92.5M, 7 |
+| SouthAmerica bankrupt / avg cash / wins | 62/119, $63.7M, 19 | 62/119, $63.6M, 19 |
+
+Overall shape essentially unchanged — expected, and a sign the
+individual Olympics events are correctly modest in scale, not that
+they're inert: **AustralAsia moved the most** (bankrupt 23→22, avg
+cash $83.6M→$92.5M, median cash flipped from -$22K to +$3.1M), the one
+region hosting *two* of the authored Games (Melbourne 1956, Sydney
+2000) — a real, small, explainable effect, not noise, sized correctly
+relative to the region's own much larger existing drivers (starting
+economics, strategy choice, the global trend/event backdrop).
 
 ---
 

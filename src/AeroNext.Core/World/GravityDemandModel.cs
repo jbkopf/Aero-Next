@@ -59,6 +59,26 @@ namespace AeroNext.Core.World;
 /// per scope where a trend breakpoint and an event breakpoint at the
 /// same scope would otherwise silently clobber each other instead of
 /// composing.
+///
+/// M21 (performance fix, found stress-testing a large batch of real
+/// events — every Olympic Games 1956-2015): every one of the factors
+/// above depends only on `schedule`/`year`, both fixed for the lifetime
+/// of one model instance (a fresh instance is constructed once per
+/// quarter at every real call site) — never on which two cities
+/// `ForPair` is asked about. Re-deriving them from a `Where`/`GroupBy`
+/// scan of the whole schedule on *every* `ForPair` call was correct but
+/// wastefully repeated: `AllPairs` alone calls `ForPair` O(cities^2)
+/// times a quarter, and callers like `BaselineAi.FindBestUnservedPair`
+/// call `AllPairs` itself multiple times a quarter — with a schedule
+/// large enough (the Olympics round roughly quadrupled
+/// `historical_events.json`'s size), a 150-game/244-quarter sweep that
+/// used to finish in minutes stretched out far enough to look hung.
+/// The constructor now resolves the global factor and every distinct
+/// region/city's own factor exactly **once**, into a couple of small
+/// dictionaries; `ForPair` become simple lookups. Deliberately not a
+/// resolution-logic change — every intermediate value and fallback rule
+/// above is identical, only *when* it's computed differs, confirmed by
+/// the full existing test suite passing unchanged.
 /// </summary>
 public sealed class GravityDemandModel
 {
@@ -72,8 +92,15 @@ public sealed class GravityDemandModel
     private readonly double _exponent;
     private readonly double _crossRegionMultiplier;
     private readonly double _globalMultiplier;
-    private readonly IReadOnlyList<DemandGrowthPoint>? _schedule;
-    private readonly int? _year;
+
+    /// <summary>Trend x Event, global scope - identical for every pair, so resolved once here rather than per ForPair call.</summary>
+    private readonly double _resolvedGlobalMultiplier;
+
+    /// <summary>Trend x Event per region, populated only for regions that actually have a schedule entry - a region with none defaults to 1.0 (not present as a key).</summary>
+    private readonly IReadOnlyDictionary<Region, double> _regionMultiplierByRegion;
+
+    /// <summary>Trend x Event per city, populated only for cities that actually have a schedule entry - same "absent = 1.0" convention as the region dictionary.</summary>
+    private readonly IReadOnlyDictionary<string, double> _cityMultiplierByCityId;
 
     /// <summary>
     /// globalMultiplier is M13's historical growth knob — the campaign
@@ -96,8 +123,37 @@ public sealed class GravityDemandModel
         _exponent = exponent;
         _crossRegionMultiplier = crossRegionMultiplier;
         _globalMultiplier = globalMultiplier;
-        _schedule = schedule;
-        _year = year;
+
+        if (schedule is null || year is null)
+        {
+            _resolvedGlobalMultiplier = globalMultiplier;
+            _regionMultiplierByRegion = new Dictionary<Region, double>();
+            _cityMultiplierByCityId = new Dictionary<string, double>(StringComparer.Ordinal);
+            return;
+        }
+
+        var y = year.Value;
+        var trend = Timeline.DemandMultiplierForYear(schedule, y);
+        var globalEvents = schedule.Where(p => p.Region is null && p.CityId is null);
+        _resolvedGlobalMultiplier = trend * ResolveEvents(globalEvents, y);
+
+        var regionMultipliers = new Dictionary<Region, double>();
+        foreach (var region in schedule.Where(p => p.Region is not null).Select(p => p.Region!.Value).Distinct())
+        {
+            var matches = schedule.Where(p => p.Region == region && p.CityId is null).ToList();
+            regionMultipliers[region] = ResolveTrend(matches, y) * ResolveEvents(matches, y);
+        }
+
+        _regionMultiplierByRegion = regionMultipliers;
+
+        var cityMultipliers = new Dictionary<string, double>(StringComparer.Ordinal);
+        foreach (var cityId in schedule.Where(p => p.CityId is not null).Select(p => p.CityId!).Distinct(StringComparer.Ordinal))
+        {
+            var matches = schedule.Where(p => p.CityId == cityId).ToList();
+            cityMultipliers[cityId] = ResolveTrend(matches, y) * ResolveEvents(matches, y);
+        }
+
+        _cityMultiplierByCityId = cityMultipliers;
     }
 
     public PairDemand ForPair(City a, City b)
@@ -110,7 +166,7 @@ public sealed class GravityDemandModel
             raw *= _crossRegionMultiplier;
         }
 
-        raw *= GlobalMultiplierForPair();
+        raw *= _resolvedGlobalMultiplier;
         raw *= EffectiveMultiplier(a) * EffectiveMultiplier(b);
 
         var passengers = (long)Math.Round(raw, MidpointRounding.AwayFromZero);
@@ -118,52 +174,13 @@ public sealed class GravityDemandModel
         return new PairDemand(a, b, distanceKm, passengers);
     }
 
-    /// <summary>
-    /// Applied once per pair, exactly as _globalMultiplier always has
-    /// been — the global Trend curve (the schedule's own global-scoped
-    /// breakpoints when available, else the constructor's flat value)
-    /// times a separate global *Event* layer (M21: a 747/oil-crisis/9-11
-    /// style shock that composes on top of the trend rather than
-    /// replacing it - 1.0/neutral whenever none is active).
-    /// </summary>
-    private double GlobalMultiplierForPair()
-    {
-        if (_schedule is null || _year is null)
-        {
-            return _globalMultiplier;
-        }
+    /// <summary>M20/M21: the region/city-scoped portion, resolved per city from the precomputed dictionaries - a plain dictionary lookup, 1.0 when the city (or its region) has no schedule entry at all.</summary>
+    private double EffectiveMultiplier(City city) =>
+        _regionMultiplierByRegion.GetValueOrDefault(city.Region, 1.0) * _cityMultiplierByCityId.GetValueOrDefault(city.Id, 1.0);
 
-        var trend = Timeline.DemandMultiplierForYear(_schedule, _year.Value);
-        var globalEvents = _schedule.Where(p => p.Region is null && p.CityId is null);
-
-        return trend * ResolveEvents(globalEvents);
-    }
-
-    /// <summary>
-    /// M20: the region/city-scoped portion, resolved per city (1.0 when
-    /// no schedule, or nothing applies to this city in any scope/kind).
-    /// M21 (trend/event split): each of region and city now composes its
-    /// own Trend x Event, same reasoning as the global pair-level factor
-    /// above - a region or city can carry a sustained trend (Dubai) and
-    /// a separate, composable event on top, not one pool where the two
-    /// would silently clobber each other.
-    /// </summary>
-    private double EffectiveMultiplier(City city)
-    {
-        if (_schedule is null || _year is null)
-        {
-            return 1.0;
-        }
-
-        var regionMatches = _schedule.Where(p => p.Region == city.Region && p.CityId is null);
-        var cityMatches = _schedule.Where(p => p.CityId == city.Id);
-
-        double ResolveTrend(IEnumerable<DemandGrowthPoint> candidates) =>
-            Timeline.LatestAtOrBefore(candidates.Where(p => p.Kind == DemandGrowthPointKind.Trend), _year!.Value)?.GlobalMultiplier ?? 1.0;
-
-        return ResolveTrend(regionMatches) * ResolveEvents(regionMatches)
-            * ResolveTrend(cityMatches) * ResolveEvents(cityMatches);
-    }
+    /// <summary>The Trend portion only, for a given already-scope-filtered candidate set — falls back to neutral 1.0 when that scope has no trend entry at all (matches EffectiveMultiplier's own pre-existing region/city fallback).</summary>
+    private static double ResolveTrend(IEnumerable<DemandGrowthPoint> candidates, int year) =>
+        Timeline.LatestAtOrBefore(candidates.Where(p => p.Kind == DemandGrowthPointKind.Trend), year)?.GlobalMultiplier ?? 1.0;
 
     /// <summary>
     /// M21 (correctness fix found during round 3's own verification,
@@ -181,11 +198,11 @@ public sealed class GravityDemandModel
     /// earlier event never came back, even past its own reversion year,
     /// since the "latest breakpoint" was now the later event's.
     /// </summary>
-    private double ResolveEvents(IEnumerable<DemandGrowthPoint> candidates) =>
+    private static double ResolveEvents(IEnumerable<DemandGrowthPoint> candidates, int year) =>
         candidates
             .Where(p => p.Kind == DemandGrowthPointKind.Event)
             .GroupBy(p => p.EventGroup)
-            .Select(group => Timeline.LatestAtOrBefore(group, _year!.Value)?.GlobalMultiplier ?? 1.0)
+            .Select(group => Timeline.LatestAtOrBefore(group, year)?.GlobalMultiplier ?? 1.0)
             .Aggregate(1.0, (product, multiplier) => product * multiplier);
 
     /// <summary>
