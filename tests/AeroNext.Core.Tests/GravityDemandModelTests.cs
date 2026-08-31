@@ -647,6 +647,51 @@ public class GravityDemandModelTests
     }
 
     [Fact]
+    public void RealDataset_MoscowUssrDissolution_DipsIn1991ThenRecoversAndGrows()
+    {
+        // Window 8 of the historical sweep: unlike Dubai/Berlin's
+        // clean monotonic rise, Moscow's real trajectory is genuinely
+        // non-monotonic - the USSR's Dec 1991 dissolution opened
+        // borders politically, but the immediate "shock therapy"
+        // economic collapse (hyperinflation, ~40% GDP contraction)
+        // made things *worse* before Putin-era stabilization made
+        // them better. A pure city Trend, same classification as
+        // Berlin, but shaped dip-then-recover rather than a straight
+        // climb.
+        var cities = CityCatalog.LoadFile(Path.Combine(AppContext.BaseDirectory, "data", "cities.json"));
+        var byId = cities.ToDictionary(c => c.Id);
+        var schedule = DemandGrowthCatalog.LoadCampaignSchedule(Path.Combine(AppContext.BaseDirectory, "data"));
+        // Moscow's own city-Trend effect has to be isolated against a
+        // same-year reference with its entries removed - the global
+        // trend curve (and, at 1991, the Gulf War's own global Event)
+        // move independently across these same years and would
+        // otherwise swamp a raw before/after comparison, the same
+        // confound the Iran-Iraq test caught earlier in this series.
+        var withoutMoscowTrend = schedule.Where(p => p.CityId != "mow").ToList();
+        var farAway = byId["gru"];
+        var moscow = byId["mow"];
+
+        double MoscowRatio(int year)
+        {
+            var withTrend = new GravityDemandModel(schedule: schedule, year: year).ForPair(farAway, moscow).PassengersPerQuarter;
+            var withoutTrend = new GravityDemandModel(schedule: withoutMoscowTrend, year: year).ForPair(farAway, moscow).PassengersPerQuarter;
+            return withTrend / (double)withoutTrend;
+        }
+
+        var sovietEra = MoscowRatio(1955);
+        var dissolution = MoscowRatio(1991);
+        var stabilized = MoscowRatio(2000);
+        var established = MoscowRatio(2015);
+
+        // The dip: 1991 lands lower than the already-constrained
+        // Soviet-era baseline, not higher - the newly opened borders
+        // don't outweigh the economic collapse in this authored shape.
+        Assert.True(dissolution < sovietEra, "1991 should dip below the Soviet-era baseline");
+        Assert.True(stabilized > dissolution, "2000 should recover above 1991");
+        Assert.True(established > stabilized, "2015 should keep growing past 2000");
+    }
+
+    [Fact]
     public void RealDataset_OlympicsEvents_BoostHostYearOnly_NotAdjacentYears()
     {
         // Stress-tests the trend/event architecture against a real,

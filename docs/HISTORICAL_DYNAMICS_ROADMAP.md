@@ -22,7 +22,10 @@ window 4 needed nothing new), M21 round 10 done (Iran-Iraq War
 Baghdad both; a small, real SouthWestAsia effect measured), M21 round
 11 done (Chernobyl 1986 — the sweep's first Region-scoped event — and
 the Berlin Wall falling 1989 as a permanent city Trend, window 7;
-Europe's avg cash nearly doubled in the QA sweep), M22 not
+Europe's avg cash nearly doubled in the QA sweep), M21 round 12 done
+(USSR dissolution 1991, window 8 — a non-monotonic Moscow Trend
+(dip-then-recover); the first round to ripple across nearly every
+region in the QA sweep, not just one), M22 not
 started.**
 China's
 opening and the 1997 Asian Financial Crisis remain named, not-yet-
@@ -197,7 +200,7 @@ entries (M21's job), so nothing behavioral could have changed yet.
 
 ---
 
-## M21 — Author real historical trends and events (round 1: architecture + Dubai; round 2: global curve redesign; round 3: trend/event split; round 4: every Olympic Games + a real perf fix; round 5: remaining Games via same-country substitution; round 6: Suez Crisis, window 1 of a 13-window historical sweep; round 7: Cuba embargo, window 2; round 8: Suez Canal closure 1967-75, window 3; round 9: Camp David Peace Treaty 1979, window 5; round 10: Iran-Iraq War 1980-88, window 6; round 11: Chernobyl + Berlin Wall falls, window 7) ✅
+## M21 — Author real historical trends and events (round 1: architecture + Dubai; round 2: global curve redesign; round 3: trend/event split; round 4: every Olympic Games + a real perf fix; round 5: remaining Games via same-country substitution; round 6: Suez Crisis, window 1 of a 13-window historical sweep; round 7: Cuba embargo, window 2; round 8: Suez Canal closure 1967-75, window 3; round 9: Camp David Peace Treaty 1979, window 5; round 10: Iran-Iraq War 1980-88, window 6; round 11: Chernobyl + Berlin Wall falls, window 7; round 12: USSR dissolution, window 8) ✅
 
 Content, not mechanics — the same shape as the aircraft-catalog and
 city-expansion series, and expected to become its own ongoing round-by-round
@@ -772,7 +775,7 @@ pick events ad hoc.
 | 1975-79 | Suez reopens (1975, round 8's own bookend); Camp David / Egypt-Israel peace (1979) | **Authored round 9** — Cairo (`cai`), permanent boost |
 | 1980-84 | Iran-Iraq War (1980-88) | **Authored round 10** — `thr` + `bgw`, spans into window 7 |
 | 1985-89 | Chernobyl (1986); Berlin Wall falls (1989) | **Authored round 11** — Europe region-wide dip; `ber` trend-shift |
-| 1990-94 | USSR dissolves (1991) | Named — `mow` |
+| 1990-94 | USSR dissolves (1991) | **Authored round 12** — `mow`, non-monotonic trend-shift |
 | 1995-99 | Hong Kong Handover (1997) | Named — `hkg`, flagged as historically mild |
 | 2000-04 | SARS (2003); Iraq War (2003) | Named — first real **Region**-scope candidate (EastAsia); `bgw` |
 | 2005-09 | — | No standout beyond what rounds 3-4 already cover (Beijing, financial crisis) |
@@ -1110,6 +1113,75 @@ boost (0.7→1.8 across 60 years), while Chernobyl's own dip is a brief
 statistic, exactly as its own much larger scope and duration would
 predict. Every other region's row is untouched, as expected: none of
 their own cities or regions carry either event.
+
+### Round 12: the sweep, window 8 (USSR dissolution, 1991) ✅
+
+**Moscow's real trajectory is genuinely non-monotonic** — a first for
+this series. Every prior city Trend (Dubai, Berlin) climbs cleanly;
+Moscow doesn't, because the real history doesn't: the USSR's December
+1991 dissolution opened borders politically, but the immediate "shock
+therapy" collapse (hyperinflation, roughly a 40% GDP contraction)
+made Moscow *less* attractive for a while, not more, before Putin-era
+stabilization (~2000) let real growth begin. Same classification as
+Berlin — a pure city Trend, no Event layer — but shaped dip-then-recover:
+`1955: 0.6` (Soviet-era Intourist/Aeroflot restrictions), `1991: 0.5`
+(dissolution — the economic collapse outweighs the newly opened
+borders), `2000: 1.0` (Putin-era stabilization), `2015: 1.4`
+(established major destination).
+
+New proof test,
+`RealDataset_MoscowUssrDissolution_DipsIn1991ThenRecoversAndGrows`:
+a raw before/after passenger comparison at 1991 actually **failed on
+its own first run** — 1991 came back *higher* than 1955, not lower,
+because the global trend curve (1.0x→2.2x by 1970) and the Gulf War's
+own global Event (also active in 1991, entirely unrelated) both move
+independently across these years and swamped the city-specific dip.
+The same confound the Iran-Iraq test caught in round 10, this time on
+the "before/after" comparison itself rather than the year choice.
+Fixed the same way as the Cuba embargo's own permanence proof: isolate
+Moscow's own ratio at each year against a same-year reference with its
+schedule entries removed, then compare *those* ratios across
+1955/1991/2000/2015 — confirms the dip, then two stages of recovery.
+586 tests, up from 585, all passing; coverage gate re-run and
+unchanged (same accepted baseline as every round).
+
+**Measured — M13 unchanged again (Moscow's Trend, like Berlin's,
+starts at 1955, so this is a real check, not a timing triviality), but
+the 150-game sweep produced this series' first genuinely diffuse
+result — movement in every region but one, not an isolated regional
+shift:**
+
+| Metric | Round 11 | Round 12 |
+|---|---|---|
+| Clean games with a win | 113/150 (avg quarter **19.9**) | 113/150 (avg quarter **19.6**) |
+| Total bankrupt games | 143 | 144 |
+| NorthAmerica bankrupt / wins | 117/144, 16 | 116/144, 16 |
+| Europe bankrupt / bankrupt-quarter / avg cash / wins | 79/95, 11.5, $7.69M, 3 | 84/95, 10.4, **$4.55M**, 3 |
+| EastAsia bankrupt / wins | 14/142, 88 | 14/142, **89** |
+| SouthWestAsia bankrupt / wins | 29/55, 17 | 29/55, **16** |
+| AustralAsia bankrupt / bankrupt-quarter | 22/45, 11.0 | 21/45, 10.7 |
+| SouthAmerica | unchanged | unchanged |
+
+**Reported honestly rather than smoothed over: this is a different
+kind of result than any prior round, and the reason is structural, not
+a bug.** Moscow is a moderately weighted city (`demandWeight` 70) whose
+own trajectory now swings both down (the 1991 dip, deeper than even
+the constrained Soviet baseline) and up (real growth by 2015) —
+touching AI route-planning incentives in Europe throughout the entire
+back half of the campaign. Over a 244-quarter simulation where each
+quarter's AI decisions compound into the next, a single mid-campaign
+perturbation to one city's demand curve can cascade into materially
+different aggregate outcomes well beyond that city's own region —
+which is exactly what a 244-quarter deterministic-but-chaotic
+simulation should do with a real structural change, not evidence of a
+scoping error (Moscow's own event-composition correctness is already
+proven directly by the proof test's own reference-schedule ratios,
+independent of any of these downstream aggregate numbers). Europe's
+own avg cash dropped back down near round-10 levels ($7.69M→$4.55M) as
+Moscow's dip partly offsets Berlin's own boost within the same region;
+EastAsia and SouthWestAsia's win counts each moved by exactly one game
+out of 150 — small, real, and plausible given how close a margin
+separates them already.
 
 ---
 

@@ -133,5 +133,10 @@
   { "year": 1955, "globalMultiplier": 0.7, "cityId": "ber", "name": "Berlin: divided city, Cold War isolation (Wall built 1961) constrains travel and business" },
   { "year": 1989, "globalMultiplier": 1.0, "cityId": "ber", "name": "Berlin Wall falls (November 1989): reunification process begins" },
   { "year": 2000, "globalMultiplier": 1.4, "cityId": "ber", "name": "Berlin: capital of unified Germany, government relocation from Bonn complete (1999)" },
-  { "year": 2015, "globalMultiplier": 1.8, "cityId": "ber", "name": "Berlin: established major European capital" }
+  { "year": 2015, "globalMultiplier": 1.8, "cityId": "ber", "name": "Berlin: established major European capital" },
+
+  { "year": 1955, "globalMultiplier": 0.6, "cityId": "mow", "name": "Moscow: Soviet-era travel restrictions, Intourist controls, Aeroflot state monopoly limit access" },
+  { "year": 1991, "globalMultiplier": 0.5, "cityId": "mow", "name": "USSR dissolves (Dec 1991): economic collapse and hyperinflation ('shock therapy') offset newly opened borders" },
+  { "year": 2000, "globalMultiplier": 1.0, "cityId": "mow", "name": "Post-Yeltsin stabilization; Putin era begins, growing international access" },
+  { "year": 2015, "globalMultiplier": 1.4, "cityId": "mow", "name": "Moscow: established major destination for Russia/Eastern Europe travel" }
 ]
