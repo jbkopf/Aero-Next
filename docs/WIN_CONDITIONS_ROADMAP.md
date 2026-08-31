@@ -103,6 +103,30 @@ ran to 2015 and fell back to the ranking. Low but nonzero under
 these constants are in a plausible range, not proof they're right; worth
 revisiting once a stronger AI or human play generates more data.
 
+**M42 re-tuning check (`BASELINE_AI_ROADMAP.md`'s M39-M41), reaffirmed
+with new data, not silently left stale:** under the strategy-framework AI
+(region-aware strategies + M41's negotiation fix), the same 150-game
+sweep now wins outright **118/150 (78.7%), averaging quarter 25.3** — a
+complete reversal from 1.3%. Tried re-tuning both constants directly
+against this new data before reaffirming them as-is: raising
+`RequiredRegionCount` from 3 to 4 collapses the win rate to **0/150** —
+a hard cliff, not a smooth dial, meaning no current strategy ever builds
+a network reaching 4+ of the 6 regions at once, so 4 isn't "harder," it's
+unreachable. Raising `RequiredStreakQuarters` alone barely moves win
+rate at all (8 quarters: 116/150, avg 29.8; 20 quarters: 114/150, avg
+42.6) while pushing the average win quarter up only slightly — once one
+airline reaches 3-region dominance, it holds it almost indefinitely,
+because a bankrupt rival is permanently frozen (M23) and can never
+contest a region back. **Reaffirmed at `RequiredRegionCount = 3`,
+`RequiredStreakQuarters = 4`** — neither constant is actually the lever
+that controls campaign pacing under this AI; the real lever is that
+bankruptcy is a permanent, unrecoverable elimination, which structurally
+guarantees an early leader's streak becomes uncontestable once rivals
+start dropping out. Worth investigating on its own (does a bankrupt
+airline need some kind of comeback path, for pacing's sake if nothing
+else?) — flagged here, not fixed, since it's a bankruptcy-mechanic
+question, not a win-condition-constant one.
+
 **`CampaignRanking`** (same namespace): if the timeline ends with no
 winner, ranks all 4 by (a) regions currently led (streak ≥ 1) descending,
 (b) total passengers carried that quarter descending, (c) final net worth
@@ -168,6 +192,10 @@ invariant violations from the new mechanism.
   Both now coexist in the QA harness; folding them into one view once
   there's enough real win data to compare against is a reasonable
   follow-up, not done as part of landing the mechanism itself.
-- **Re-tuning `RequiredRegionCount`/`RequiredStreakQuarters`** once a
-  stronger AI or actual human play exists — 1.3% under `BaselineAi` is a
-  real data point, not a target either constant was tuned to hit.
+- ~~**Re-tuning `RequiredRegionCount`/`RequiredStreakQuarters`** once a
+  stronger AI or actual human play exists~~ — done in M42
+  (`BASELINE_AI_ROADMAP.md`), see the re-tuning check above: both
+  constants were tried against real M39-M41 data and reaffirmed, not
+  revised. What's still open: whether permanent, unrecoverable
+  bankruptcy (not either win-condition constant) is the real thing
+  worth revisiting for campaign pacing.

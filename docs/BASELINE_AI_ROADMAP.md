@@ -939,7 +939,7 @@ milestone, not this one.
 
 ---
 
-## M42 — Re-verification and closing the loop
+## M42 — Re-verification and closing the loop ✅
 
 Once `BaselineAi`'s real behavior has changed across M31–M41, every
 number recorded *under the old heuristic* elsewhere in this repo needs
@@ -962,6 +962,53 @@ checkpoint figures are re-measured and written down, and
 `WIN_CONDITIONS_ROADMAP.md`'s M24 constants are either reaffirmed with
 the new data or revised with a stated reason — not silently left
 pointing at pre-`BaselineAi`-rework numbers.
+
+Done. Re-ran the 150-game QA sweep at 244 quarters (identical command
+M39-M41 already used): **118/150 (78.7%) win outright, averaging quarter
+25.3** — up from M25b's original baseline of 2/150 (1.3%), averaging
+quarter 149. Tried actually re-tuning `RequiredRegionCount`/
+`RequiredStreakQuarters` against this new data rather than assuming they
+still hold or blindly reaffirming them: raising `RequiredRegionCount`
+from 3 to 4 collapses the win rate to **0/150** — a hard cliff, not a
+dial, since no current strategy ever builds a network reaching 4+ of the
+6 regions at once. Raising `RequiredStreakQuarters` (tried 8 and 20
+quarters) barely moves win rate (116/150 avg 29.8; 114/150 avg 42.6) —
+once an airline reaches 3-region dominance it holds it almost
+indefinitely, because M23's bankruptcy is permanent and a frozen rival
+can never contest a region back. **Reaffirmed both constants at their
+original values, with a stated reason** (written into
+`WIN_CONDITIONS_ROADMAP.md`'s own M24 section): the real lever
+controlling campaign pacing isn't either win-condition constant, it's
+that bankruptcy elimination is permanent — flagged there as a real,
+separate question for a future milestone, not fixed here.
+
+`AeroNext.Sim`'s M13 loop re-run and confirmed **byte-for-byte identical**
+to its own M39/M40/M41 figures (Continental Wings wins at quarter 10) —
+`Program.cs`'s own checkpoint-set comment, written during M39, is still
+accurate; no update needed, confirmed rather than assumed.
+`FINANCIAL_MODEL_ROADMAP.md`'s M26-M34 writeups carry real figures
+measured under the pre-M39 flat `BaselineAi.DecideOrders` path this repo
+no longer runs in either real loop — added one forward-pointer note in
+that doc's own "Kept in mind" section rather than rewriting dozens of
+historical dollar figures throughout; each of those writeups documents
+what that milestone measurably did *at the time*, a development-log
+entry worth preserving as history, not a live claim to keep current.
+
+**Phase 2 closes here.** M39 (strategy framework) fixed the
+identical-decision cannibalization pathology; M40 (hub-awareness)
+sharpened one strategy's own network sense; M41 (repeat-negotiation fix)
+turned out to be the single biggest lever measured all session, taking
+the QA harness from a game that essentially never produced a winner to
+one that does most of the time. M42 closes the loop by re-measuring
+everything downstream rather than leaving old numbers to quietly rot,
+and by being honest that the resulting pacing — most games settling by
+around quarter 25-40, EastAsia still winning disproportionately often —
+isn't the end of the story: this session's own memory now records that
+regional balance work is deliberately deferred until a future "dynamic
+demand" milestone, and this M42 pass additionally surfaces permanent
+bankruptcy elimination as a second, separate structural question worth
+its own milestone before either win-condition constant gets touched
+again.
 
 ---
 

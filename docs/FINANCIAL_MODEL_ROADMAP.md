@@ -1117,6 +1117,20 @@ not a substitute for teaching it.
 
 ## Kept in mind, not scheduled
 
+- **Every bankruptcy-quarter/cash-trajectory/win-rate figure recorded in
+  M26 through M34 below predates `BASELINE_AI_ROADMAP.md`'s M39-M41 —
+  read them as history, not current state.** Each was measured under the
+  old flat/symmetric `BaselineAi.DecideOrders` path this repo no longer
+  runs in either real loop; M39 replaced it with region-aware strategies,
+  M41 fixed a real cash-burn bug, and both real loops moved to genuinely
+  different numbers (e.g. the 150-game QA sweep's win rate: 1.3% under
+  this doc's own M25b baseline → 78.7% after M41 — see
+  `BASELINE_AI_ROADMAP.md`'s M39/M40/M41 "Done" sections and
+  `WIN_CONDITIONS_ROADMAP.md`'s M42 re-tuning check for today's real
+  figures). Not rewriting the specific numbers throughout M26-M34 below —
+  each documents what that milestone's own change measurably did *at the
+  time*, a real development-log entry, not a live claim about the game's
+  current behavior.
 - **M31 ("Campaign integration and re-verification") is retired from
   this document.** It was drafted before M27–M34 existed; a review found
   its stated wiring goal already done (each milestone since has wired
