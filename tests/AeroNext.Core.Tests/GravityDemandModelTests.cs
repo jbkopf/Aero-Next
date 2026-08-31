@@ -716,6 +716,82 @@ public class GravityDemandModelTests
     }
 
     [Fact]
+    public void RealDataset_Sars2003_DipsEastAsiaOnly_RecoveredBy2004()
+    {
+        // Window 10 of the historical sweep: SARS (Nov 2002 - July
+        // 2003) is the sweep's second Region-scoped event - like
+        // Chernobyl, the outbreak and the resulting collapse in air
+        // travel were genuinely pan-regional (East Asia), not centered
+        // on one city. 2003 also falls inside the unrelated global
+        // 9/11 event's own 2001-2005 window, so a ratio against a
+        // same-year SARS-free reference isolates the effect cleanly -
+        // the 9/11 factor applies identically to both sides of the
+        // ratio and cancels.
+        var cities = CityCatalog.LoadFile(Path.Combine(AppContext.BaseDirectory, "data", "cities.json"));
+        var byId = cities.ToDictionary(c => c.Id);
+        var schedule = DemandGrowthCatalog.LoadCampaignSchedule(Path.Combine(AppContext.BaseDirectory, "data"));
+        var withoutSars = schedule.Where(p => p.EventGroup != "sars-2003").ToList();
+        var farAway = byId["gru"];
+        // Tokyo (hnd) - EastAsia, no other city-scoped entry active in
+        // this window (its own Olympics events are 1964 and 1998).
+        var eastAsiaCity = byId["hnd"];
+
+        double SarsRatio(int year)
+        {
+            var withEvent = new GravityDemandModel(schedule: schedule, year: year).ForPair(farAway, eastAsiaCity).PassengersPerQuarter;
+            var withoutEvent = new GravityDemandModel(schedule: withoutSars, year: year).ForPair(farAway, eastAsiaCity).PassengersPerQuarter;
+            return withEvent / (double)withoutEvent;
+        }
+
+        Assert.True(SarsRatio(2003) < 1.0, "2003 should be suppressed relative to a SARS-free reference");
+        Assert.Equal(1.0, SarsRatio(2004));
+
+        // Confirms this is genuinely Region-scoped, not accidentally
+        // global: a same-region South America-South America pair
+        // shouldn't move between 2002 and 2003.
+        var southAmericaControl = byId["scl"];
+        var southAmericaBefore = new GravityDemandModel(schedule: schedule, year: 2002).ForPair(farAway, southAmericaControl).PassengersPerQuarter;
+        var southAmericaDuring = new GravityDemandModel(schedule: schedule, year: 2003).ForPair(farAway, southAmericaControl).PassengersPerQuarter;
+        Assert.Equal(southAmericaBefore, southAmericaDuring);
+    }
+
+    [Fact]
+    public void RealDataset_IraqWar2003_PermanentlyCollapsesBaghdad_SeparateFromThe1980sWar()
+    {
+        // Also window 10: the 2003 Iraq War is a second, later, far
+        // more severe episode on Baghdad than the already-reverted
+        // 1980-88 Iran-Iraq War - a real exercise of the same
+        // multi-independent-event-group composition the Cairo events
+        // already prove, this time with no reversion at all (unlike
+        // the 1980s war's own ceasefire, the invasion's aftermath -
+        // occupation, insurgency, ISIS's 2014 gains - never resolves
+        // within the campaign's own 2015 end year).
+        var cities = CityCatalog.LoadFile(Path.Combine(AppContext.BaseDirectory, "data", "cities.json"));
+        var byId = cities.ToDictionary(c => c.Id);
+        var schedule = DemandGrowthCatalog.LoadCampaignSchedule(Path.Combine(AppContext.BaseDirectory, "data"));
+        var withoutIraqWar2003 = schedule.Where(p => p.EventGroup != "iraq-war-2003").ToList();
+        var farAway = byId["gru"];
+        var baghdad = byId["bgw"];
+
+        double IraqWarRatio(int year)
+        {
+            var withEvent = new GravityDemandModel(schedule: schedule, year: year).ForPair(farAway, baghdad).PassengersPerQuarter;
+            var withoutEvent = new GravityDemandModel(schedule: withoutIraqWar2003, year: year).ForPair(farAway, baghdad).PassengersPerQuarter;
+            return withEvent / (double)withoutEvent;
+        }
+
+        // Before the 2003 war (but after the 1980s war's own 1988
+        // reversion), the ratio should be neutral - this event group
+        // hasn't started yet.
+        Assert.Equal(1.0, IraqWarRatio(2002));
+        Assert.True(IraqWarRatio(2004) < 1.0, "2004 should be suppressed relative to a war-free reference");
+
+        // Permanence: the ratio stays pinned at the authored 0.50
+        // factor as late as 2015, not drifting back toward 1.0.
+        Assert.InRange(IraqWarRatio(2015), 0.49, 0.51);
+    }
+
+    [Fact]
     public void RealDataset_OlympicsEvents_BoostHostYearOnly_NotAdjacentYears()
     {
         // Stress-tests the trend/event architecture against a real,

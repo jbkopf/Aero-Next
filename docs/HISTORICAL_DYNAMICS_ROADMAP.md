@@ -28,7 +28,11 @@ Europe's avg cash nearly doubled in the QA sweep), M21 round 12 done
 region in the QA sweep, not just one), M21 round 13 done (Hong Kong
 Handover 1997, window 9 — deliberately the smallest magnitude in the
 sweep; confirmed genuinely mild, no QA-sweep effect despite Hong
-Kong's own size and gateway status), M22 not
+Kong's own size and gateway status), M21 round 14 done (SARS 2003 —
+the sweep's second Region-scoped event, EastAsia — and the 2003 Iraq
+War as a second, permanent, far more severe Baghdad episode, window
+10; a real, non-monotonic EastAsia ripple, SouthWestAsia unmoved in
+this sample), M22 not
 started.**
 China's
 opening and the 1997 Asian Financial Crisis remain named, not-yet-
@@ -203,7 +207,7 @@ entries (M21's job), so nothing behavioral could have changed yet.
 
 ---
 
-## M21 — Author real historical trends and events (round 1: architecture + Dubai; round 2: global curve redesign; round 3: trend/event split; round 4: every Olympic Games + a real perf fix; round 5: remaining Games via same-country substitution; round 6: Suez Crisis, window 1 of a 13-window historical sweep; round 7: Cuba embargo, window 2; round 8: Suez Canal closure 1967-75, window 3; round 9: Camp David Peace Treaty 1979, window 5; round 10: Iran-Iraq War 1980-88, window 6; round 11: Chernobyl + Berlin Wall falls, window 7; round 12: USSR dissolution, window 8; round 13: Hong Kong Handover, window 9) ✅
+## M21 — Author real historical trends and events (round 1: architecture + Dubai; round 2: global curve redesign; round 3: trend/event split; round 4: every Olympic Games + a real perf fix; round 5: remaining Games via same-country substitution; round 6: Suez Crisis, window 1 of a 13-window historical sweep; round 7: Cuba embargo, window 2; round 8: Suez Canal closure 1967-75, window 3; round 9: Camp David Peace Treaty 1979, window 5; round 10: Iran-Iraq War 1980-88, window 6; round 11: Chernobyl + Berlin Wall falls, window 7; round 12: USSR dissolution, window 8; round 13: Hong Kong Handover, window 9; round 14: SARS + Iraq War 2003, window 10) ✅
 
 Content, not mechanics — the same shape as the aircraft-catalog and
 city-expansion series, and expected to become its own ongoing round-by-round
@@ -780,7 +784,7 @@ pick events ad hoc.
 | 1985-89 | Chernobyl (1986); Berlin Wall falls (1989) | **Authored round 11** — Europe region-wide dip; `ber` trend-shift |
 | 1990-94 | USSR dissolves (1991) | **Authored round 12** — `mow`, non-monotonic trend-shift |
 | 1995-99 | Hong Kong Handover (1997) | **Authored round 13** — `hkg`, confirmed genuinely mild |
-| 2000-04 | SARS (2003); Iraq War (2003) | Named — first real **Region**-scope candidate (EastAsia); `bgw` |
+| 2000-04 | SARS (2003); Iraq War (2003) | **Authored round 14** — Region-scope (EastAsia); `bgw` permanent second episode |
 | 2005-09 | — | No standout beyond what rounds 3-4 already cover (Beijing, financial crisis) |
 | 2010-14 | Eyjafjallajökull eruption (2010); Arab Spring (2011) | Named — Europe-wide airspace shutdown; Cairo/North Africa |
 | 2015 | — | Campaign's final year — no room for a reversion arc, not worth authoring |
@@ -1225,6 +1229,73 @@ aggregate consequences. Not a bug, and not evidence the event was
 wasted effort: its own correctness is proven directly by the proof
 test, independent of whether this particular 150-game sample happens
 to surface it.
+
+### Round 14: the sweep, window 10 (SARS + Iraq War, 2003) ✅
+
+**SARS — the sweep's second Region-scoped event.** The Nov 2002-July
+2003 outbreak produced a sharp, short-lived collapse in East Asian air
+travel during its peak months — genuinely pan-regional (originating in
+Guangdong, spreading through Hong Kong, mainland China, Singapore,
+Taiwan, Vietnam), the same real shape as Chernobyl's own diffuse fear
+effect, just concentrated in EastAsia instead of Europe. -25%
+(`0.75`), a single year (2003), reverting in 2004 as the WHO declared
+the outbreak contained — sized alongside the Suez closure's own -25%
+in this sweep's severity ladder (acute but resolved within the
+campaign's own granularity), sharper than Chernobyl's -15% diffuse
+fear, given real accounts of the outbreak's own more severe, more
+concentrated impact on regional aviation specifically.
+
+**Iraq War 2003 — Baghdad's second, independent, far more severe
+episode.** The March 2003 invasion and its aftermath (occupation,
+insurgency, ISIS's 2014 gains) never resolve within the campaign's own
+2015 end year, unlike the 1980-88 war's clean ceasefire — modeled as a
+second `EventGroup` (`iraq-war-2003`) on the same city, composing
+independently on top of the already-reverted `iran-iraq-war-1980`
+group, the same multi-independent-layer pattern the Cairo events
+already established. -50% (`0.50`), permanent — the harshest magnitude
+authored anywhere in this sweep, reflecting a near-total collapse of
+normal travel/business activity, not merely a severe dip.
+
+Two new proof tests, both using the ratio-against-same-year-reference
+pattern established in rounds 10 and 12 (global events active in this
+same window — 9/11 spans 2001-2005 — would otherwise confound a raw
+before/after comparison, but cancel cleanly in a same-year ratio).
+`RealDataset_Sars2003_DipsEastAsiaOnly_RecoveredBy2004` also confirms
+a same-region South America control pair doesn't move, proving genuine
+region-scoping. `RealDataset_IraqWar2003_PermanentlyCollapsesBaghdad_
+SeparateFromThe1980sWar` confirms the new group is neutral before 2003
+(the 1980s war having already reverted), suppressed from 2004, and
+still pinned at the authored 0.50 factor as late as 2015. Both passed
+on their first run — the ratio pattern paying off after two rounds of
+catching real confounds the hard way. 589 tests, up from 587, all
+passing; coverage gate re-run and unchanged (same accepted baseline as
+every round).
+
+**Measured — M13 unchanged (resolves decades before either event),
+but the 150-game sweep produced a striking, real, non-monotonic
+EastAsia result, while SouthWestAsia showed no aggregate movement at
+all despite Baghdad's own harsh new event:**
+
+| Metric | Round 13 | Round 14 |
+|---|---|---|
+| Clean games with a win | 113/150 (avg quarter 19.6) | 113/150 (avg quarter 19.6) |
+| EastAsia bankrupt / bankrupt-quarter / avg cash / wins | 14/142, 23.0, $140.60M, 88 | 16/142, **46.4**, $133.67M, **89** |
+| SouthWestAsia | unchanged | unchanged |
+| NorthAmerica / Europe / AustralAsia / SouthAmerica | unchanged | unchanged |
+
+EastAsia's own bankrupt-quarter more than doubled (23.0→46.4) — the
+airlines in that region that do fail are now failing much later on
+average — alongside two more bankruptcies (14→16) and a *higher* win
+count (88→89), a mixed, non-monotonic signal rather than a clean
+"worse across the board" one, the same character as round 12's Moscow
+ripple: a real structural perturbation to a dominant region's demand
+curve, propagating through 244 quarters of compounding AI decisions,
+doesn't have to move every statistic in the same direction to be a
+real, correctly-computed effect. SouthWestAsia staying flat despite
+Baghdad's own -50% permanent collapse is the same "correctness proven
+directly, invisible at this sample size" result as Hong Kong in round
+13 — Baghdad, like Tehran, is a comparatively minor city within a
+region whose AI strategies aren't centered on it.
 
 ---
 
