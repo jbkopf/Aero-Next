@@ -15,10 +15,14 @@ public class RapidExpansionStrategyTests
     private static readonly GravityDemandModel DemandModel = new();
     private static readonly RapidExpansionStrategy Strategy = new();
 
+    // M44: homeCity defaults to cities[0] - every existing fixture in this
+    // file already lists its own "home" city first, matching the pattern
+    // MakeContext's own callers were already written against; explicit
+    // override only where a test specifically needs a different one.
     private static StrategyContext MakeContext(
         IReadOnlyList<Route> routes, IReadOnlyList<City> cities, IReadOnlyList<AircraftType> eraTypes, Region homeRegion,
-        AirlineFleet? fleet = null, int actionCap = 3, Money? cash = null) =>
-        new(routes, actionCap, cities, DemandModel, eraTypes, fleet ?? AirlineFleet.Empty, homeRegion, AvailableCash: cash);
+        AirlineFleet? fleet = null, int actionCap = 3, Money? cash = null, City? homeCity = null) =>
+        new(routes, actionCap, cities, DemandModel, eraTypes, fleet ?? AirlineFleet.Empty, homeRegion, HomeCity: homeCity ?? cities[0], AvailableCash: cash);
 
     [Fact]
     public void DecideOrders_TightBudget_PrefersOpeningANewPair_OverGrowingAnExistingRoute()
@@ -100,7 +104,7 @@ public class RapidExpansionStrategyTests
         var cities = new[] { home, best, next };
 
         var context = new StrategyContext(
-            Array.Empty<Route>(), 3, cities, DemandModel, Array.Empty<AircraftType>(), AirlineFleet.Empty, Region.NorthAmerica,
+            Array.Empty<Route>(), 3, cities, DemandModel, Array.Empty<AircraftType>(), AirlineFleet.Empty, Region.NorthAmerica, HomeCity: home,
             AvailableCash: Money.FromDollars(10_000_000),
             PendingNegotiationCityIds: new HashSet<string> { "best" });
 
@@ -123,7 +127,7 @@ public class RapidExpansionStrategyTests
         var cities = new[] { home, best, next };
 
         var context = new StrategyContext(
-            Array.Empty<Route>(), 3, cities, DemandModel, Array.Empty<AircraftType>(), AirlineFleet.Empty, Region.NorthAmerica,
+            Array.Empty<Route>(), 3, cities, DemandModel, Array.Empty<AircraftType>(), AirlineFleet.Empty, Region.NorthAmerica, HomeCity: home,
             AvailableSlotsByCity: new Dictionary<string, int> { ["best"] = 1 },
             AvailableCash: Money.FromDollars(10_000_000));
 
@@ -374,7 +378,7 @@ public class RapidExpansionStrategyTests
         var cities = new[] { home, foreignGateway };
 
         var context = new StrategyContext(
-            Array.Empty<Route>(), 3, cities, DemandModel, Array.Empty<AircraftType>(), AirlineFleet.Empty, Region.NorthAmerica,
+            Array.Empty<Route>(), 3, cities, DemandModel, Array.Empty<AircraftType>(), AirlineFleet.Empty, Region.NorthAmerica, HomeCity: home,
             AvailableCash: Money.FromDollars(500_000), CurrentDebtBalance: Money.Zero);
 
         var orders = Strategy.DecideOrders(context);
@@ -402,7 +406,7 @@ public class RapidExpansionStrategyTests
         var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, aircraft, quantity: 1, FleetOwnershipMode.Owned);
 
         var context = new StrategyContext(
-            Array.Empty<Route>(), 3, cities, DemandModel, new[] { aircraft }, fleet, Region.NorthAmerica,
+            Array.Empty<Route>(), 3, cities, DemandModel, new[] { aircraft }, fleet, Region.NorthAmerica, HomeCity: home,
             AvailableSlotsByCity: new Dictionary<string, int> { ["won"] = 1 });
 
         var orders = Strategy.DecideOrders(context);
@@ -429,7 +433,7 @@ public class RapidExpansionStrategyTests
         var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, aircraft, quantity: 1, FleetOwnershipMode.Owned);
 
         var context = new StrategyContext(
-            existing, 3, cities, DemandModel, new[] { aircraft }, fleet, Region.NorthAmerica,
+            existing, 3, cities, DemandModel, new[] { aircraft }, fleet, Region.NorthAmerica, HomeCity: home,
             AvailableSlotsByCity: new Dictionary<string, int> { ["won"] = 1 });
 
         var orders = Strategy.DecideOrders(context);
@@ -461,7 +465,7 @@ public class RapidExpansionStrategyTests
         var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, aircraft, quantity: 2, FleetOwnershipMode.Owned); // one already flying home-dom, one idle
 
         var context = new StrategyContext(
-            existing, 3, cities, DemandModel, new[] { aircraft }, fleet, Region.NorthAmerica,
+            existing, 3, cities, DemandModel, new[] { aircraft }, fleet, Region.NorthAmerica, HomeCity: home,
             AvailableSlotsByCity: new Dictionary<string, int> { ["won"] = 1 });
 
         var orders = Strategy.DecideOrders(context);
@@ -492,7 +496,7 @@ public class RapidExpansionStrategyTests
         var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, aircraft, quantity: 1, FleetOwnershipMode.Owned);
 
         var context = new StrategyContext(
-            Array.Empty<Route>(), 3, cities, DemandModel, new[] { aircraft }, fleet, Region.NorthAmerica,
+            Array.Empty<Route>(), 3, cities, DemandModel, new[] { aircraft }, fleet, Region.NorthAmerica, HomeCity: home,
             AvailableSlotsByCity: new Dictionary<string, int> { ["aaa"] = 0, ["bbb"] = 1 });
 
         var orders = Strategy.DecideOrders(context);

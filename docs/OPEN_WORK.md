@@ -18,35 +18,48 @@ Compiled 2026-08-31, cross-referencing every `docs/*_ROADMAP.md`'s own
 writing: M0–M14 (`SIM_CORE_ROADMAP.md`), M15–M19 (`GAME_SETUP_ROADMAP.md`),
 M20–M22 (`HISTORICAL_DYNAMICS_ROADMAP.md`), M23–M24
 (`WIN_CONDITIONS_ROADMAP.md`), M25–M30/M34 (`FINANCIAL_MODEL_ROADMAP.md`,
-M31 retired), M31/M35–M43 (`BASELINE_AI_ROADMAP.md`), M32–M33
-(`ROUTE_CAPACITY_ROADMAP.md`). M43 is the current highest issued number.
+M31 retired), M31/M35–M44 (`BASELINE_AI_ROADMAP.md`), M32–M33
+(`ROUTE_CAPACITY_ROADMAP.md`). M44 is the current highest issued number.
 Update this line the moment a new milestone is opened anywhere.
 
 ---
 
 ## Active priority
 
-**Regional outcome imbalance — round 1 shipped, round 2 open.**
-`docs/BASELINE_AI_ROADMAP.md`'s M43: root-caused to gateway negotiation
-wins going unused (an airline could win 6 contested slots and build a
-route at none of them, continuing to bid on new ones regardless) and
-fixed by prioritizing an already-won, unused slot over chasing a fresh
-one. Measured: overall QA-sweep win rate 70.7%→98.0%, the single biggest
-lever this whole project has measured. Two items found during the same
-investigation, deliberately deferred rather than folded in — both filed
-under `BASELINE_AI_ROADMAP.md`'s own "Kept in mind" now:
+**Regional outcome imbalance — two rounds shipped, both with real,
+honestly-reported side effects.** `docs/BASELINE_AI_ROADMAP.md`'s M43:
+root-caused to gateway negotiation wins going unused, fixed by
+prioritizing an already-won slot over chasing a fresh one. Measured:
+overall QA-sweep win rate 70.7%→98.0%. M44 (requested directly by the
+user): network contiguity — a new route must originate from the home
+city or a city already served, closing an already-designed
+`GAME_SETUP_ROADMAP.md` gap. Measured: **NorthAmerica's win share
+jumped from 18.6% to 87.6%**, a near-total reversal of M43's own
+"region size is a liability" finding (NorthAmerica's dense 22-city local
+network is now a dominant advantage instead) — SouthAmerica mirrors it
+in the other direction (45.6%→4.2% win share, 17.3%→88.2% bankrupt).
+Flagged plainly as a strikingly lopsided result, not smoothed over —
+whether it's an acceptable consequence of today's real, uneven city
+density per region, or the next thing to investigate, is open.
+
+Three items found during these investigations, deliberately deferred
+rather than folded in — all filed under `BASELINE_AI_ROADMAP.md`'s own
+"Kept in mind" now:
 - **The route open/shrink/regrow thrash cycle** — real, but a tried
   static-threshold fix measurably made things *worse* (win rate
   98.0%→85.3%); the real fix needs cross-quarter state, filed for a
   future AI-strategy-expansion round.
 - **Europe's own idle-fleet stall** under `DomesticProfitOptimizerStrategy`
-  — Europe remains the worst-performing region (81.2% bankrupt) even
-  after round 1; root cause not yet isolated.
+  — Europe remains the worst-performing region (86.3% bankrupt after
+  both rounds) throughout; root cause not yet isolated.
+- **NorthAmerica's own post-M44 dominance (87.6% win share)** — real,
+  causally understood (dense local network), but flagged for a decision
+  on whether it's acceptable as-is.
 
-`RegionalEconomics.Factor` is confirmed not the cause (NorthAmerica and
-EastAsia share the same 1.117 factor yet landed at opposite outcomes
-before this fix) — the real driver was downstream AI strategy behavior,
-not starting conditions.
+`RegionalEconomics.Factor` is confirmed not the cause of the original
+imbalance (NorthAmerica and EastAsia shared the same 1.117 factor yet
+landed at opposite outcomes pre-M43) — the real driver was downstream
+AI strategy/network-topology behavior, not starting conditions.
 
 ---
 
@@ -56,14 +69,13 @@ not starting conditions.
 - **AI differentiation** — the 4 airlines have differentiated starting
   conditions since M15–M19, but nothing beyond M39–M41's region-aware
   strategies makes them play differently by home region's own character.
-- **Route-entry slot requirement + network contiguity** — fully designed,
-  not implemented. `QuarterEngine` still never checks landing-rights
-  ownership against a plain `RouteOrder` (only `NegotiationOrder` touches
-  `LandingRightsBoard`). Two rules ready to build: (1) a `RouteOrder`
-  touching a gateway the airline holds no slot at should be rejected; (2)
-  new routes must grow outward from a city the airline already serves
-  (home city always valid; the valid-origin set for a quarter is cities
-  touched by routes active at that quarter's start).
+- **Route-entry slot requirement** — still open. `QuarterEngine` still
+  never checks landing-rights ownership against a plain `RouteOrder`
+  itself (only `NegotiationOrder` touches `LandingRightsBoard`; M33's
+  `HasSlotAtEveryGateway` is only ever a self-check each AI strategy
+  opts into, not an enforced rejection every caller is bound by). The
+  network-contiguity half of this same original item is done —
+  `docs/BASELINE_AI_ROADMAP.md`'s M44.
 - **Gateway home-city exception** — every region's gateway sits inside
   the ordinary M9 contested mechanic, including for the local airline.
   Revisit only with real evidence this makes early gateway negotiation
@@ -97,8 +109,12 @@ not starting conditions.
   cross-quarter state (which route was shrunk how recently), filed for
   a future AI-strategy-expansion round, not a quick patch.
 - **Europe's own idle-fleet stall under `DomesticProfitOptimizerStrategy`**
-  — Europe remains the worst-performing region (81.2% bankrupt) even
-  after M43's own fix; root cause not yet isolated.
+  — Europe remains the worst-performing region (86.3% bankrupt after
+  M43+M44 both) throughout; root cause not yet isolated.
+- **NorthAmerica's own post-M44 dominance (87.6% win share)** — real,
+  causally understood (its dense 22-city local network is now a
+  compounding advantage under network-contiguity), but a strikingly
+  lopsided result flagged for a decision on whether it's acceptable.
 
 ### `WIN_CONDITIONS_ROADMAP.md`
 - **Difficulty tiers** — explicitly deferred, no `Difficulty` concept

@@ -1228,4 +1228,92 @@ public class QuarterEngineTests
         Assert.Equal(2, route.AircraftCount);
         Assert.Equal(Money.FromDollars(500), route.FareOverride);
     }
+
+    // M44: network contiguity - a new route may only originate from the
+    // home city or a city the airline already serves.
+
+    [Fact]
+    public void RunQuarter_HomeCityNull_RouteFromAnyCity_NeverRejectedForOrigin()
+    {
+        // The permissive default: homeCity null preserves today's
+        // behavior exactly, matching every other optional enforcement
+        // parameter's own convention.
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 50);
+        var b = MakeCity("b", 1, 1, 50);
+        var order = new RouteOrder(a, b, Aircraft);
+
+        var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, new[] { a, b }, demandModel);
+
+        Assert.Empty(result.RejectedOrders);
+        Assert.Single(result.Routes);
+    }
+
+    [Fact]
+    public void RunQuarter_HomeCityProvided_RouteFromANonServedNonHomeCity_Rejected()
+    {
+        var demandModel = new GravityDemandModel();
+        var home = MakeCity("home", 0, 0, 50);
+        var elsewhere = MakeCity("elsewhere", 5, 5, 50);
+        var far = MakeCity("far", 6, 6, 50);
+        var order = new RouteOrder(elsewhere, far, Aircraft); // touches neither home nor any served city
+
+        var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, new[] { home, elsewhere, far }, demandModel, homeCity: home);
+
+        Assert.Empty(result.AppliedOrders);
+        Assert.Single(result.RejectedOrders);
+        Assert.Empty(result.Routes);
+    }
+
+    [Fact]
+    public void RunQuarter_HomeCityProvided_RouteFromHome_AlwaysAccepted_EvenWithZeroExistingRoutes()
+    {
+        var demandModel = new GravityDemandModel();
+        var home = MakeCity("home", 0, 0, 50);
+        var elsewhere = MakeCity("elsewhere", 5, 5, 50);
+        var order = new RouteOrder(home, elsewhere, Aircraft);
+
+        var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, new[] { home, elsewhere }, demandModel, homeCity: home);
+
+        Assert.Empty(result.RejectedOrders);
+        Assert.Single(result.Routes);
+    }
+
+    [Fact]
+    public void RunQuarter_HomeCityProvided_RouteFromAnAlreadyServedCity_Accepted()
+    {
+        // Contiguity is evaluated against quarter-start routes - the
+        // same "not other orders in the same batch" rule Cost() already
+        // applies (see the class doc comment). A pair already served
+        // trivially satisfies this: its own origin was already touched
+        // before this quarter began.
+        var demandModel = new GravityDemandModel();
+        var home = MakeCity("home", 0, 0, 50);
+        var served = MakeCity("served", 5, 5, 50);
+        var newDestination = MakeCity("newdest", 6, 6, 50);
+        var existing = new[] { new Route(home, served, Aircraft, AircraftCount: 1) };
+        var order = new RouteOrder(served, newDestination, Aircraft); // origin is "served", not home
+
+        var result = QuarterEngine.RunQuarter(1, existing, QuarterEngine.BaseActionCap, new[] { order }, new[] { home, served, newDestination }, demandModel, homeCity: home);
+
+        Assert.Empty(result.RejectedOrders);
+        Assert.Equal(2, result.Routes.Count);
+    }
+
+    [Fact]
+    public void RunQuarter_HomeCityProvided_NegotiationOrderNeverRejectedForOrigin()
+    {
+        // Scoped to RouteOrder only - a NegotiationOrder can still
+        // target any gateway in the world, a real forward-looking
+        // investment rather than a route.
+        var demandModel = new GravityDemandModel();
+        var home = MakeCity("home", 0, 0, 50);
+        var farGateway = new City("gw", "GW", Region.EastAsia, 40, 40, 90, IsGateway: true, GateCapacity: 3);
+        var order = new NegotiationOrder(farGateway, Money.FromDollars(2_000_000));
+
+        var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, new[] { home, farGateway }, demandModel, homeCity: home);
+
+        Assert.Empty(result.RejectedOrders);
+        Assert.Single(result.AppliedOrders);
+    }
 }

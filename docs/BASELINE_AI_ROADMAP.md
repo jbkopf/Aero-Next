@@ -1140,6 +1140,135 @@ this same regional-balance effort.
 
 ---
 
+## M44 — Network contiguity: a new route must originate from a served (or home) city ✅
+
+The exact gap M43's own trace directly exposed and `docs/GAME_SETUP_ROADMAP.md`'s
+"Kept in mind" section had already fully designed, never built: an
+airline could open a route *anywhere in the world*, with zero requirement
+that it connect to its own existing network. M43's own diagnosis found
+this precisely — an airline based in Beijing opened a real
+Philadelphia-JFK route using a gateway slot won at JFK, with zero other
+presence within 10,000km of North America. Requested directly by the
+user, expecting a significant balance impact.
+
+**Design.** `StrategyContext` gains a required `HomeCity` field
+(mirroring `HomeRegion`'s own non-nullable convention).
+`QuarterEngine.RunQuarter` gains an optional `homeCity` parameter (null
+preserves today's fully permissive behavior, matching every other
+enforcement toggle) — when provided, a `RouteOrder` is rejected unless
+its `Origin` is either the home city or a city touched by
+quarter-start `currentRoutes` (the same "evaluated against the quarter's
+starting routes, not other orders in the same batch" rule `Cost()`
+already applies). The home city is *always* a valid origin, every
+quarter, permanently — a real, persistent right to re-enter from home,
+not just an exemption for the guaranteed first route. Scoped to
+`RouteOrder` only — a `NegotiationOrder` can still target any gateway
+in the world, a real forward-looking investment, not a route.
+
+Two new shared `AiToolkit` helpers: `ValidOriginCityIds` (cities touched
+by `CurrentRoutes` union the home city) and `TryOrientFromValidOrigin`
+(re-orients a candidate pair so the valid side becomes `Origin` —
+`GravityDemandModel.AllPairs`'s own canonical Origin/Destination
+assignment is alphabetical by city id, entirely unrelated to which side
+the airline can legally originate from, so every new-pair search needs
+to re-orient the winner, not just filter candidates out). Wired into
+every new-pair search that ignored contiguity before: both of
+`RapidExpansionStrategy`'s (idle-fleet and lease/order-fallback),
+both of `DomesticProfitOptimizerStrategy`'s (profitability-ranked,
+composing with its own existing region filter), and M43's own
+`AiToolkit.FindBestUnservedPairTouchingWonSlot` (a won slot doesn't
+grant "start a route from nowhere" rights either). `ApplyManagementToolkit`'s
+stranded-idle-unit check moved onto a new, contiguity-aware equivalent
+living in `AiToolkit` rather than touching `BaselineAi.FindBestUnservedPair` —
+`BaselineAi.DecideOrders` itself stays completely untouched, confirmed
+no longer called by either real loop (only its own legacy unit tests;
+`AeroNext.Sim`'s only remaining call site is an earlier, explicitly
+"illustrative only" demo section, not the real M13 campaign loop, which
+has used `BaselineAi.SelectStrategy` + `strategy.DecideOrders` since
+M39). Growing an already-served route is never affected — a served
+route's own origin is definitionally already in the valid-origin set.
+Both real loops wired from data they already had: `FullGameRunner.cs`
+and `AeroNext.Sim`'s M13 campaign loop both source `homeCity` from
+`AirlineSeat.StartingCity`.
+
+**A real, deliberate design refinement during implementation, not
+scope creep:** the rejection doesn't get its own `ExceptionKind` —
+`BriefingGenerator.Generate` can't re-derive "not connected to network"
+from a rejected order alone (it needs the airline's own routes and home
+city, context it doesn't receive), and every other rejection needing
+external context (cash, slot scarcity, fleet ownership) already
+collapses into the existing generic `OrderRejectedOverBudget` bucket
+today — this one follows the same established precedent rather than
+widening a 15-call-site public API for a display-only distinction.
+
+603 tests total (10 new — 5 `QuarterEngineTests` proving the rejection,
+acceptance from home, acceptance from an already-served city, and that
+`NegotiationOrder` is untouched; the rest updated across
+`RapidExpansionStrategyTests.cs`/`DomesticProfitOptimizerStrategyTests.cs`
+for the new required `HomeCity` field — a `MakeContext` default of
+`cities[0]` in both files handled the bulk of existing call sites
+automatically). One existing test's own fixture needed a real rewrite,
+not just a mechanical update: `DecideOrders_HubBonus_
+SkipsDemandAlreadyDirectlyServedElsewhere_NotDoubleCounted`'s own
+"p2-p3 decoy" pair was a fully-disconnected pair by design — exactly
+what M44 now correctly excludes. Replaced with a `home-decoy` pair at
+the identical relative offset and weight, preserving the test's own
+exact pre-verified dollar figures while keeping it reachable from home.
+Coverage gate re-run: one genuinely new gap (`AiToolkit.
+TryOrientFromValidOrigin`'s own "neither side qualifies" defensive
+branch — both real call sites already pre-filter with the identical
+check before ever reaching it, so it's a real safety net for a public
+helper, not dead code, confirmed via the coverage report and documented
+inline rather than chased with new test infrastructure this project has
+never used before). `RapidExpansionStrategy`'s own branch rate actually
+improved slightly (98.2%→98.4%) against the pre-existing accepted
+baseline.
+
+**Measured — both loops moved dramatically, exactly as the user
+predicted, reported in full.** `AeroNext.Sim`'s M13 loop: the win
+quarter moved from **10 to 40**, and the winner itself changed
+(Continental Wings → **Atlas Air**) — routes can no longer teleport to
+the single best pair in the world regardless of connectivity, so every
+airline's own early growth is now visibly slower and more organic.
+300-game QA sweep, before/after (M43's own just-shipped numbers as the
+baseline):
+
+| Region | Bankrupt before → after | Win share before → after |
+|---|---|---|
+| NorthAmerica | 50.7% → **8.4%** | 18.6% → **87.6%** |
+| Europe | 81.2% → 86.3% | 5.6% → 1.0% |
+| EastAsia | 18.3% → 14.1% | 14.5% → 5.5% |
+| SouthWestAsia | 32.4% → 21.0% | 50.5% → 24.8% |
+| AustralAsia | 40.2% → 56.7% | 36.1% → 6.2% |
+| SouthAmerica | 17.3% → **88.2%** | 45.6% → 4.2% |
+| Overall win rate | 98.0% (avg qtr 17.5) | 83.3% (avg qtr 23.0) |
+
+**A genuine reversal of M43's own working theory, not just new
+numbers.** M43's own investigation found region *size/density* was
+correlated with *worse* outcomes (NorthAmerica and Europe, the two
+largest, richest regions, were the two worst performers) — plausibly
+because a bigger region meant more contested surface area and more
+temptation to overextend into disconnected routes that then got
+contested by rivals. Once routes must grow organically from home,
+that reverses: **NorthAmerica's own dense local city network — 22
+cities, the most of any region — becomes a dominant advantage instead
+of a liability**, since it has by far the richest set of nearby,
+reachable, connectable markets to expand into step by step. SouthAmerica
+shows the mirror image: it was one of the *best*-performing regions
+under M43 alone (its own airlines' teleporting reach apparently
+mattered more than its comparatively sparse home network), and is now
+one of the worst (88.2% bankrupt) once that reach is gone and its own
+thinner local network can't sustain organic growth. This is a real,
+legible, causally-understood finding — not asserted, traced to the
+mechanism directly above — but **NorthAmerica's 87.6% win share is a
+strikingly lopsided result**, flagged here plainly rather than smoothed
+over; whether it's acceptable as a real consequence of "network
+contiguity plus today's real, uneven city density per region," or
+whether it's the next thing worth investigating in this same
+regional-balance effort, is a call for the user, not decided here.
+
+---
+
 ## Kept in mind, not scheduled
 
 - **`AllianceCourtOrder`** — deliberately excluded from every milestone

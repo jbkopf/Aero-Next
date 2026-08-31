@@ -15,10 +15,14 @@ public class DomesticProfitOptimizerStrategyTests
     private static readonly GravityDemandModel DemandModel = new();
     private static readonly DomesticProfitOptimizerStrategy Strategy = new();
 
+    // M44: homeCity defaults to cities[0] - every existing fixture in this
+    // file already lists its own "home" city first, matching the pattern
+    // MakeContext's own callers were already written against; explicit
+    // override only where a test specifically needs a different one.
     private static StrategyContext MakeContext(
         IReadOnlyList<Route> routes, IReadOnlyList<City> cities, IReadOnlyList<AircraftType> eraTypes, Region homeRegion,
-        AirlineFleet? fleet = null, int actionCap = 3, Money? cash = null) =>
-        new(routes, actionCap, cities, DemandModel, eraTypes, fleet ?? AirlineFleet.Empty, homeRegion, AvailableCash: cash);
+        AirlineFleet? fleet = null, int actionCap = 3, Money? cash = null, City? homeCity = null) =>
+        new(routes, actionCap, cities, DemandModel, eraTypes, fleet ?? AirlineFleet.Empty, homeRegion, HomeCity: homeCity ?? cities[0], AvailableCash: cash);
 
     [Fact]
     public void DecideOrders_BelowCap_OpensMostProfitableIntraRegionPair_NotHighestDemandPair()
@@ -93,18 +97,23 @@ public class DomesticProfitOptimizerStrategyTests
         // route, so that demand is already nonstop-served and must be
         // skipped, not double-counted. Correct hub bonus = home-far demand
         // only, giving hub-far a real value of $1,826,396.60 - below the
-        // p2-p3 decoy's $1,974,336.00, so p2-p3 wins. If elsewhere-far's
-        // demand were wrongly double-counted too, hub-far's value would
-        // reach $2,110,988.04, wrongly beating the decoy instead. A tight
-        // 500km aircraft range excludes every other candidate pair
-        // (all >500km apart) so only these two compete.
+        // home-decoy pair's $1,974,336.00, so home-decoy wins. If
+        // elsewhere-far's demand were wrongly double-counted too,
+        // hub-far's value would reach $2,110,988.04, wrongly beating the
+        // decoy instead. decoy sits at home's own coordinates offset by
+        // exactly what the original p2-p3 decoy pair (pre-M44) was offset
+        // from each other, at the same weight - preserves the exact
+        // dollar figures above while touching home directly, since M44's
+        // network-contiguity rule now correctly excludes a pair touching
+        // neither served city at all (what the original decoy pair was).
+        // A tight 500km aircraft range excludes every other candidate
+        // pair (all >500km apart) so only these two compete.
         var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
         var hub = MakeCity("hub", Region.NorthAmerica, 5, 0, 100);
         var far = MakeCity("far", Region.NorthAmerica, 9, 0, 7);
         var elsewhere = MakeCity("elsewhere", Region.NorthAmerica, 5, -6, 60);
-        var p2 = MakeCity("p2", Region.NorthAmerica, -6, -6, 100);
-        var p3 = MakeCity("p3", Region.NorthAmerica, -6.9, -7.5, 100);
-        var cities = new[] { home, hub, far, elsewhere, p2, p3 };
+        var decoy = MakeCity("decoy", Region.NorthAmerica, -0.9, -1.5, 100);
+        var cities = new[] { home, hub, far, elsewhere, decoy };
         var wideAircraft = new AircraftType("wide", "Wide", Seats: 100, RangeKm: 2000); // flies the existing network's own legs
         var candidateAircraft = new AircraftType("t", "Test", Seats: 100, RangeKm: 500); // short enough to exclude every other candidate pair
         var existing = new[]
@@ -120,7 +129,7 @@ public class DomesticProfitOptimizerStrategyTests
         var orders = Strategy.DecideOrders(context);
 
         var routeOrder = Assert.Single(orders.OfType<RouteOrder>());
-        Assert.Equal(new HashSet<string> { "p2", "p3" }, new HashSet<string> { routeOrder.Origin.Id, routeOrder.Destination.Id });
+        Assert.Equal(new HashSet<string> { "home", "decoy" }, new HashSet<string> { routeOrder.Origin.Id, routeOrder.Destination.Id });
     }
 
     [Fact]
@@ -206,7 +215,7 @@ public class DomesticProfitOptimizerStrategyTests
         var cities = new[] { home, best, next };
 
         var context = new StrategyContext(
-            Array.Empty<Route>(), 3, cities, DemandModel, Array.Empty<AircraftType>(), AirlineFleet.Empty, Region.NorthAmerica,
+            Array.Empty<Route>(), 3, cities, DemandModel, Array.Empty<AircraftType>(), AirlineFleet.Empty, Region.NorthAmerica, HomeCity: home,
             AvailableCash: Money.FromDollars(10_000_000),
             PendingNegotiationCityIds: new HashSet<string> { "best" });
 
@@ -225,7 +234,7 @@ public class DomesticProfitOptimizerStrategyTests
         var cities = new[] { home, best, next };
 
         var context = new StrategyContext(
-            Array.Empty<Route>(), 3, cities, DemandModel, Array.Empty<AircraftType>(), AirlineFleet.Empty, Region.NorthAmerica,
+            Array.Empty<Route>(), 3, cities, DemandModel, Array.Empty<AircraftType>(), AirlineFleet.Empty, Region.NorthAmerica, HomeCity: home,
             AvailableSlotsByCity: new Dictionary<string, int> { ["best"] = 1 },
             AvailableCash: Money.FromDollars(10_000_000));
 
@@ -384,7 +393,7 @@ public class DomesticProfitOptimizerStrategyTests
         var home = MakeCity("home", Region.NorthAmerica, 0, 0, 1);
 
         var context = new StrategyContext(
-            Array.Empty<Route>(), 0, new[] { home }, DemandModel, Array.Empty<AircraftType>(), AirlineFleet.Empty, Region.NorthAmerica,
+            Array.Empty<Route>(), 0, new[] { home }, DemandModel, Array.Empty<AircraftType>(), AirlineFleet.Empty, Region.NorthAmerica, HomeCity: home,
             AvailableCash: Money.FromDollars(15_000_000), CurrentDebtBalance: Money.FromDollars(1_000_000));
 
         var orders = Strategy.DecideOrders(context);
@@ -423,7 +432,7 @@ public class DomesticProfitOptimizerStrategyTests
         var cities = new[] { home, domesticGateway };
 
         var context = new StrategyContext(
-            Array.Empty<Route>(), 3, cities, DemandModel, Array.Empty<AircraftType>(), AirlineFleet.Empty, Region.NorthAmerica,
+            Array.Empty<Route>(), 3, cities, DemandModel, Array.Empty<AircraftType>(), AirlineFleet.Empty, Region.NorthAmerica, HomeCity: home,
             AvailableCash: Money.FromDollars(500_000)); // CurrentDebtBalance stays null
 
         var orders = Strategy.DecideOrders(context);
@@ -441,7 +450,7 @@ public class DomesticProfitOptimizerStrategyTests
         var home = MakeCity("home", Region.NorthAmerica, 0, 0, 1);
 
         var context = new StrategyContext(
-            Array.Empty<Route>(), 0, new[] { home }, DemandModel, Array.Empty<AircraftType>(), AirlineFleet.Empty, Region.NorthAmerica,
+            Array.Empty<Route>(), 0, new[] { home }, DemandModel, Array.Empty<AircraftType>(), AirlineFleet.Empty, Region.NorthAmerica, HomeCity: home,
             AvailableCash: Money.FromDollars(12_000_000), CurrentDebtBalance: Money.FromDollars(5_000_000));
 
         var orders = Strategy.DecideOrders(context);
@@ -484,7 +493,7 @@ public class DomesticProfitOptimizerStrategyTests
         var domesticGateway = MakeCity("dgw", Region.NorthAmerica, 30, 30, 90, isGateway: true);
 
         var context = new StrategyContext(
-            Array.Empty<Route>(), 3, new[] { home, domesticGateway }, DemandModel, Array.Empty<AircraftType>(), AirlineFleet.Empty, Region.NorthAmerica,
+            Array.Empty<Route>(), 3, new[] { home, domesticGateway }, DemandModel, Array.Empty<AircraftType>(), AirlineFleet.Empty, Region.NorthAmerica, HomeCity: home,
             AvailableCash: Money.FromDollars(500_000), CurrentDebtBalance: Money.Zero);
 
         var orders = Strategy.DecideOrders(context);

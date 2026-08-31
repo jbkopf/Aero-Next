@@ -14,9 +14,11 @@ public class SelectStrategyTests
 
     private static readonly GravityDemandModel DemandModel = new();
 
+    private static readonly City HomeCity = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
+
     private static StrategyContext MakeContext(Money? cash) =>
-        new(Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { MakeCity("home", Region.NorthAmerica, 0, 0, 100) },
-            DemandModel, Array.Empty<AircraftType>(), AirlineFleet.Empty, Region.NorthAmerica, AvailableCash: cash);
+        new(Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { HomeCity },
+            DemandModel, Array.Empty<AircraftType>(), AirlineFleet.Empty, Region.NorthAmerica, HomeCity, AvailableCash: cash);
 
     [Fact]
     public void SelectStrategy_InitialAssignment_RichAirline_PicksRapidExpansion()

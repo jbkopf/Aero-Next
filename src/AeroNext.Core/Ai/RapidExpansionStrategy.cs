@@ -50,6 +50,7 @@ public sealed class RapidExpansionStrategy : IAiStrategy
         var reservedUnitIds = new HashSet<int>();
         var slotsReservedByCity = new Dictionary<string, int>();
         var spent = 0;
+        var validOriginCityIds = AiToolkit.ValidOriginCityIds(context);
 
         // 1. New pair first, cross-region preferred - the inversion from
         // BaselineAi's own order. A gateway already won but not yet built
@@ -57,19 +58,23 @@ public sealed class RapidExpansionStrategy : IAiStrategy
         // AiToolkit.FindBestUnservedPairTouchingWonSlot's own doc comment
         // for the diagnosed problem this closes (a contested win, spent
         // real cash to secure, otherwise just sits there while more bids
-        // keep going out).
+        // keep going out). M44: every candidate below is already filtered
+        // to touch a valid origin; TryOrientFromValidOrigin fixes up
+        // Origin/Destination right before each RouteOrder is built, since
+        // AllPairs's own canonical ordering has no idea which side that is.
         if (spent + 1 <= context.ActionCap)
         {
             var idleBest = AiToolkit.FindBestUnservedPairTouchingWonSlot(context, reservedUnitIds)
-                ?? FindBestUnservedPairCrossRegionFirstUsingIdleFleet(context, reservedUnitIds);
+                ?? FindBestUnservedPairCrossRegionFirstUsingIdleFleet(context, reservedUnitIds, validOriginCityIds);
 
-            if (idleBest is not null && BaselineAi.HasSlotAtEveryGateway(idleBest.Value.Pair.Origin, idleBest.Value.Pair.Destination, context.AvailableSlotsByCity, slotsReservedByCity))
+            if (idleBest is not null && AiToolkit.TryOrientFromValidOrigin(idleBest.Value.Pair, validOriginCityIds, out var origin, out var destination)
+                && BaselineAi.HasSlotAtEveryGateway(origin, destination, context.AvailableSlotsByCity, slotsReservedByCity))
             {
-                var (pair, aircraft) = idleBest.Value;
+                var aircraft = idleBest.Value.Aircraft;
                 var idleUnit = context.OwnFleet.Idle.Where(u => u.Type.Id == aircraft.Id && !reservedUnitIds.Contains(u.Id)).OrderBy(u => u.Id).First();
-                orders.Add(new RouteOrder(pair.Origin, pair.Destination, aircraft));
+                orders.Add(new RouteOrder(origin, destination, aircraft));
                 reservedUnitIds.Add(idleUnit.Id);
-                BaselineAi.ReserveSlots(pair.Origin, pair.Destination, slotsReservedByCity);
+                BaselineAi.ReserveSlots(origin, destination, slotsReservedByCity);
                 spent += 1;
             }
             else if (idleBest is null && spent + 1 <= context.ActionCap)
@@ -79,20 +84,23 @@ public sealed class RapidExpansionStrategy : IAiStrategy
                     .ThenBy(a => a.Id, StringComparer.Ordinal)
                     .FirstOrDefault();
 
-                var bestUnserved = bestAircraft is null ? null : FindBestUnservedPairCrossRegionFirst(context, bestAircraft);
+                var bestUnserved = bestAircraft is null ? null : FindBestUnservedPairCrossRegionFirst(context, bestAircraft, validOriginCityIds);
+                var oriented = bestUnserved is not null && AiToolkit.TryOrientFromValidOrigin(bestUnserved, validOriginCityIds, out var newOrigin, out var newDestination)
+                    ? (Origin: newOrigin, Destination: newDestination)
+                    : ((City Origin, City Destination)?)null;
 
-                if (bestAircraft is not null && bestUnserved is not null
+                if (bestAircraft is not null && oriented is not null
                     && context.AvailableCash is not null && FinancialState.CanAfford(context.AvailableCash.Value, ComfortableOrderCost(bestAircraft)))
                 {
                     orders.Add(new AircraftOrder(bestAircraft, Quantity: 1));
                     spent += 1;
                 }
-                else if (bestAircraft is not null && bestUnserved is not null && spent + 2 <= context.ActionCap
-                    && BaselineAi.HasSlotAtEveryGateway(bestUnserved.Origin, bestUnserved.Destination, context.AvailableSlotsByCity, slotsReservedByCity))
+                else if (bestAircraft is not null && oriented is not null && spent + 2 <= context.ActionCap
+                    && BaselineAi.HasSlotAtEveryGateway(oriented.Value.Origin, oriented.Value.Destination, context.AvailableSlotsByCity, slotsReservedByCity))
                 {
                     orders.Add(new LeaseAircraftOrder(bestAircraft, Quantity: 1));
-                    orders.Add(new RouteOrder(bestUnserved.Origin, bestUnserved.Destination, bestAircraft));
-                    BaselineAi.ReserveSlots(bestUnserved.Origin, bestUnserved.Destination, slotsReservedByCity);
+                    orders.Add(new RouteOrder(oriented.Value.Origin, oriented.Value.Destination, bestAircraft));
+                    BaselineAi.ReserveSlots(oriented.Value.Origin, oriented.Value.Destination, slotsReservedByCity);
                     spent += 2;
                 }
             }
@@ -144,13 +152,13 @@ public sealed class RapidExpansionStrategy : IAiStrategy
     private static Money ComfortableOrderCost(AircraftType type) => type.Cost * CashComfortMultiplier;
 
     /// <summary>Mirrors BaselineAi.FindBestUnservedPairUsingIdleFleet's shape, but cross-region candidates outrank intra-region ones before demand is even compared.</summary>
-    private static (PairDemand Pair, AircraftType Aircraft)? FindBestUnservedPairCrossRegionFirstUsingIdleFleet(StrategyContext context, IReadOnlySet<int> reservedUnitIds)
+    private static (PairDemand Pair, AircraftType Aircraft)? FindBestUnservedPairCrossRegionFirstUsingIdleFleet(StrategyContext context, IReadOnlySet<int> reservedUnitIds, IReadOnlySet<string> validOriginCityIds)
     {
         var candidates = context.OwnFleet.Idle
             .Where(u => !reservedUnitIds.Contains(u.Id))
             .Select(u => u.Type)
             .Distinct()
-            .Select(type => (Pair: FindBestUnservedPairCrossRegionFirst(context, type), Aircraft: type))
+            .Select(type => (Pair: FindBestUnservedPairCrossRegionFirst(context, type, validOriginCityIds), Aircraft: type))
             .Where(c => c.Pair is not null)
             .ToList();
 
@@ -170,7 +178,8 @@ public sealed class RapidExpansionStrategy : IAiStrategy
         return (best.Pair!, best.Aircraft);
     }
 
-    private static PairDemand? FindBestUnservedPairCrossRegionFirst(StrategyContext context, AircraftType aircraft)
+    /// <summary>M44: validOriginCityIds filters candidates to those touching a city this airline can legally originate a new route from - see AiToolkit.ValidOriginCityIds/TryOrientFromValidOrigin.</summary>
+    private static PairDemand? FindBestUnservedPairCrossRegionFirst(StrategyContext context, AircraftType aircraft, IReadOnlySet<string> validOriginCityIds)
     {
         var served = context.CurrentRoutes
             .SelectMany(r => new[] { (r.Origin.Id, r.Destination.Id), (r.Destination.Id, r.Origin.Id) })
@@ -179,6 +188,7 @@ public sealed class RapidExpansionStrategy : IAiStrategy
         return context.DemandModel.AllPairs(context.AllCities)
             .Where(p => !served.Contains((p.Origin.Id, p.Destination.Id)))
             .Where(p => p.DistanceKm <= aircraft.RangeKm)
+            .Where(p => validOriginCityIds.Contains(p.Origin.Id) || validOriginCityIds.Contains(p.Destination.Id))
             .OrderByDescending(p => IsCrossRegion(p, context))
             .ThenByDescending(p => p.PassengersPerQuarter)
             .ThenBy(p => p.Origin.Id, StringComparer.Ordinal)

@@ -101,6 +101,30 @@ public static class QuarterEngine
     /// quarter, since RefinanceOrder does no QuarterEngine-side processing
     /// at all (resolved entirely in FinancialResolver, as always).
     /// </param>
+    /// <param name="homeCity">
+    /// Null (the default) preserves fully permissive behavior — a
+    /// RouteOrder is never rejected for where it originates, exactly as
+    /// before this parameter existed. Passing a real city (the airline's
+    /// own AirlineSeat.StartingCity) turns on network-contiguity
+    /// enforcement (M44): a RouteOrder is rejected unless its Origin is
+    /// either this home city or a city touched by currentRoutes —
+    /// quarter-start state only, the same "evaluated against the
+    /// quarter's starting routes, not other orders in the same batch"
+    /// rule Cost() already applies, so a new route can never chain off
+    /// another new route placed in the same batch. The home city is
+    /// always a valid origin, every quarter, permanently — not just for
+    /// the guaranteed first route — so an airline that somehow lost every
+    /// route touching its own home city could still always re-enter
+    /// there. Applies only to RouteOrder; a NegotiationOrder can still
+    /// target any gateway in the world (a real, forward-looking
+    /// investment, not a route) exactly as today. Reported by
+    /// BriefingGenerator under the same generic
+    /// ExceptionKind.OrderRejectedOverBudget bucket cash/slot/fleet
+    /// rejections already share — distinguishing it needs the airline's
+    /// own routes/home city, context BriefingGenerator.Generate doesn't
+    /// receive today, the same reason those other rejections aren't
+    /// broken out either.
+    /// </param>
     public static QuarterResult RunQuarter(
         int quarterNumber,
         IReadOnlyList<Route> currentRoutes,
@@ -111,8 +135,16 @@ public static class QuarterEngine
         AirlineFleet? fleet = null,
         Money? availableCash = null,
         IReadOnlyDictionary<string, int>? availableSlotsByCity = null,
-        Money? currentDebtBalance = null)
+        Money? currentDebtBalance = null,
+        City? homeCity = null)
     {
+        var validOriginCityIds = homeCity is null
+            ? null
+            : currentRoutes
+                .SelectMany(r => new[] { r.Origin.Id, r.Destination.Id })
+                .Append(homeCity.Id)
+                .ToHashSet(StringComparer.Ordinal);
+
         var applied = new List<QuarterOrder>();
         var rejected = new List<QuarterOrder>();
         var retiredUnits = new List<FleetUnit>();
@@ -144,6 +176,12 @@ public static class QuarterEngine
             }
 
             if (!IsAircraftAvailable(order, year))
+            {
+                rejected.Add(order);
+                continue;
+            }
+
+            if (order is RouteOrder contiguityOrder && validOriginCityIds is not null && !validOriginCityIds.Contains(contiguityOrder.Origin.Id))
             {
                 rejected.Add(order);
                 continue;

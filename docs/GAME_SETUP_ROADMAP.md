@@ -808,58 +808,37 @@ bar at the top.
   identical starting conditions, but will still run the identical
   `BaselineAi` heuristic — a natural, well-scoped next roadmap.
 - **Route entry should require an available slot, and must grow outward
-  from a city the airline already serves — noted for the
-  AI-differentiation work above, not implemented now, applies to human and
-  AI players identically (confirmed, not just an open question anymore).**
-  Two rules, both closing gaps in today's `QuarterEngine`:
+  from a city the airline already serves.** Two originally-bundled rules;
+  network contiguity is now done, slot requirement is still open.
 
-  **1. Slot requirement.** M18 already found the gap: `QuarterEngine`
-  never checks landing-rights slot ownership against a `RouteOrder` at
-  all today — only `NegotiationOrder` touches `LandingRightsBoard`, so
-  winning a gateway negotiation currently has no mechanical effect on
-  what routes can actually be flown there. Closing it means: (a)
-  `QuarterEngine` gains a new rejection reason (mirroring how range/era/
-  budget are each rejected and reported separately by `BriefingGenerator`
-  today) for a `RouteOrder` touching a gateway city the airline holds no
-  slot at; (b) `BaselineAi`'s route search
-  (`FindBestUnservedPair`/`FindBestUnservedGateway`) has to become
-  slot-aware — it doesn't receive `LandingRightsBoard` state at all right
-  now, so this means threading that board through `DecideOrders`, not
-  just changing what it does with cities it can already see.
+  **1. Slot requirement — still open.** M18 already found the gap:
+  `QuarterEngine` never checks landing-rights slot ownership against a
+  `RouteOrder` itself — only `NegotiationOrder` touches
+  `LandingRightsBoard`. M33's `HasSlotAtEveryGateway` gives every real AI
+  strategy its own self-check before proposing a route touching a
+  gateway with no held slot (the "never attempt what will predictably
+  fail" pattern), but that's a courtesy each strategy opts into, not an
+  enforced `QuarterEngine`-level rejection every caller (including a
+  human, or a future/buggy AI) is bound by. Closing it for real still
+  means `QuarterEngine` gaining its own rejection reason for this case,
+  the same way M44 (`docs/BASELINE_AI_ROADMAP.md`) closed the
+  network-contiguity half below.
 
-  **2. Network contiguity — rules settled, not just flagged as open
-  questions anymore:**
-
-  - The constrained field is specifically `RouteOrder.Origin`, not "either
-    endpoint" — deliberate, not an arbitrary pick: origin is where growth
-    has to reach *outward from*, `Destination` is deliberately unconstrained
-    (has to be, or an airline could never open anywhere new at all).
-  - The airline's **home city is always a valid origin, every quarter,
-    permanently** — not just exempted for the first-ever route. This is
-    what actually resolves the gap flagged earlier: since home has to stay
-    checkable forever, not just at setup, the airline's home-city identity
-    needs to become a real, persistent field (on `Airline` or wherever it
-    ends up living), not something `StartingConditionsResolver` consumes
-    once and forgets. A concrete consequence worth naming: this makes home
-    city permanently re-enterable even if a later quarter's route churn
-    ever dropped the airline's own home-city route entirely — by design,
-    not as an edge-case bug.
-  - The valid-origin set for a quarter is **the cities touched by routes
-    active at the start of that quarter** (plus home city, always) — a new
-    route order can never chain off another new route order placed in the
-    same quarter. Confirms the recommended default: matches
-    `QuarterEngine.Cost`'s existing "evaluated against the quarter's
-    starting routes, not other orders in the same batch" precedent exactly,
-    keeping order resolution independent of submission order within a
-    quarter, which the simultaneous-resolution architecture depends on
-    throughout.
-
-  Still a genuinely bigger `BaselineAi` change than it looks, unresolved by
-  the above: `FindBestUnservedPair` today searches every city pair in the
-  world for the single globally-best move, completely independent of the
-  airline's own network — it needs to search only pairs whose `Origin` is
-  in the valid-origin set defined above, which also means `DecideOrders`
-  needs to know the airline's home city, not just its current routes.
+  **2. Network contiguity — done, M44 (`docs/BASELINE_AI_ROADMAP.md`).**
+  Built essentially as designed here: `RouteOrder.Origin` (not either
+  endpoint) is the constrained field; the home city is always a valid
+  origin, every quarter, permanently (a real field on `StrategyContext`
+  now, not something consumed once and forgotten); the valid-origin set
+  is cities touched by routes active at the start of the quarter, plus
+  home — matching `QuarterEngine.Cost`'s own "evaluated against the
+  quarter's starting routes" precedent exactly. The bigger-than-it-looks
+  `BaselineAi`-side change this note anticipated was real: every strategy's
+  own new-pair search needed both a contiguity filter and a genuine
+  re-orientation step (`AllPairs`'s own canonical Origin/Destination
+  assignment has nothing to do with which side the airline can legally
+  originate from). Measured impact was dramatic — see M44's own writeup
+  for the real before/after numbers, including a full reversal of M43's
+  own "region size is a liability" finding.
 - **Gateway home-city exception** — M15 deliberately keeps every region's
   gateway inside the ordinary M9 contested mechanic, including for the
   local airline. Revisit only with real evidence this makes early gateway

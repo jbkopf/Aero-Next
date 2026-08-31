@@ -25,6 +25,17 @@ namespace AeroNext.Core.Ai;
 /// loop still never builds a real LandingRightsBoard at all (a separate,
 /// already-documented gap), so it has nothing real to populate this
 /// from.
+///
+/// M44: HomeCity, deliberately non-nullable like HomeRegion — every real
+/// caller already has one (AirlineSeat.StartingCity). Together with
+/// CurrentRoutes this defines the network-contiguity valid-origin set
+/// (see AiToolkit.ValidOriginCityIds): a new route may only originate
+/// from the home city or a city the airline already serves, the same
+/// rule QuarterEngine.RunQuarter's own homeCity parameter enforces
+/// authoritatively. A strategy has to know this to avoid proposing an
+/// order that would predictably be rejected, the same "never attempt
+/// what will fail" principle every other StrategyContext field already
+/// serves.
 /// </summary>
 public sealed record StrategyContext(
     IReadOnlyList<Route> CurrentRoutes,
@@ -34,6 +45,7 @@ public sealed record StrategyContext(
     IReadOnlyList<AircraftType> EraAvailableTypes,
     AirlineFleet OwnFleet,
     Region HomeRegion,
+    City HomeCity,
     IReadOnlyDictionary<string, int>? AvailableSlotsByCity = null,
     Money? AvailableCash = null,
     Money? CurrentDebtBalance = null,

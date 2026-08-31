@@ -168,6 +168,7 @@ public static class FullGameRunner
                         .ToHashSet(StringComparer.Ordinal);
                     var strategyContext = new StrategyContext(
                         routes[name], caps[name], cities, yearDemandModel, availableFleet, fleets[name], homeRegionByName[name],
+                        HomeCity: seatByName[name].StartingCity,
                         AvailableSlotsByCity: availableSlotsByCity, AvailableCash: finances[name].CashBalance, CurrentDebtBalance: finances[name].DebtBalance,
                         PendingNegotiationCityIds: pendingNegotiationCityIds);
                     var strategy = BaselineAi.SelectStrategy(currentStrategyByName[name], q, strategyContext);
@@ -179,12 +180,18 @@ public static class FullGameRunner
                 // gating — nothing in the starting-conditions design pre-
                 // grants a negotiated slot at a gateway home/destination
                 // city, so gating it here would break the "always
-                // accepted" guarantee the very next check relies on.
+                // accepted" guarantee the very next check relies on. M44:
+                // exempt from network-contiguity too, for the same reason
+                // — it's always Origin=StartingCity anyway, so homeCity
+                // would never reject it, but passing null on quarter 1
+                // keeps the "guaranteed route is unconditionally exempt"
+                // guarantee explicit rather than incidental.
                 var result = QuarterEngine.RunQuarter(
                     q, routes[name], caps[name], orders, cities, yearDemandModel, fleets[name],
                     availableCash: finances[name].CashBalance,
                     availableSlotsByCity: q == 1 ? null : availableSlotsByCity,
-                    currentDebtBalance: finances[name].DebtBalance);
+                    currentDebtBalance: finances[name].DebtBalance,
+                    homeCity: q == 1 ? null : seatByName[name].StartingCity);
 
                 if (q == 1 && result.RejectedOrders.Count > 0)
                 {

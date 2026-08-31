@@ -58,6 +58,71 @@ internal static class AiToolkit
     }
 
     /// <summary>
+    /// M44: the network-contiguity valid-origin set - a new route may
+    /// only originate from the home city or a city the airline already
+    /// serves (touched by CurrentRoutes), the same rule
+    /// QuarterEngine.RunQuarter's own homeCity parameter enforces
+    /// authoritatively. Every new-pair search below uses this to avoid
+    /// proposing an order that would predictably be rejected, mirroring
+    /// range/era/cash/slot's own existing "never attempt what will fail"
+    /// checks. HomeCity is always included, unconditionally - a real,
+    /// persistent right to re-enter from home, not just an exemption for
+    /// the very first route.
+    /// </summary>
+    public static IReadOnlySet<string> ValidOriginCityIds(StrategyContext context)
+    {
+        var ids = context.CurrentRoutes
+            .SelectMany(r => new[] { r.Origin.Id, r.Destination.Id })
+            .ToHashSet(StringComparer.Ordinal);
+        ids.Add(context.HomeCity.Id);
+        return ids;
+    }
+
+    /// <summary>
+    /// M44: true, and correctly oriented, only if at least one side of
+    /// candidate is a valid origin. GravityDemandModel.AllPairs's own
+    /// canonical Origin/Destination assignment is alphabetical by city
+    /// id, entirely unrelated to which side the airline can legally
+    /// originate a new route from - every new-pair search needs to
+    /// re-orient the winning candidate before building a RouteOrder from
+    /// it, not just filter candidates out. When both sides already
+    /// qualify (e.g. a direct pair between the home city and an
+    /// already-served city with no route between them yet), keeps
+    /// AllPairs's own canonical Origin as Origin - an arbitrary but
+    /// deterministic tie-break.
+    ///
+    /// The false path (neither side qualifies) is a real safety net, not
+    /// dead code - every real search site today already filters its own
+    /// candidates by this exact same "either side" check before ever
+    /// calling this method, so it's not exercised by any current test
+    /// (confirmed via the coverage report, not assumed), but a public
+    /// helper validating its own invariant rather than trusting every
+    /// future caller to have pre-filtered is the correct, legible
+    /// failure mode - silently returning a wrongly-oriented pair would
+    /// be worse.
+    /// </summary>
+    public static bool TryOrientFromValidOrigin(PairDemand pair, IReadOnlySet<string> validOriginCityIds, out City origin, out City destination)
+    {
+        if (validOriginCityIds.Contains(pair.Origin.Id))
+        {
+            origin = pair.Origin;
+            destination = pair.Destination;
+            return true;
+        }
+
+        if (validOriginCityIds.Contains(pair.Destination.Id))
+        {
+            origin = pair.Destination;
+            destination = pair.Origin;
+            return true;
+        }
+
+        origin = pair.Origin;
+        destination = pair.Destination;
+        return false;
+    }
+
+    /// <summary>
     /// The best unserved pair touching a gateway city this airline already
     /// holds an unused slot at - checked ahead of a general new-pair
     /// search so a contested negotiation win actually gets exploited
@@ -78,6 +143,15 @@ internal static class AiToolkit
     /// that doesn't populate real slot data has nothing to prioritize,
     /// same permissive-default convention as every other nullable
     /// StrategyContext field.
+    ///
+    /// M44: a won slot doesn't grant "start a route from nowhere" rights
+    /// either - the returned pair still needs its *other* endpoint (or
+    /// the won city itself) to be a valid origin. Callers use
+    /// TryOrientFromValidOrigin on the returned Pair before building a
+    /// RouteOrder from it - this method doesn't orient itself, since some
+    /// callers (the M43 priority-boost's own two proof tests) inspect
+    /// Pair.Origin/Destination directly against AllPairs's own canonical
+    /// ordering.
     /// </summary>
     public static (PairDemand Pair, AircraftType Aircraft)? FindBestUnservedPairTouchingWonSlot(StrategyContext context, IReadOnlySet<int> reservedUnitIds)
     {
@@ -100,6 +174,8 @@ internal static class AiToolkit
             return null;
         }
 
+        var validOriginCityIds = ValidOriginCityIds(context);
+
         var served = context.CurrentRoutes
             .SelectMany(r => new[] { (r.Origin.Id, r.Destination.Id), (r.Destination.Id, r.Origin.Id) })
             .ToHashSet();
@@ -113,6 +189,7 @@ internal static class AiToolkit
         var best = candidateTypes
             .SelectMany(type => context.DemandModel.AllPairs(context.AllCities)
                 .Where(p => wonUnusedCityIds.Contains(p.Origin.Id) || wonUnusedCityIds.Contains(p.Destination.Id))
+                .Where(p => validOriginCityIds.Contains(p.Origin.Id) || validOriginCityIds.Contains(p.Destination.Id))
                 .Where(p => !served.Contains((p.Origin.Id, p.Destination.Id)))
                 .Where(p => p.DistanceKm <= type.RangeKm)
                 .Select(p => (Pair: p, Aircraft: type)))
@@ -149,6 +226,33 @@ internal static class AiToolkit
                 orders.Add(new RefinanceOrder(shortfall));
             }
         }
+    }
+
+    /// <summary>
+    /// M44: mirrors BaselineAi.FindBestUnservedPair's own shape (plain
+    /// demand-ranked, no cross-region/domestic preference) but also
+    /// respects network contiguity - used by ApplyManagementToolkit's own
+    /// stranded-unit check rather than BaselineAi.FindBestUnservedPair
+    /// itself, which stays untouched (BaselineAi.DecideOrders is legacy,
+    /// no longer called by either real loop - see its own class doc
+    /// comment). A unit that could only reach a non-contiguous pair now
+    /// correctly counts as stranded: winning a gateway slot doesn't grant
+    /// route rights from a city the airline has no presence near.
+    /// </summary>
+    private static PairDemand? FindBestUnservedPairFromValidOrigin(StrategyContext context, IReadOnlySet<string> validOriginCityIds, AircraftType aircraft)
+    {
+        var served = context.CurrentRoutes
+            .SelectMany(r => new[] { (r.Origin.Id, r.Destination.Id), (r.Destination.Id, r.Origin.Id) })
+            .ToHashSet();
+
+        return context.DemandModel.AllPairs(context.AllCities)
+            .Where(p => !served.Contains((p.Origin.Id, p.Destination.Id)))
+            .Where(p => p.DistanceKm <= aircraft.RangeKm)
+            .Where(p => validOriginCityIds.Contains(p.Origin.Id) || validOriginCityIds.Contains(p.Destination.Id))
+            .OrderByDescending(p => p.PassengersPerQuarter)
+            .ThenBy(p => p.Origin.Id, StringComparer.Ordinal)
+            .ThenBy(p => p.Destination.Id, StringComparer.Ordinal)
+            .FirstOrDefault();
     }
 
     /// <summary>
@@ -193,10 +297,12 @@ internal static class AiToolkit
             }
         }
 
+        var validOriginCityIds = ValidOriginCityIds(context);
+
         foreach (var stranded in context.OwnFleet.Idle
             .Where(u => !reservedUnitIds.Contains(u.Id))
             .Where(u => context.CurrentRoutes.All(r => r.Aircraft.Id != u.Type.Id))
-            .Where(u => (BaselineAi.FindBestUnservedPair(context.CurrentRoutes, context.AllCities, context.DemandModel, u.Type)?.PassengersPerQuarter ?? 0) <= 0)
+            .Where(u => (FindBestUnservedPairFromValidOrigin(context, validOriginCityIds, u.Type)?.PassengersPerQuarter ?? 0) <= 0)
             .OrderBy(u => u.Id))
         {
             orders.Add(new RetireAircraftOrder(stranded.Id));

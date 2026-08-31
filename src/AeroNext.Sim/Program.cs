@@ -743,11 +743,12 @@ for (var q = 1; q <= campaignQuarters; q++)
         // cash-aware here too.
         var campaignStrategyContext = new StrategyContext(
             campaignRoutes[name], campaignCaps[name], cities, yearDemandModel, availableFleet, campaignFleets[name], campaignHomeRegionByName[name],
+            HomeCity: campaignSeats[name].StartingCity,
             AvailableSlotsByCity: null, AvailableCash: campaignFinances[name].CashBalance, CurrentDebtBalance: campaignFinances[name].DebtBalance);
         var campaignStrategy = BaselineAi.SelectStrategy(campaignCurrentStrategyByName[name], q, campaignStrategyContext);
         campaignCurrentStrategyByName[name] = campaignStrategy;
         var orders = campaignStrategy.DecideOrders(campaignStrategyContext);
-        var result = QuarterEngine.RunQuarter(q, campaignRoutes[name], campaignCaps[name], orders, cities, yearDemandModel, campaignFleets[name], availableCash: campaignFinances[name].CashBalance, currentDebtBalance: campaignFinances[name].DebtBalance);
+        var result = QuarterEngine.RunQuarter(q, campaignRoutes[name], campaignCaps[name], orders, cities, yearDemandModel, campaignFleets[name], availableCash: campaignFinances[name].CashBalance, currentDebtBalance: campaignFinances[name].DebtBalance, homeCity: campaignSeats[name].StartingCity);
         campaignRoutes[name] = result.Routes;
         campaignCaps[name] = result.ActionCap;
         campaignFleets[name] = result.UpdatedFleet!;

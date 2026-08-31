@@ -62,19 +62,20 @@ public sealed class DomesticProfitOptimizerStrategy : IAiStrategy
         var reservedUnitIds = new HashSet<int>();
         var slotsReservedByCity = new Dictionary<string, int>();
         var spent = 0;
+        var validOriginCityIds = AiToolkit.ValidOriginCityIds(context);
 
         var domesticRouteCount = context.CurrentRoutes
             .Count(r => r.Origin.Region == context.HomeRegion && r.Destination.Region == context.HomeRegion);
 
         if (domesticRouteCount < MaxDomesticRoutes && spent + 1 <= context.ActionCap)
         {
-            var idleBest = FindMostProfitableDomesticPairUsingIdleFleet(context, reservedUnitIds);
+            var idleBest = FindMostProfitableDomesticPairUsingIdleFleet(context, reservedUnitIds, validOriginCityIds);
 
-            if (idleBest is not null && BaselineAi.HasSlotAtEveryGateway(idleBest.Value.Pair.Origin, idleBest.Value.Pair.Destination, context.AvailableSlotsByCity, slotsReservedByCity))
+            if (idleBest is not null && AiToolkit.TryOrientFromValidOrigin(idleBest.Value.Pair, validOriginCityIds, out var origin, out var destination)
+                && BaselineAi.HasSlotAtEveryGateway(origin, destination, context.AvailableSlotsByCity, slotsReservedByCity))
             {
-                var (pair, aircraft) = idleBest.Value;
-                orders.Add(new RouteOrder(pair.Origin, pair.Destination, aircraft));
-                BaselineAi.ReserveSlots(pair.Origin, pair.Destination, slotsReservedByCity);
+                orders.Add(new RouteOrder(origin, destination, idleBest.Value.Aircraft));
+                BaselineAi.ReserveSlots(origin, destination, slotsReservedByCity);
                 spent += 1;
             }
             else if (idleBest is null)
@@ -88,20 +89,23 @@ public sealed class DomesticProfitOptimizerStrategy : IAiStrategy
                 // profitability ranking itself picks the type, since a
                 // bigger/faster aircraft isn't automatically the most
                 // profitable one on a short intra-region hop.
-                var bestOrdered = FindMostProfitableDomesticPairAcrossTypes(context, context.EraAvailableTypes);
+                var bestOrdered = FindMostProfitableDomesticPairAcrossTypes(context, context.EraAvailableTypes, validOriginCityIds);
+                var oriented = bestOrdered is not null && AiToolkit.TryOrientFromValidOrigin(bestOrdered.Value.Pair, validOriginCityIds, out var newOrigin, out var newDestination)
+                    ? (Origin: newOrigin, Destination: newDestination)
+                    : ((City Origin, City Destination)?)null;
 
-                if (bestOrdered is not null && context.AvailableCash is not null
+                if (bestOrdered is not null && oriented is not null && context.AvailableCash is not null
                     && FinancialState.CanAfford(context.AvailableCash.Value, BaselineAi.ComfortableOrderCost(bestOrdered.Value.Aircraft)))
                 {
                     orders.Add(new AircraftOrder(bestOrdered.Value.Aircraft, Quantity: 1));
                     spent += 1;
                 }
-                else if (bestOrdered is not null && spent + 2 <= context.ActionCap
-                    && BaselineAi.HasSlotAtEveryGateway(bestOrdered.Value.Pair.Origin, bestOrdered.Value.Pair.Destination, context.AvailableSlotsByCity, slotsReservedByCity))
+                else if (bestOrdered is not null && oriented is not null && spent + 2 <= context.ActionCap
+                    && BaselineAi.HasSlotAtEveryGateway(oriented.Value.Origin, oriented.Value.Destination, context.AvailableSlotsByCity, slotsReservedByCity))
                 {
                     orders.Add(new LeaseAircraftOrder(bestOrdered.Value.Aircraft, Quantity: 1));
-                    orders.Add(new RouteOrder(bestOrdered.Value.Pair.Origin, bestOrdered.Value.Pair.Destination, bestOrdered.Value.Aircraft));
-                    BaselineAi.ReserveSlots(bestOrdered.Value.Pair.Origin, bestOrdered.Value.Pair.Destination, slotsReservedByCity);
+                    orders.Add(new RouteOrder(oriented.Value.Origin, oriented.Value.Destination, bestOrdered.Value.Aircraft));
+                    BaselineAi.ReserveSlots(oriented.Value.Origin, oriented.Value.Destination, slotsReservedByCity);
                     spent += 2;
                 }
             }
@@ -138,7 +142,7 @@ public sealed class DomesticProfitOptimizerStrategy : IAiStrategy
     }
 
     /// <summary>Mirrors BaselineAi.FindBestUnservedPairUsingIdleFleet's shape, but region-filtered and profitability-ranked instead of demand-ranked.</summary>
-    private static (PairDemand Pair, AircraftType Aircraft)? FindMostProfitableDomesticPairUsingIdleFleet(StrategyContext context, IReadOnlySet<int> reservedUnitIds)
+    private static (PairDemand Pair, AircraftType Aircraft)? FindMostProfitableDomesticPairUsingIdleFleet(StrategyContext context, IReadOnlySet<int> reservedUnitIds, IReadOnlySet<string> validOriginCityIds)
     {
         var candidateTypes = context.OwnFleet.Idle
             .Where(u => !reservedUnitIds.Contains(u.Id))
@@ -146,10 +150,11 @@ public sealed class DomesticProfitOptimizerStrategy : IAiStrategy
             .Distinct()
             .ToList();
 
-        return FindMostProfitableDomesticPairAcrossTypes(context, candidateTypes);
+        return FindMostProfitableDomesticPairAcrossTypes(context, candidateTypes, validOriginCityIds);
     }
 
-    private static (PairDemand Pair, AircraftType Aircraft)? FindMostProfitableDomesticPairAcrossTypes(StrategyContext context, IReadOnlyList<AircraftType> candidateTypes)
+    /// <summary>M44: validOriginCityIds filters candidates to those touching a city this airline can legally originate a new route from - see AiToolkit.ValidOriginCityIds/TryOrientFromValidOrigin.</summary>
+    private static (PairDemand Pair, AircraftType Aircraft)? FindMostProfitableDomesticPairAcrossTypes(StrategyContext context, IReadOnlyList<AircraftType> candidateTypes, IReadOnlySet<string> validOriginCityIds)
     {
         var served = context.CurrentRoutes
             .SelectMany(r => new[] { (r.Origin.Id, r.Destination.Id), (r.Destination.Id, r.Origin.Id) })
@@ -158,6 +163,7 @@ public sealed class DomesticProfitOptimizerStrategy : IAiStrategy
         var domesticPairs = context.DemandModel.AllPairs(context.AllCities)
             .Where(p => p.Origin.Region == context.HomeRegion && p.Destination.Region == context.HomeRegion)
             .Where(p => !served.Contains((p.Origin.Id, p.Destination.Id)))
+            .Where(p => validOriginCityIds.Contains(p.Origin.Id) || validOriginCityIds.Contains(p.Destination.Id))
             .ToList();
 
         // Built once per DecideOrders call, not once per candidate - hub
