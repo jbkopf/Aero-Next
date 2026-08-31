@@ -26,8 +26,20 @@ Update this line the moment a new milestone is opened anywhere.
 
 ## Active priority
 
-**EastAsia/AustralAsia-vs-everyone-else regional imbalance** — see the
-project-memory note below. Planning underway as of 2026-08-31.
+**Regional outcome imbalance — a three-tier split, corrected from the
+original "EastAsia/AustralAsia-vs-everyone" framing.** A fresh 300-game
+sweep against the complete (post-Historical-Dynamics) dataset shows the
+picture has shifted since M39–M41 first measured it: NorthAmerica and
+Europe are now the catastrophically bad tier (85–90% bankrupt, under 10%
+win rate), SouthWestAsia/AustralAsia/SouthAmerica sit in a healthy middle
+band, and EastAsia alone is the standout top performer. Diagnosis plan
+approved 2026-08-31; see `docs/BASELINE_AI_ROADMAP.md` for the working
+milestone once it lands (or a new dedicated roadmap doc, if the work
+grows large enough to warrant one). `RegionalEconomics.Factor` is
+already ruled out as the sole cause (NorthAmerica and EastAsia share the
+same 1.117 factor yet land at opposite outcomes) — the live hypotheses
+are region size/gateway-density and cross-region-pair competitive
+dilution, neither yet confirmed causal.
 
 ---
 
