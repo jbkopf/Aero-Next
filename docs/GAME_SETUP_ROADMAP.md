@@ -762,6 +762,39 @@ two small pre-existing gaps noted at M16 (`BriefingGenerator.cs`,
 `QuarterOrder.cs`'s empty abstract marker) remain, still out of this
 roadmap's scope.
 
+**An eleventh re-measurement, after the M20-M21 Historical Dynamics work
+(`docs/HISTORICAL_DYNAMICS_ROADMAP.md`'s own M22) — the first re-
+measurement to change the section's own qualitative finding, not just
+its numbers.** Quarter 1 falls at `Timeline.StartYear` (1955), and
+several of that roadmap's own city-scoped `Trend` breakpoints are
+authored to start exactly there (Dubai, Berlin, Moscow, and — the one
+that actually reaches a demo seat — Beijing/Shanghai's China-opening
+Trend at `0.3`, the dataset's steepest early suppression). Re-measured
+directly rather than assumed unaffected: EastAsia's own demo seat
+(still Beijing, still the same guaranteed-route destination) now posts
+net **-$132,800.96** (was -$231,054.25) — less negative than before,
+not more, since `CompetitiveMarket.Resolve` splits realized revenue
+across all four airlines' routes together, so a demand change on one
+seat's own city ripples into every other seat's own realized numbers
+too, not just the city it directly touches. **NorthAmerica's own demo
+seat crosses into positive net income for the first time in this
+section's history**: +$120,908.33 (0-human), +$84,772.97 (1-human,
+Founders Airways), +$43,484.70 (4-human, Atlas Air) — all previous
+re-measurements, back to the milestone's own original "every seat
+posts a small negative" finding, stayed uniformly negative. Confirmed
+reproducible (re-run twice, byte-identical both times — this pipeline
+carries no RNG through quarter 1's guaranteed route). The range is no
+longer a single negative band: Europe still posts -$175,747.23
+(unchanged — its own Beijing/Berlin/Moscow-adjacent competitive
+picture didn't shift enough to change sign), while NorthAmerica now
+spans zero. Not a bug — every multiplier involved is a real, positive,
+historically-authored value; `GravityDemandModel`'s own correctness at
+the pair level is already proven by that roadmap's own extensive
+proof-test suite (594 tests). This is the real, current behavior of
+the same guaranteed-route mechanic this milestone has re-measured ten
+times before, now reflecting a materially richer demand model than any
+prior re-measurement did.
+
 **Roadmap complete.** M15–M19 all done, tested, coverage-checked, and
 demonstrated from the command line, per this document's own "done when"
 bar at the top.

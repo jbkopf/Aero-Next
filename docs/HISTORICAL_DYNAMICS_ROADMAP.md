@@ -41,8 +41,10 @@ candidates; **the largest QA-sweep swing in the whole series**; a
 4-attempt magnitude investigation found the swing curve-shape-
 insensitive — resolved by keeping the original, historically honest
 curve, with the AI's own threshold-sensitivity flagged as future
-AI-tuning work), M22 not
-started.**
+AI-tuning work), M22 done (wiring already in place since round 1;
+`SIM_CORE_ROADMAP.md`'s M13 section and `GAME_SETUP_ROADMAP.md`'s M19
+section re-measured against the complete dataset — **this roadmap's
+own milestones are now all complete**).**
 Builds on the completed sim core
 (`docs/SIM_CORE_ROADMAP.md`, M0–M14) and game setup system
 (`docs/GAME_SETUP_ROADMAP.md`, M15–M19, plus its ongoing city-expansion
@@ -1489,7 +1491,7 @@ own decision thresholds.
 
 ---
 
-## M22 — Campaign integration and re-verification
+## M22 — Campaign integration and re-verification ✅
 
 Wire the generalized, city/region-aware model into the real consumers —
 the M13 campaign loop and the QA harness's `FullGameRunner` — replacing
@@ -1510,6 +1512,26 @@ new model (0 invariant violations — correctness, not exact figures, is
 what that sweep protects, same as every round before it), and both
 roadmap docs' pinned figures are re-measured and updated rather than left
 stale.
+
+**Done.** Wiring was already in place as a byproduct of round 1's own
+architecture decision — both `AeroNext.Sim`'s M13 loop and
+`AeroNext.QaHarness/FullGameRunner.cs` have constructed
+`GravityDemandModel(schedule:, year:)` since round 1, confirmed by
+direct inspection rather than assumed. The 150-game sweep has passed
+cleanly (150/150, 0 invariant violations, 0 crashes) against the
+complete, final dataset repeatedly throughout this milestone, most
+recently across all four of round 16's own magnitude attempts.
+`docs/SIM_CORE_ROADMAP.md`'s M13 section and `docs/GAME_SETUP_ROADMAP.md`'s
+M19 section are both re-measured and updated with real current numbers
+(M16/M18 confirmed unaffected and left as-is, for real, checked
+reasons: M16's `RegionalEconomics.Factor` is purely `demandWeight`-based,
+never touched by this roadmap's own city-scoped multipliers; M18's
+"guaranteed route" check is a positive-demand sign check, unaffected by
+any positive multiplier's own magnitude). The M13 re-measurement
+surfaced a genuine, unrelated staleness — the loop no longer produces
+the bankruptcy arc that section's own history was built around, due to
+a later, unrelated milestone breaking its starting symmetry — documented
+plainly there rather than silently worked around.
 
 ---
 

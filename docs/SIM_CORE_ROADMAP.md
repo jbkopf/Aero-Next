@@ -840,6 +840,54 @@ stop." Quarter 16 (1958) onward: "Boeing 707 flies JFK-LHR direct" — the
 exact CLAUDE.md map-design story, now driven by the timeline rather than
 manually staged as it was in M11's own demo.
 
+**Updated a tenth time, checked at the close of
+`docs/HISTORICAL_DYNAMICS_ROADMAP.md`'s own M22 — a genuine surprise
+this section's every prior update assumed away.** Every update above
+depended on this loop's own "flat, symmetric starting conditions for
+all 4 airlines" property (stated explicitly in the ninth update) to
+produce a peak/bankruptcy arc worth tracking at all. **That property no
+longer holds, and hasn't for a while** — some time after the ninth
+update was written, a later, unrelated milestone (fleet ownership
+differentiation, per this repo's own git history — outside both this
+roadmap and `HISTORICAL_DYNAMICS_ROADMAP.md`) broke the perfect
+symmetry the win-condition mechanic (`docs/WIN_CONDITIONS_ROADMAP.md`'s
+M23/M24) depends on to ever produce a winner. The loop's own real
+current output, confirmed by actually running it rather than assumed
+unaffected: **Continental Wings wins outright at quarter 10 (1957)** —
+"led 3+ regions for 4+ consecutive quarters" — with every airline still
+solvent (quarter 10 cash: $16.3M-$22.8M, no bankruptcy ever reached).
+The peak/bankruptcy checkpoints this section chased through nine
+rounds of city-expansion updates are now permanently moot for this
+specific loop: a winner is always declared long before any of them
+would be reached. Fixing that observation belongs to whichever
+milestone broke the symmetry, not to this one or to Historical
+Dynamics — noted here because it's what M22's own re-measurement
+actually found, not invented scope creep.
+
+**Historical Dynamics' own real effect on this specific loop, directly
+confirmed rather than assumed: none.** Every one of `HISTORICAL_
+DYNAMICS_ROADMAP.md`'s 16 M21 rounds re-ran this exact loop and diffed
+its output against the prior round's own byte-for-byte — including the
+several rounds whose own city-scoped `Trend` breakpoints are active
+from quarter 1 (Dubai, Berlin, Moscow, Beijing/Shanghai's China-opening
+curve) — and every single one came back identical. None of the cities
+those Trends touch happen to sit on the specific same-region guaranteed
+routes this loop's own flat, symmetric setup picks, so the final,
+complete historical dataset changes nothing here. This is a real,
+useful negative result, not a gap: the loop's own printed quarters
+(1, 4, 7, 10) are unaffected, and every real, measured Historical
+Dynamics consequence documented across all 16 M21 rounds shows up
+instead in the QA harness's fuller 244-quarter sweep, which does reach
+every authored event's own active years. Final, complete-dataset sweep
+(150 games, all 16 rounds' data): 98/150 clean wins (avg quarter 23.1);
+NorthAmerica 123/144 bankrupt, $59.12M avg cash, 14 wins; Europe 86/95,
+$9.25M, 6 wins; EastAsia 24/142, $46.83M, 63 wins; SouthWestAsia 32/55,
+$30.30M, 18 wins; AustralAsia 22/45, $67.75M, 16 wins; SouthAmerica
+58/119, $93.58M, 34 wins — down from the pre-Historical-Dynamics
+113/150 (avg quarter 19.6), driven overwhelmingly by round 16's own
+China-opening Trend (see that round's own writeup for the full
+magnitude investigation this finding prompted).
+
 ---
 
 ## M14 — Determinism regression harness ✅
