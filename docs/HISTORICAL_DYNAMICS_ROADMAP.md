@@ -37,8 +37,11 @@ this sample), M21 round 15 done (Eyjafjallajokull 2010 + Arab Spring
 confirmed needing nothing — **the 13-window sweep is now complete**),
 M21 round 16 done (China's opening (Beijing + Shanghai Trends) and the
 1997 Asian Financial Crisis — the sweep's last two reserved
-candidates; **the largest QA-sweep swing in the whole series**, flagged
-to the user for a magnitude decision), M22 not
+candidates; **the largest QA-sweep swing in the whole series**; a
+4-attempt magnitude investigation found the swing curve-shape-
+insensitive — resolved by keeping the original, historically honest
+curve, with the AI's own threshold-sensitivity flagged as future
+AI-tuning work), M22 not
 started.**
 Builds on the completed sim core
 (`docs/SIM_CORE_ROADMAP.md`, M0–M14) and game setup system
@@ -1355,7 +1358,7 @@ particular 150 seeded games draw), and the same "correctness proven
 directly, not visible in this sample" story as Hong Kong (round 13)
 and Baghdad's own 2003 event (round 14).
 
-### Round 16: China's opening + the 1997 Asian Financial Crisis — the last two reserved candidates ⚠️
+### Round 16: China's opening + the 1997 Asian Financial Crisis — the last two reserved candidates ✅
 
 **China's opening.** Deng Xiaoping's reforms (Third Plenum, Dec 1978)
 through Special Economic Zones (Shenzhen, 1980), the 1992 "Southern
@@ -1432,10 +1435,57 @@ region that already dominated the sweep — reshaping the relative
 economic balance of the whole simulated world rather than perturbing
 one region's own local statistics. Correctness at the per-pair level
 is proven directly by the proof tests above, independent of this
-aggregate result; what's genuinely open is whether a swing this large
-is the intended scale for this milestone, or whether the authored
-magnitude (`3.5x`) should be dialed back. Flagged to the user rather
-than decided unilaterally.
+aggregate result. Flagged to the user rather than decided
+unilaterally; the investigation and resolution below.
+
+**Magnitude investigation.** Asked to dial the swing down, the first
+attempt (rescaling both the 1955 floor and the 2015 peak together,
+`0.5→1.7`) made the *aggregate* result meaningfully worse, not
+better (win rate 98→94, EastAsia bankruptcies 24→73/142) — a genuine
+surprise that warranted diagnosis before any more guessing. Traced via
+a temporary instrumented run of `FullGameRunner` (added, measured,
+then reverted cleanly via `git checkout`) comparing game 0's
+`EastAsia Air` quarter-by-quarter under both schedules: by quarter 6
+of 1956, its fleet was already 6 aircraft under the "toned down"
+schedule vs 5 under the original — because `0.5` is a *higher* 1955
+starting value than the original `0.3`, the dialed-back version
+actually made Beijing/Shanghai *more* attractive during the
+campaign's formative early quarters, not less, triggering more
+aggressive debt-financed expansion that a lower eventual ceiling
+(`1.7` vs `3.5`) couldn't sustain. **The late-game peak turns out to
+barely matter — the early 1955 floor is what drives the aggregate
+swing**, confirmed by a second attempt that kept the original `0.3`
+floor with only the peak lowered (`0.3→1.7`): it landed nearly
+identical to the *original* `0.3→3.5` curve (98/150, EastAsia 24/142
+bankrupt, 63 wins — both numbers matching to within a few dollars of
+average cash), while the `0.5`-floor attempt alone was the outlier.
+
+A third attempt raised the floor toward neutral as directed (`0.6`,
+closer to 1.0 than either prior try) with a modest peak (`1.6`) — this
+did **not** reduce the disruption either: win rate stayed at 98/150,
+but EastAsia's own bankruptcy count came back *worse* than the
+original curve (56/142 vs 24/142), moving unpredictably rather than
+monotonically as the curve was gentled. Across all four real
+attempts, the win rate stayed pinned in a narrow 94-98/150 band
+regardless of curve shape, while EastAsia's own bankruptcy count swung
+without a consistent direction (16 baseline → 24 → 73 → 24 → 56) —
+the signature of real threshold-sensitivity in the AI strategy logic
+(which route/fleet decisions cross which profitability thresholds in
+which quarters), not a dial that predictably shrinks with a gentler
+curve. Presented in full rather than continuing to guess at more
+shapes; **resolved by keeping the original, historically honest curve
+(`0.3→3.5`)** — it ties for the mildest EastAsia impact of the four
+real attempts, and toning the peak down bought nothing once the 1955
+floor was fixed. The live repo data was returned to exactly its
+originally-committed round 16 state (confirmed via `git diff`, no new
+data commit needed).
+
+This is worth carrying forward explicitly, not just resolving and
+forgetting: **the AI's sensitivity to a major structural Trend on a
+high-weight city is a genuine open question**, most useful to a future
+AI-tuning milestone rather than to this one, which is about authoring
+correct historical data, not rebalancing `BaselineAi`/`RapidExpansionStrategy`'s
+own decision thresholds.
 
 ---
 
