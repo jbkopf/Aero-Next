@@ -446,6 +446,38 @@ public class GravityDemandModelTests
     }
 
     [Fact]
+    public void RealDataset_CubaEmbargo_PermanentlyDipsHavanaFrom1962_NeverReverts()
+    {
+        // Window 2 of the 5-year historical sweep: the US embargo on
+        // Cuba (Kennedy's Feb 1962 proclamation) collapsed the
+        // dominant US-Cuba passenger market and, unlike every other
+        // event in this series so far, never reverted within the
+        // campaign's own timeframe - modeled with no reversion
+        // breakpoint at all, the same permanent shape as the 747's own
+        // step-up.
+        var cities = CityCatalog.LoadFile(Path.Combine(AppContext.BaseDirectory, "data", "cities.json"));
+        var byId = cities.ToDictionary(c => c.Id);
+        var schedule = DemandGrowthCatalog.LoadCampaignSchedule(Path.Combine(AppContext.BaseDirectory, "data"));
+        var withoutEmbargo = schedule.Where(p => p.EventGroup != "cuba-embargo-1962").ToList();
+        var farAway = byId["gru"];
+
+        var before1961 = new GravityDemandModel(schedule: schedule, year: 1961).ForPair(farAway, byId["hav"]).PassengersPerQuarter;
+        var during1962 = new GravityDemandModel(schedule: schedule, year: 1962).ForPair(farAway, byId["hav"]).PassengersPerQuarter;
+        Assert.True(during1962 < before1961, "1962 should dip below 1961");
+
+        // Permanence, proven against a same-year reference with the
+        // embargo's own event group removed entirely (not just an
+        // earlier pre-embargo year, since the trend curve itself keeps
+        // moving) - the ratio should stay pinned at the authored 0.65
+        // factor decades later, in 2015, not drift back toward 1.0.
+        var embargoed2015 = new GravityDemandModel(schedule: schedule, year: 2015).ForPair(farAway, byId["hav"]).PassengersPerQuarter;
+        var unaffected2015 = new GravityDemandModel(schedule: withoutEmbargo, year: 2015).ForPair(farAway, byId["hav"]).PassengersPerQuarter;
+
+        var ratio = embargoed2015 / (double)unaffected2015;
+        Assert.InRange(ratio, 0.64, 0.66);
+    }
+
+    [Fact]
     public void RealDataset_OlympicsEvents_BoostHostYearOnly_NotAdjacentYears()
     {
         // Stress-tests the trend/event architecture against a real,

@@ -11,7 +11,9 @@ host city in the dataset; found and fixed a real performance regression
 city; 1984 Sarajevo skipped on the user's own direction — no dataset
 city is in Bosnia/former Yugoslavia), M21 round 6 done (Suez Crisis
 1956, first window of a 13-window sweep of 1955-2015 built to cover
-every year with no gaps), M22 not started.** China's
+every year with no gaps), M21 round 7 done (Cuba embargo 1962, window
+2 — the first permanent, real-dataset event in the sweep; a real
+regional shift measured in the QA sweep), M22 not started.** China's
 opening and the 1997 Asian Financial Crisis remain named, not-yet-
 authored future rounds. Builds on the completed sim core
 (`docs/SIM_CORE_ROADMAP.md`, M0–M14) and game setup system
@@ -184,7 +186,7 @@ entries (M21's job), so nothing behavioral could have changed yet.
 
 ---
 
-## M21 — Author real historical trends and events (round 1: architecture + Dubai; round 2: global curve redesign; round 3: trend/event split; round 4: every Olympic Games + a real perf fix; round 5: remaining Games via same-country substitution; round 6: Suez Crisis, window 1 of a 13-window historical sweep) ✅
+## M21 — Author real historical trends and events (round 1: architecture + Dubai; round 2: global curve redesign; round 3: trend/event split; round 4: every Olympic Games + a real perf fix; round 5: remaining Games via same-country substitution; round 6: Suez Crisis, window 1 of a 13-window historical sweep; round 7: Cuba embargo, window 2) ✅
 
 Content, not mechanics — the same shape as the aircraft-catalog and
 city-expansion series, and expected to become its own ongoing round-by-round
@@ -752,8 +754,8 @@ pick events ad hoc.
 
 | Window | Candidate(s) | Status |
 |---|---|---|
-| 1955-59 | Suez Crisis (1956) | **Authored this round** — Cairo (`cai`), city-scoped |
-| 1960-64 | US embargo on Cuba (1962) | Named, not yet authored — `hav`, permanent step-down |
+| 1955-59 | Suez Crisis (1956) | Authored round 6 — Cairo (`cai`), city-scoped |
+| 1960-64 | US embargo on Cuba (1962) | **Authored this round** — `hav`, permanent step-down |
 | 1965-69 | Six-Day War → Suez Canal closed (1967-75) | Named, spans into windows 4-5; scope not yet decided |
 | 1970-74 | (747, Munich/Sapporo Olympics, first oil crisis) | Already covered by rounds 3-4 |
 | 1975-79 | Suez reopens (1975); Camp David / Egypt-Israel peace (1979) | Named — Cairo bookend + boost |
@@ -817,6 +819,64 @@ numbers:
   Cairo-scoped dip has nothing to move. Consistent with this project's
   own chokepoint design pillar: a gate only matters when someone is
   actually contesting it.
+
+### Round 7: the sweep, window 2 (Cuba embargo, 1962) ✅
+
+**US embargo on Cuba:** Kennedy's February 1962 trade proclamation
+collapsed the previously-dominant US-Cuba passenger market. Unlike
+every event authored so far, it never reverted within the campaign's
+own timeframe — commercial air service between the US and Cuba stayed
+cut off in real history until well past 2015, the campaign's own end
+year. Modeled with **no reversion breakpoint at all**, the same
+permanent shape already established by the 747's own step-up: a single
+`Event` breakpoint at 1962 (`0.65`, city-scoped to `hav`), and nothing
+after it.
+
+Magnitude (-35%, permanent) is sized larger than the sweep's own
+temporary-shock convention (Olympics ±20%, Suez -20%) deliberately —
+this event is different in *kind*, not just degree: a structural,
+permanent collapse of a city's dominant market, not a multi-month
+shock with a recovery arc. Still *(proposed, tunable)*, not
+individually researched to the point, matching every other magnitude
+in this series.
+
+New proof test,
+`RealDataset_CubaEmbargo_PermanentlyDipsHavanaFrom1962_NeverReverts`:
+confirms 1962 dips below 1961, then proves permanence against a
+same-year *reference schedule with the embargo's own event group
+removed* (not just an earlier year, since the trend curve itself keeps
+moving) — the with-embargo/without-embargo ratio stays pinned at the
+authored 0.65 factor as late as 2015, decades after onset, rather than
+drifting back toward 1.0. 580 tests, up from 579, all passing;
+coverage gate re-run and unchanged (same accepted baseline as every
+round: `BriefingGenerator`, `QuarterOrder`, `AiToolkit`, `BaselineAi`,
+`RapidExpansionStrategy`, `NetworkPlanner`; `GravityDemandModel`,
+`DemandGrowthCatalog`, `Timeline` stay at 100%).
+
+**Measured — the M13 loop stayed byte-identical (expected: it only
+prints checkpoints through quarter 10, 1957 — five years before the
+embargo even begins, so there's no way for this event to reach it),
+but the 150-game QA sweep, which runs the full 244-quarter campaign
+through 2015, moved for real, concentrated entirely in NorthAmerica
+(Havana's own region):**
+
+| Metric | Round 6 (Suez only) | Round 7 (+ Cuba embargo) |
+|---|---|---|
+| Clean games with a win | 113/150 (avg quarter 19.9) | 113/150 (avg quarter 19.9) |
+| NorthAmerica bankrupt / bankrupt-quarter / avg cash / wins | 118/144, 14.5, $14.83M, 15 | 117/144, 14.0, **$19.61M**, **16** |
+| Europe bankrupt / avg cash / wins | 80/95, $4.11M, 4 | 80/95, $4.11M, **3** |
+| EastAsia / SouthWestAsia / AustralAsia / SouthAmerica | unchanged | unchanged |
+
+NorthAmerica's own average cash rose by a third and it picked up a win
+that Europe lost — a real, explainable, if slightly counterintuitive
+effect: cutting off a comparatively low-value city (Havana,
+`demandWeight` 35, well below the dataset's larger NorthAmerican hubs)
+stops AI strategies from sinking capacity into it, freeing that fleet
+for higher-value pairs elsewhere in the same region. This is exactly
+the kind of causal, legible story CLAUDE.md's own design pillars ask
+for — not noise, and not asserted without the number to back it. Every
+other region's row is untouched, as expected: none of their own cities
+carry this event.
 
 ---
 
