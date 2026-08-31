@@ -23,8 +23,7 @@ public static class DemandGrowthCatalog
 
     public static IReadOnlyList<DemandGrowthPoint> Load(string json)
     {
-        var points = JsonSerializer.Deserialize<List<DemandGrowthPoint>>(json, JsonOptions)
-            ?? throw new InvalidDataException("Demand growth data deserialized to null.");
+        var points = Deserialize(json);
 
         Validate(points);
 
@@ -32,6 +31,34 @@ public static class DemandGrowthCatalog
     }
 
     public static IReadOnlyList<DemandGrowthPoint> LoadFile(string path) => Load(File.ReadAllText(path));
+
+    /// <summary>
+    /// M21: the one entry point real callers use — loads the global-only
+    /// baseline curve (<c>demand_growth.json</c>) together with every
+    /// authored region/city-scoped story (<c>historical_events.json</c>,
+    /// the file this roadmap's own round-by-round event series grows
+    /// story by story) and validates the *combined* result once.
+    /// Validating separately would be wrong, not just redundant:
+    /// `historical_events.json` alone will always have zero global
+    /// entries, which the "at least one global breakpoint" rule would
+    /// wrongly reject on its own. `Load`/`LoadFile` stay independently
+    /// useful (tests load a single inline schedule all the time) - this
+    /// method doesn't replace them, it composes them.
+    /// </summary>
+    public static IReadOnlyList<DemandGrowthPoint> LoadCampaignSchedule(string dataDirectory)
+    {
+        var baseline = Deserialize(File.ReadAllText(Path.Combine(dataDirectory, "demand_growth.json")));
+        var events = Deserialize(File.ReadAllText(Path.Combine(dataDirectory, "historical_events.json")));
+        var combined = baseline.Concat(events).ToList();
+
+        Validate(combined);
+
+        return combined.OrderBy(p => p.Year).ToList();
+    }
+
+    private static List<DemandGrowthPoint> Deserialize(string json) =>
+        JsonSerializer.Deserialize<List<DemandGrowthPoint>>(json, JsonOptions)
+            ?? throw new InvalidDataException("Demand growth data deserialized to null.");
 
     private static void Validate(List<DemandGrowthPoint> points)
     {

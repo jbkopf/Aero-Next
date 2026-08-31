@@ -7,6 +7,7 @@ namespace AeroNext.Core.Tests;
 public class TimelineTests
 {
     private static string DemandGrowthDataPath => Path.Combine(AppContext.BaseDirectory, "data", "demand_growth.json");
+    private static string DataDirectory => Path.Combine(AppContext.BaseDirectory, "data");
 
     [Theory]
     [InlineData(1, 1955)]
@@ -152,6 +153,58 @@ public class TimelineTests
         var schedule = DemandGrowthCatalog.Load(json);
 
         Assert.Equal(3, schedule.Count);
+    }
+
+    [Fact]
+    public void DemandGrowthCatalog_Load_RoundTripsNameAndDefaultsToNullWhenAbsent()
+    {
+        const string json = """
+        [
+          { "year": 1955, "globalMultiplier": 1.0 },
+          { "year": 1985, "globalMultiplier": 2.0, "cityId": "dxb", "name": "Dubai: aviation-hub strategy begins" }
+        ]
+        """;
+
+        var schedule = DemandGrowthCatalog.Load(json);
+
+        Assert.Null(schedule.Single(p => p.CityId is null).Name);
+        Assert.Equal("Dubai: aviation-hub strategy begins", schedule.Single(p => p.CityId == "dxb").Name);
+    }
+
+    [Fact]
+    public void LoadCampaignSchedule_MergesBaselineAndEvents_ValidatingTheCombinedResult()
+    {
+        // The important claim, not just a happy-path check: a
+        // historical_events.json that's entirely city-scoped (M21's own
+        // real shape - it never carries a global entry itself) would fail
+        // DemandGrowthCatalog's own "at least one global breakpoint"
+        // rule if validated alone. LoadCampaignSchedule must merge
+        // before validating, not after, for this to ever succeed.
+        var tempDir = Path.Combine(Path.GetTempPath(), "aeronext-test-" + Guid.NewGuid());
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            File.WriteAllText(Path.Combine(tempDir, "demand_growth.json"), """[{ "year": 1955, "globalMultiplier": 1.0 }]""");
+            File.WriteAllText(Path.Combine(tempDir, "historical_events.json"), """[{ "year": 1985, "globalMultiplier": 5.0, "cityId": "dxb" }]""");
+
+            var schedule = DemandGrowthCatalog.LoadCampaignSchedule(tempDir);
+
+            Assert.Equal(2, schedule.Count);
+            Assert.Contains(schedule, p => p.CityId == "dxb" && p.GlobalMultiplier == 5.0);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void LoadCampaignSchedule_LoadsTheRealRepoFiles_IncludingDubai()
+    {
+        var schedule = DemandGrowthCatalog.LoadCampaignSchedule(DataDirectory);
+
+        Assert.Contains(schedule, p => p.CityId == "dxb");
+        Assert.Contains(schedule, p => p.Region is null && p.CityId is null); // the global baseline is still present
     }
 
     [Fact]

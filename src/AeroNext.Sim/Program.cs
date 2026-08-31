@@ -538,7 +538,7 @@ Console.WriteLine();
 Console.WriteLine("--- M13: full campaign, 1955-2015, 4 AI-driven airlines ---");
 
 var fleetCatalog = AircraftCatalog.LoadFile(Path.Combine(AppContext.BaseDirectory, "data", "aircraft.json"));
-var growthSchedule = DemandGrowthCatalog.LoadFile(Path.Combine(AppContext.BaseDirectory, "data", "demand_growth.json"));
+var growthSchedule = DemandGrowthCatalog.LoadCampaignSchedule(Path.Combine(AppContext.BaseDirectory, "data")); // M21: baseline curve + authored historical_events.json, merged
 
 const int campaignQuarters = 244; // 1955 Q1 through 2015 Q4
 var campaignAirlineNames = new[] { "Atlas Air", "Meridian", "Skyward", "Continental Wings" };

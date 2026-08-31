@@ -1,0 +1,6 @@
+[
+  { "year": 1955, "globalMultiplier": 0.3,  "cityId": "dxb", "name": "Dubai: minor regional trading post" },
+  { "year": 1985, "globalMultiplier": 1.5,  "cityId": "dxb", "name": "Dubai: Emirates founded, free-trade-zone/aviation-hub strategy begins" },
+  { "year": 2000, "globalMultiplier": 4.0,  "cityId": "dxb", "name": "Dubai: hub build-out through the 1990s" },
+  { "year": 2015, "globalMultiplier": 10.0, "cityId": "dxb", "name": "Dubai: DXB among the world's busiest airports" }
+]

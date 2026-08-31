@@ -1,6 +1,6 @@
 # Historical Dynamics Roadmap
 
-**Status: M20 done, M21-M22 not started.** Builds on the completed sim core
+**Status: M20 done, M21 round 1 done (Dubai; China/oil-crisis remain future rounds), M22 not started.** Builds on the completed sim core
 (`docs/SIM_CORE_ROADMAP.md`, M0–M14) and game setup system
 (`docs/GAME_SETUP_ROADMAP.md`, M15–M19, plus its ongoing city-expansion
 series). Continues the shared milestone numbering from M20, since this is
@@ -171,7 +171,7 @@ entries (M21's job), so nothing behavioral could have changed yet.
 
 ---
 
-## M21 — Author real historical trends and events
+## M21 — Author real historical trends and events (round 1: architecture + Dubai) ✅
 
 Content, not mechanics — the same shape as the aircraft-catalog and
 city-expansion series, and expected to become its own ongoing round-by-round
@@ -184,31 +184,120 @@ existing global ones; not resolved here) with real, well-known stories,
 starting with the ones already named as gaps during the city-expansion
 series:
 
-- **Dubai** — near-zero relevance through the 1970s, a real inflection
-  point once its free-trade-zone/aviation-hub strategy took hold in the
-  1980s–90s, continuing to climb sharply through the 2000s. The single
-  clearest "this is exactly the gap this roadmap exists to close" case,
-  named directly in the conversation that started this roadmap.
-- **China's opening (Beijing, Shanghai)** — muted through the Cultural
-  Revolution era, a real inflection after 1978's opening-up reforms,
-  continuing to climb through the 1990s–2000s boom.
-- **A global shock** — the 1973 oil crisis is the obvious first
-  candidate: a real, dateable, global (not city-specific) demand
-  contraction, testing the *global*-scope path of the same mechanism
-  M20 built, not just city/region scopes.
+- **Dubai** ✅ (round 1, this milestone) — near-zero relevance through
+  the 1970s, a real inflection point once its free-trade-zone/
+  aviation-hub strategy took hold in the 1980s–90s, continuing to climb
+  sharply through the 2000s. The single clearest "this is exactly the
+  gap this roadmap exists to close" case, named directly in the
+  conversation that started this roadmap.
+- **China's opening (Beijing, Shanghai)** — *not yet authored, a future
+  round.* Muted through the Cultural Revolution era, a real inflection
+  after 1978's opening-up reforms, continuing to climb through the
+  1990s–2000s boom.
+- **A global shock** — *not yet authored, a future round.* The 1973 oil
+  crisis is the obvious first candidate: a real, dateable, global (not
+  city-specific) demand contraction, testing the *global*-scope path of
+  the same mechanism M20 built, not just city/region scopes.
 - Further candidates deliberately left open rather than pre-committed —
   each should be picked and authored the way each aircraft/city round
   was: one real, well-documented story at a time, verified against the
   campaign's actual measured output before being called done, not
   batch-authored speculatively.
 
-**Done when:** at least one city/region-scoped story and the one
-global-scope story are authored, each with a real, checkable historical
-basis (not an invented number), and the M13 campaign's measured trajectory
-visibly reflects them — e.g., Dubai's route(s) carrying negligible traffic
-early and materially more by the campaign's later decades, confirmed by
+**Done when (per round, not all-at-once — matching the "own ongoing
+round-by-round series" framing above, not the original single-shot
+reading of this bar):** each round authors one real story with a real,
+checkable historical basis (not an invented number), and the M13
+campaign's measured trajectory visibly reflects it — confirmed by
 actually running it and reading the numbers, not assumed from the input
-data alone.
+data alone. **This round (round 1)** also had to establish the
+round-by-round *architecture* itself — a repeatable, low-friction shape
+every future round (China, the oil crisis, and whatever else gets
+picked) can just reuse without re-deriving it. China and the 1973 oil
+crisis remain real, named, *not-yet-authored* candidates for their own
+future rounds — not silently dropped, and not required for this round's
+own "done."
+
+**The repeatable recipe, for the next round to just follow:**
+1. Pick one real, well-documented story with a checkable historical
+   basis — a city/region inflection goes in `data/historical_events.json`
+   (`cityId` or `region` scope); a global shock goes in
+   `data/demand_growth.json` itself (global scope — the file this
+   round's own architecture deliberately kept as the small, rarely-touched
+   baseline curve).
+2. Author 2+ breakpoints tracing the real story's shape — a slow trend
+   is a handful of points; a sharp event is a dip/spike breakpoint plus
+   a reversion breakpoint afterward (this roadmap's own stated design,
+   settled before M20 was built). Give each entry a short `name` — pure
+   documentation, but it makes the file self-explaining on its own.
+3. Run `AeroNext.Sim`'s M13 loop and/or a direct `GravityDemandModel.ForPair`
+   check (`DemandGrowthCatalog.LoadCampaignSchedule` loads everything
+   merged) and confirm the story's effect is actually visible in the
+   numbers — not assumed from the authored data alone.
+4. Add a test proving the multiplier resolves correctly at each
+   breakpoint (mirrors this round's own `RealDataset_Dubai_...` test).
+5. Re-run the 150-game QA harness sweep and record whatever moved, the
+   same "measure it, don't assume no change" standard this round used.
+6. Write the round's own entry into this section (mark the bullet ✅,
+   note the real measured effect), commit.
+
+Done (round 1). **The architecture:** `data/historical_events.json` is a
+new, dedicated file for authored region/city-scoped stories —
+`data/demand_growth.json` stays exactly the small global-only baseline
+curve it always was. `DemandGrowthPoint` gained an optional `Name` (pure
+documentation, mirroring `cities.json`/`aircraft.json`'s own `id`/`name`
+convention — never read by resolution logic). New
+`DemandGrowthCatalog.LoadCampaignSchedule(dataDirectory)` is the one
+entry point real callers use — loads both files and validates the
+*combined* result once (not per-file — `historical_events.json` alone
+will always have zero global entries, which M20's own "at least one
+global breakpoint" rule would wrongly reject in isolation).
+`AeroNext.Sim`/`AeroNext.QaHarness`'s `Program.cs` both switched to it;
+both `.csproj` files already glob `data\**\*.json`, so the new file
+needed zero build-config changes.
+
+565 tests total (4 new). `RealDataset_Dubai_NegligibleEarly_MaterialyHigherLate`
+proves Dubai's own real trajectory against the actual repo data (not a
+synthetic city) — 1955's 0.3x factor vs. 2015's 10.0x is confirmed
+directly, a wide margin, not a borderline check.
+`LoadCampaignSchedule_MergesBaselineAndEvents_ValidatingTheCombinedResult`
+proves the merge-before-validate ordering is load-bearing, not
+incidental — an all-city-scoped `historical_events.json` would fail
+validated alone. 100% line coverage on every touched file; the one
+remaining partial branch (`DemandGrowthCatalog`, unchanged from M20) is
+the same confirmed structurally-unreachable case already documented
+there. Overall project coverage **99.89%/99.20%**.
+
+**Measured, not assumed:** `AeroNext.Sim`'s M13 loop came back
+byte-for-byte identical to its established current output — a real
+result, not a compatibility check that was expected to hold: this loop's
+own game resolves by quarter 10 (1957), decades before Dubai's own first
+authored inflection (1985), so there was nothing yet for Dubai's story
+to change *in this specific loop*, confirmed by actually running it
+rather than assumed from the shape of the data.
+
+The 150-game QA harness sweep, which runs the full 244-quarter campaign
+and gives Dubai's later breakpoints real room to matter, moved for real
+— and surfaced a genuine, unflattering side effect worth reporting in
+full, not smoothed over. Overall win rate held (118/150, avg quarter
+25.3→26.4), and EastAsia/AustralAsia/SouthAmerica moved only modestly.
+**SouthWestAsia — Dubai's own home region — got measurably worse:**
+bankrupt seats nearly doubled (17/55→33/55), average cash collapsed
+($105.3M→$22.1M), and wins dropped (18→15). The cause, traced rather
+than guessed: `dxb` is SouthWestAsia's own top-`DemandWeight` eligible
+city, so it's that region's default AI starting city
+(`HomeRegions.EligibleStartingCities`) — and Dubai's real, authored
+"near-zero relevance through the 1970s" (0.3x, *below* the pre-M21
+neutral baseline) now actively penalizes demand at exactly the city
+every SouthWestAsia seat's earliest, highest-bankruptcy-risk routes fly
+through (M41's own diagnosed danger window is quarters ~1-25; Dubai's
+own multiplier doesn't clear 1.0x until 1985, quarter 120). A real,
+historically accurate story authored correctly still has a real,
+harsh knock-on effect on this simulation's own starting-city mechanics
+— flagged here as a genuine finding for a future round (should
+region-appropriate starting-city selection ever weight a city's own
+demand trajectory, not just its 1955 snapshot?), not silently absorbed
+into this round's own narrower scope.
 
 ---
 

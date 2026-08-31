@@ -268,4 +268,25 @@ public class GravityDemandModelTests
 
         Assert.True(jfkLhr.PassengersPerQuarter > yqxTer.PassengersPerQuarter * 100);
     }
+
+    [Fact]
+    public void RealDataset_Dubai_NegligibleEarly_MaterialyHigherLate()
+    {
+        // M21's own worked example, measured against the real repo data
+        // (data/cities.json + data/historical_events.json), not a
+        // synthetic city - the same "actually run it and read the
+        // numbers" standard this session has held to throughout.
+        var cities = CityCatalog.LoadFile(Path.Combine(AppContext.BaseDirectory, "data", "cities.json"));
+        var byId = cities.ToDictionary(c => c.Id);
+        var schedule = DemandGrowthCatalog.LoadCampaignSchedule(Path.Combine(AppContext.BaseDirectory, "data"));
+        var farAway = byId["gru"]; // a real, distant, unrelated city - not scoped by Dubai's own entries
+
+        var early = new GravityDemandModel(schedule: schedule, year: 1955).ForPair(farAway, byId["dxb"]).PassengersPerQuarter;
+        var late = new GravityDemandModel(schedule: schedule, year: 2015).ForPair(farAway, byId["dxb"]).PassengersPerQuarter;
+
+        // 1955's 0.3x vs 2015's 10.0x is a real ~33x swing in Dubai's own
+        // factor alone (global growth on top of it too) - a wide,
+        // unambiguous margin, not a borderline check.
+        Assert.True(late > early * 20);
+    }
 }

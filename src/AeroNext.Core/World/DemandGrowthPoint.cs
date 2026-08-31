@@ -11,5 +11,15 @@ namespace AeroNext.Core.World;
 /// it's the breakpoint's own multiplier value either way, and renaming
 /// it would mean renaming the `demand_growth.json` property key for
 /// every existing entry too, for no real gain.
+///
+/// M21: <see cref="Name"/> — optional, mirroring the id/name convention
+/// every other data file in this repo already uses
+/// (<c>cities.json</c>, <c>aircraft.json</c>). Pure documentation, never
+/// read by resolution logic (<see cref="Timeline"/>,
+/// <see cref="GravityDemandModel"/> both ignore it entirely) — exists so
+/// a data file full of authored historical stories
+/// (<c>historical_events.json</c>) is self-identifying on its own, not
+/// something a future author has to cross-reference against this
+/// roadmap's prose to understand.
 /// </summary>
-public sealed record DemandGrowthPoint(int Year, double GlobalMultiplier, Region? Region = null, string? CityId = null);
+public sealed record DemandGrowthPoint(int Year, double GlobalMultiplier, Region? Region = null, string? CityId = null, string? Name = null);
