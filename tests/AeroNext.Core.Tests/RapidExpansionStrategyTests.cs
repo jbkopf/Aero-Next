@@ -383,4 +383,122 @@ public class RapidExpansionStrategyTests
         Assert.Equal(Money.FromDollars(1_500_000), refinance.AdditionalBorrowing);
         Assert.Empty(orders.OfType<NegotiationOrder>());
     }
+
+    [Fact]
+    public void DecideOrders_HoldsAnUnusedWonSlot_UsesItInsteadOfChasingAHigherDemandCandidate()
+    {
+        // M43 (regional balance): a gateway this airline already holds a
+        // slot at - won by a past negotiation, real cash already spent -
+        // takes priority over a fresh, even higher-raw-demand candidate.
+        // Diagnosed directly from a traced real game: an airline won 6
+        // gateway negotiations across 11 quarters and used none of them,
+        // burning cash on repeat bids while a route it could open for
+        // free (the slot's already paid for) sat unused.
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
+        var wonGateway = MakeCity("won", Region.Europe, 1, 1, 20, isGateway: true); // lower raw demand, but a slot is already held here
+        var distractor = MakeCity("hi", Region.Europe, 2, 2, 500); // far higher raw demand, but no slot held
+        var cities = new[] { home, wonGateway, distractor };
+        var aircraft = new AircraftType("t", "Test", Seats: 140, RangeKm: 10_000);
+        var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, aircraft, quantity: 1, FleetOwnershipMode.Owned);
+
+        var context = new StrategyContext(
+            Array.Empty<Route>(), 3, cities, DemandModel, new[] { aircraft }, fleet, Region.NorthAmerica,
+            AvailableSlotsByCity: new Dictionary<string, int> { ["won"] = 1 });
+
+        var orders = Strategy.DecideOrders(context);
+
+        var routeOrder = Assert.Single(orders.OfType<RouteOrder>());
+        Assert.Contains("won", new[] { routeOrder.Origin.Id, routeOrder.Destination.Id });
+        Assert.DoesNotContain("hi", new[] { routeOrder.Origin.Id, routeOrder.Destination.Id });
+    }
+
+    [Fact]
+    public void DecideOrders_WonSlotAlreadyServed_FallsBackToNormalSearch()
+    {
+        // The priority only applies to a slot not yet built out - a
+        // gateway already touched by an existing route doesn't need
+        // this boost (the existing "grow best-performing route" step
+        // already covers it), so the normal cross-region search runs
+        // unaffected.
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
+        var wonGateway = MakeCity("won", Region.Europe, 1, 1, 20, isGateway: true);
+        var target = MakeCity("hi", Region.Europe, 2, 2, 500);
+        var cities = new[] { home, wonGateway, target };
+        var aircraft = new AircraftType("t", "Test", Seats: 140, RangeKm: 10_000);
+        var existing = new[] { new Route(home, wonGateway, aircraft, AircraftCount: 1) };
+        var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, aircraft, quantity: 1, FleetOwnershipMode.Owned);
+
+        var context = new StrategyContext(
+            existing, 3, cities, DemandModel, new[] { aircraft }, fleet, Region.NorthAmerica,
+            AvailableSlotsByCity: new Dictionary<string, int> { ["won"] = 1 });
+
+        var orders = Strategy.DecideOrders(context);
+
+        // The won-but-already-served gateway doesn't block the normal
+        // new-pair search from picking "hi" - whether the existing
+        // home-won route also gets grown this same quarter is a
+        // separate, unrelated decision (BaselineAi.FindBestPerformingRoute's
+        // own floor), not what this test is checking.
+        var routeOrders = orders.OfType<RouteOrder>().ToList();
+        Assert.Contains(routeOrders, o => new[] { o.Origin.Id, o.Destination.Id }.Contains("hi"));
+    }
+
+    [Fact]
+    public void DecideOrders_UnusedWonSlot_ExistingUnrelatedRoute_StillPrioritizesTheWonSlot()
+    {
+        // Same priority as DecideOrders_HoldsAnUnusedWonSlot..., but with
+        // a real, already-served route elsewhere in the network - proves
+        // the won-slot search correctly excludes only pairs that are
+        // themselves already served, not every pair touching any served
+        // city, when the network isn't empty.
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
+        var domestic = MakeCity("dom", Region.NorthAmerica, 1, 1, 30); // already served from home - unrelated to the won slot
+        var wonGateway = MakeCity("won", Region.Europe, 10, 10, 20, isGateway: true);
+        var distractor = MakeCity("hi", Region.Europe, 11, 11, 500);
+        var cities = new[] { home, domestic, wonGateway, distractor };
+        var aircraft = new AircraftType("t", "Test", Seats: 140, RangeKm: 10_000);
+        var existing = new[] { new Route(home, domestic, aircraft, AircraftCount: 1) };
+        var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, aircraft, quantity: 2, FleetOwnershipMode.Owned); // one already flying home-dom, one idle
+
+        var context = new StrategyContext(
+            existing, 3, cities, DemandModel, new[] { aircraft }, fleet, Region.NorthAmerica,
+            AvailableSlotsByCity: new Dictionary<string, int> { ["won"] = 1 });
+
+        var orders = Strategy.DecideOrders(context);
+
+        // The won slot gets used - via whichever reachable pair touching
+        // it has the strongest demand (here, hi-won beats home-won), not
+        // necessarily starting from home. That's correct: the priority
+        // is "use the slot," not "use it specifically from home."
+        var routeOrders = orders.OfType<RouteOrder>().ToList();
+        Assert.Contains(routeOrders, o => new[] { o.Origin.Id, o.Destination.Id }.Contains("won"));
+    }
+
+    [Fact]
+    public void DecideOrders_WonSlotWithZeroBalance_NotTreatedAsUsable()
+    {
+        // A city can appear in AvailableSlotsByCity with a zero balance
+        // (every slot already spent on other routes) - that's a real,
+        // distinct state from "never held one at all," and shouldn't be
+        // treated as a usable won-but-unused slot. "bbb" sorts before
+        // "home" (unlike the other won-slot tests above, where the won
+        // city always sorted after its partner), so this also exercises
+        // the origin-side half of the "touches a won city" OR match.
+        var aaa = MakeCity("aaa", Region.Europe, 1, 1, 20, isGateway: true); // zero balance - not usable
+        var bbb = MakeCity("bbb", Region.Europe, 2, 2, 15, isGateway: true); // real, unused slot - sorts before "home"
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
+        var cities = new[] { aaa, bbb, home };
+        var aircraft = new AircraftType("t", "Test", Seats: 140, RangeKm: 10_000);
+        var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, aircraft, quantity: 1, FleetOwnershipMode.Owned);
+
+        var context = new StrategyContext(
+            Array.Empty<Route>(), 3, cities, DemandModel, new[] { aircraft }, fleet, Region.NorthAmerica,
+            AvailableSlotsByCity: new Dictionary<string, int> { ["aaa"] = 0, ["bbb"] = 1 });
+
+        var orders = Strategy.DecideOrders(context);
+
+        var routeOrder = Assert.Single(orders.OfType<RouteOrder>());
+        Assert.Contains("bbb", new[] { routeOrder.Origin.Id, routeOrder.Destination.Id });
+        Assert.DoesNotContain("aaa", new[] { routeOrder.Origin.Id, routeOrder.Destination.Id });
+    }
 }

@@ -57,6 +57,74 @@ internal static class AiToolkit
         return ids;
     }
 
+    /// <summary>
+    /// The best unserved pair touching a gateway city this airline already
+    /// holds an unused slot at - checked ahead of a general new-pair
+    /// search so a contested negotiation win actually gets exploited
+    /// instead of stranding cash spent to win it while more bids keep
+    /// going out for other gateways (the regional-balance investigation's
+    /// own diagnosed root cause: one traced game had an airline win 6
+    /// gateway negotiations across 11 quarters and open a route at none
+    /// of them). "Unused" means AvailableSlotsByCity shows a positive
+    /// balance there (M33: this airline's own remaining slot count) *and*
+    /// no current route already touches that city - a gateway this
+    /// airline is already flying through doesn't need this priority
+    /// boost, the existing "grow best-performing route" step already
+    /// covers that. Searches only reachable-by-idle-fleet pairs, matching
+    /// every other new-pair search's own idle-first convention; callers
+    /// fall back to their own general search when this returns null,
+    /// exactly as before this method existed. Returns null (not "no
+    /// priority") when AvailableSlotsByCity itself is null - a caller
+    /// that doesn't populate real slot data has nothing to prioritize,
+    /// same permissive-default convention as every other nullable
+    /// StrategyContext field.
+    /// </summary>
+    public static (PairDemand Pair, AircraftType Aircraft)? FindBestUnservedPairTouchingWonSlot(StrategyContext context, IReadOnlySet<int> reservedUnitIds)
+    {
+        if (context.AvailableSlotsByCity is null)
+        {
+            return null;
+        }
+
+        var touchedCityIds = context.CurrentRoutes
+            .SelectMany(r => new[] { r.Origin.Id, r.Destination.Id })
+            .ToHashSet(StringComparer.Ordinal);
+
+        var wonUnusedCityIds = context.AvailableSlotsByCity
+            .Where(kv => kv.Value > 0 && !touchedCityIds.Contains(kv.Key))
+            .Select(kv => kv.Key)
+            .ToHashSet(StringComparer.Ordinal);
+
+        if (wonUnusedCityIds.Count == 0)
+        {
+            return null;
+        }
+
+        var served = context.CurrentRoutes
+            .SelectMany(r => new[] { (r.Origin.Id, r.Destination.Id), (r.Destination.Id, r.Origin.Id) })
+            .ToHashSet();
+
+        var candidateTypes = context.OwnFleet.Idle
+            .Where(u => !reservedUnitIds.Contains(u.Id))
+            .Select(u => u.Type)
+            .Distinct()
+            .ToList();
+
+        var best = candidateTypes
+            .SelectMany(type => context.DemandModel.AllPairs(context.AllCities)
+                .Where(p => wonUnusedCityIds.Contains(p.Origin.Id) || wonUnusedCityIds.Contains(p.Destination.Id))
+                .Where(p => !served.Contains((p.Origin.Id, p.Destination.Id)))
+                .Where(p => p.DistanceKm <= type.RangeKm)
+                .Select(p => (Pair: p, Aircraft: type)))
+            .OrderByDescending(c => c.Pair.PassengersPerQuarter)
+            .ThenBy(c => c.Pair.Origin.Id, StringComparer.Ordinal)
+            .ThenBy(c => c.Pair.Destination.Id, StringComparer.Ordinal)
+            .ThenBy(c => c.Aircraft.Id, StringComparer.Ordinal)
+            .FirstOrDefault();
+
+        return best.Pair is null ? null : (best.Pair, best.Aircraft);
+    }
+
     public static void NegotiateOrBorrow(StrategyContext context, City? bestGateway, List<QuarterOrder> orders, ref int spent)
     {
         if (bestGateway is null || spent + 1 > context.ActionCap)

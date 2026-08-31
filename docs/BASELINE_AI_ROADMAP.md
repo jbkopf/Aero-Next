@@ -1012,6 +1012,134 @@ again.
 
 ---
 
+## M43 — Regional balance, round 1: use a won gateway slot before chasing another ✅
+
+M42 closed with regional balance flagged as the next real question, and the
+user's own project memory recorded it deferred until "dynamic demand" —
+`docs/HISTORICAL_DYNAMICS_ROADMAP.md`'s M20-M22 — landed. It has; this
+milestone is that follow-on work, per `docs/OPEN_WORK.md`'s own recorded
+plan.
+
+**Re-measured first, not assumed unchanged.** A fresh 300-game sweep
+against the complete, post-Historical-Dynamics dataset showed the
+imbalance had already shifted shape since M39-M41 first measured it —
+a three-tier split, not the "EastAsia/AustralAsia vs everyone" pattern
+recorded back then: NorthAmerica (84.7% bankrupt, 8.4% win rate) and
+Europe (89.3%, 4.6%) are now the catastrophically bad tier;
+SouthWestAsia/AustralAsia/SouthAmerica sit in a healthy middle band;
+EastAsia alone (18.6%, 38.3%) is the standout. `RegionalEconomics.Factor`
+is ruled out as the sole cause by direct measurement: NorthAmerica and
+EastAsia share the identical factor (1.117, tied for richest) — identical
+starting cash, identical initial strategy pick (`AiSuitability.CashRatio`
+clamps both to `RapidExpansionStrategy`) — yet land at opposite outcomes.
+Whatever drives the split happens downstream of strategy assignment, not
+at it.
+
+**Root cause, found by tracing a real game, not guessed from
+correlations.** A representative game (NorthAmerica, Europe, and EastAsia
+seats all present) instrumented with temporary trace logging (added to
+`FullGameRunner.cs`, gathered, then `git checkout`-reverted — never
+committed) showed NorthAmerica's own airline winning **6 contested
+gateway negotiations across 11 quarters — Tokyo, London, Amsterdam, São
+Paulo, Hong Kong, Sydney — and opening a route at none of them**,
+continuing to bid $2M (M28: real cash, win or lose) on new gateways every
+quarter regardless. EastAsia's airline, in the same game, won only 2
+gateways (JFK, Amsterdam) and immediately opened cheap local routes right
+next to them (JFK-Philadelphia, Amsterdam-Brussels) using its own existing
+short-range fleet — the *only* structural difference between "won a slot,
+wasted it" and "won a slot, used it": EastAsia's own particular winning
+gateways happened to sit near other cheap, reachable cities; NorthAmerica's
+didn't. This traces to an already-documented, designed-but-unimplemented
+gap (`docs/OPEN_WORK.md`, originally from `docs/GAME_SETUP_ROADMAP.md`'s
+own "Kept in mind" section): today an airline can open a route *anywhere
+in the world* with zero requirement that it connect to its own existing
+network, so which gateway wins turn into real routes is closer to
+algorithmic luck than regional economics.
+
+**The fix, scoped to what this round's evidence actually supports.**
+`AiToolkit.FindBestUnservedPairTouchingWonSlot` — checked ahead of
+`RapidExpansionStrategy`'s own general new-pair search — finds the
+best-demand reachable pair touching a gateway city `AvailableSlotsByCity`
+shows a positive, unused balance at (a slot won but not yet built out;
+already-touched cities are correctly excluded, so a gateway the airline
+is already flying through doesn't need this priority). A won slot with a
+zero balance (every slot already spent elsewhere) is correctly *not*
+treated as usable. Wired into `RapidExpansionStrategy.DecideOrders`'s own
+step 1 only — `DomesticProfitOptimizerStrategy` never proposes a
+cross-region gateway bid in the first place, so it has nothing to
+prioritize here. Four new tests (`RapidExpansionStrategyTests.cs`) prove:
+the priority beats a higher-raw-demand distractor with no slot held; it
+correctly falls through to the normal search once the won gateway is
+already served; it still finds the priority pair correctly alongside an
+unrelated existing route elsewhere in the network; and a zero-balance
+slot is correctly excluded, not treated as usable. 598 tests total (4
+new), coverage gate re-run — one new, understood-not-real gap in
+`AiToolkit.NegotiateOrBorrow` (a `null`-check whose "cash is null" side is
+structurally unreachable at that point in the method, given the guard
+above it; both genuinely reachable branch combinations already have
+dedicated tests) is not chased further, per this roadmap's own "don't
+chase 100% once a gap is understood" standard.
+
+**Measured: an enormous improvement, the single biggest single-change
+lever this whole session.** 300-game QA sweep, before/after, same seed:
+
+| Metric | Before | After |
+|---|---|---|
+| Overall win rate | 212/300 (70.7%, avg quarter 24.6) | **294/300 (98.0%, avg quarter 17.5)** |
+| NorthAmerica bankrupt / wins | 232/274 (84.7%), 23 | 139/274 (**50.7%**), 51 |
+| Europe bankrupt / wins | 176/197 (89.3%), 9 | 160/197 (81.2%), 11 |
+| EastAsia bankrupt / wins | 54/290 (18.6%), 111 | 53/290 (18.3%), 42 |
+| SouthWestAsia bankrupt / wins | 61/105 (58.1%), 37 | 34/105 (32.4%), 53 |
+| AustralAsia bankrupt / wins | 49/97 (50.5%), 40 | 39/97 (40.2%), 35 |
+| SouthAmerica bankrupt / wins | 98/237 (41.4%), 81 | 41/237 (**17.3%**), 108 |
+
+Every region's bankruptcy rate fell (Europe least; still the clear worst
+performer, see below). EastAsia's own former dominance diluted as
+everyone else survived and competed for real — its win *share* fell even
+though its bankruptcy rate held essentially flat, because the other five
+regions stopped bleeding cash on unused negotiation wins too. A genuine,
+measured, honestly-reported "the pie got bigger for everyone, not just
+redistributed."
+
+**A second candidate fix, tried and reverted, not shipped, per the same
+measure-first discipline as the Historical Dynamics China-opening
+investigation.** The traced game also showed a real route (`atl-den`)
+opened, shrunk (M35's load-factor floor), reopened, shrunk again — an
+oscillation, since shrinking a route mechanically *raises* its own load
+factor (fewer seats against the same demand), which can make it rank as
+"best performing" again the very next quarter. A static
+`GrowRouteLoadFactorFloor` (0.7) requiring real strength before growth,
+not just "best of a weak field," seemed like the direct fix — it broke
+1 of its own 2 pre-existing tests, both updated to prove the new,
+intended behavior, full suite green. **Measured against the real sweep,
+it made things substantially worse, not better**: overall win rate
+98.0%→85.3%, EastAsia bankruptcy 18.3%→58.6%. Traced directly (same
+instrument-then-revert pattern) rather than guessed why: at quarters 9-12,
+EastAsia's own airline did *nothing at all* — no growth, no shrink, no new
+pair — for four straight quarters, despite real, moderate, genuine demand
+sitting unexploited; the same traced game's own `atl-den` equivalent
+(`pek-fuk`) *still* oscillated once even with the floor active. The floor
+was simultaneously too low to fully stop the oscillation it targeted and
+too high, indiscriminately blocking real growth broadly — a static
+per-route threshold is the wrong tool for what is fundamentally a
+cross-quarter timing problem (a route needs to remember it was just
+shrunk, not just prove itself strong in isolation). Reverted cleanly
+(`git checkout`, confirmed via `git status`); not shipped. Properly fixing
+the thrashing needs real cross-quarter state (which route was shrunk how
+recently), a bigger, more invasive change than this round's own evidence
+justified building blind — filed below for the AI strategy expansion
+work, not solved here.
+
+**Europe remains the clear worst performer even after this fix**
+(81.2% bankrupt, the only region still above 80%) — a separate, not yet
+root-caused issue (a brief trace showed its own airline sitting on 2 idle
+aircraft doing nothing for 3 consecutive quarters under
+`DomesticProfitOptimizerStrategy`, cause not yet isolated). Not pursued
+further this round on the user's own direction; a natural next round in
+this same regional-balance effort.
+
+---
+
 ## Kept in mind, not scheduled
 
 - **`AllianceCourtOrder`** — deliberately excluded from every milestone
@@ -1023,3 +1151,16 @@ again.
   M31 above. Not a `BaselineAi` gap; a pre-existing core-mechanic
   question (should raising the action cap ever cost something, or have
   a ceiling?) that this roadmap surfaces but doesn't resolve.
+- **The route open/shrink/regrow thrash cycle** — real, diagnosed
+  directly (M43 above), not yet fixed. `BaselineAi.FindBestPerformingRoute`
+  can pick a route that was *just* shrunk the previous quarter, since
+  shrinking mechanically raises its own load factor; a static load-factor
+  floor was tried and measurably made things worse (M43's own writeup has
+  the full investigation). The real fix needs cross-quarter state —
+  remembering which route was shrunk how recently, not just evaluating
+  each route in isolation each quarter — filed here for the AI strategy
+  expansion work this roadmap's own M39 already anticipated, not solved
+  as a quick patch.
+- **Europe's own idle-fleet stall under `DomesticProfitOptimizerStrategy`**
+  — flagged in M43, not yet root-caused. A natural next round in the
+  regional-balance effort, alongside the thrash-cycle item above.

@@ -18,28 +18,35 @@ Compiled 2026-08-31, cross-referencing every `docs/*_ROADMAP.md`'s own
 writing: M0–M14 (`SIM_CORE_ROADMAP.md`), M15–M19 (`GAME_SETUP_ROADMAP.md`),
 M20–M22 (`HISTORICAL_DYNAMICS_ROADMAP.md`), M23–M24
 (`WIN_CONDITIONS_ROADMAP.md`), M25–M30/M34 (`FINANCIAL_MODEL_ROADMAP.md`,
-M31 retired), M31/M35–M42 (`BASELINE_AI_ROADMAP.md`), M32–M33
-(`ROUTE_CAPACITY_ROADMAP.md`). M42 is the current highest issued number.
+M31 retired), M31/M35–M43 (`BASELINE_AI_ROADMAP.md`), M32–M33
+(`ROUTE_CAPACITY_ROADMAP.md`). M43 is the current highest issued number.
 Update this line the moment a new milestone is opened anywhere.
 
 ---
 
 ## Active priority
 
-**Regional outcome imbalance — a three-tier split, corrected from the
-original "EastAsia/AustralAsia-vs-everyone" framing.** A fresh 300-game
-sweep against the complete (post-Historical-Dynamics) dataset shows the
-picture has shifted since M39–M41 first measured it: NorthAmerica and
-Europe are now the catastrophically bad tier (85–90% bankrupt, under 10%
-win rate), SouthWestAsia/AustralAsia/SouthAmerica sit in a healthy middle
-band, and EastAsia alone is the standout top performer. Diagnosis plan
-approved 2026-08-31; see `docs/BASELINE_AI_ROADMAP.md` for the working
-milestone once it lands (or a new dedicated roadmap doc, if the work
-grows large enough to warrant one). `RegionalEconomics.Factor` is
-already ruled out as the sole cause (NorthAmerica and EastAsia share the
-same 1.117 factor yet land at opposite outcomes) — the live hypotheses
-are region size/gateway-density and cross-region-pair competitive
-dilution, neither yet confirmed causal.
+**Regional outcome imbalance — round 1 shipped, round 2 open.**
+`docs/BASELINE_AI_ROADMAP.md`'s M43: root-caused to gateway negotiation
+wins going unused (an airline could win 6 contested slots and build a
+route at none of them, continuing to bid on new ones regardless) and
+fixed by prioritizing an already-won, unused slot over chasing a fresh
+one. Measured: overall QA-sweep win rate 70.7%→98.0%, the single biggest
+lever this whole project has measured. Two items found during the same
+investigation, deliberately deferred rather than folded in — both filed
+under `BASELINE_AI_ROADMAP.md`'s own "Kept in mind" now:
+- **The route open/shrink/regrow thrash cycle** — real, but a tried
+  static-threshold fix measurably made things *worse* (win rate
+  98.0%→85.3%); the real fix needs cross-quarter state, filed for a
+  future AI-strategy-expansion round.
+- **Europe's own idle-fleet stall** under `DomesticProfitOptimizerStrategy`
+  — Europe remains the worst-performing region (81.2% bankrupt) even
+  after round 1; root cause not yet isolated.
+
+`RegionalEconomics.Factor` is confirmed not the cause (NorthAmerica and
+EastAsia share the same 1.117 factor yet landed at opposite outcomes
+before this fix) — the real driver was downstream AI strategy behavior,
+not starting conditions.
 
 ---
 
@@ -85,6 +92,13 @@ dilution, neither yet confirmed causal.
 - **`HireExecutiveOrder`'s uncapped, costless action-cap growth** — a
   pre-existing core-mechanic question (should raising the cap ever cost
   something, or have a ceiling?), surfaced but not resolved.
+- **The route open/shrink/regrow thrash cycle** — real (M43), a tried
+  static load-factor floor measurably made things worse. Needs real
+  cross-quarter state (which route was shrunk how recently), filed for
+  a future AI-strategy-expansion round, not a quick patch.
+- **Europe's own idle-fleet stall under `DomesticProfitOptimizerStrategy`**
+  — Europe remains the worst-performing region (81.2% bankrupt) even
+  after M43's own fix; root cause not yet isolated.
 
 ### `WIN_CONDITIONS_ROADMAP.md`
 - **Difficulty tiers** — explicitly deferred, no `Difficulty` concept

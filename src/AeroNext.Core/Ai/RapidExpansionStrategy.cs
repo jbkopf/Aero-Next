@@ -52,10 +52,16 @@ public sealed class RapidExpansionStrategy : IAiStrategy
         var spent = 0;
 
         // 1. New pair first, cross-region preferred - the inversion from
-        // BaselineAi's own order.
+        // BaselineAi's own order. A gateway already won but not yet built
+        // out takes priority over chasing a fresh one - see
+        // AiToolkit.FindBestUnservedPairTouchingWonSlot's own doc comment
+        // for the diagnosed problem this closes (a contested win, spent
+        // real cash to secure, otherwise just sits there while more bids
+        // keep going out).
         if (spent + 1 <= context.ActionCap)
         {
-            var idleBest = FindBestUnservedPairCrossRegionFirstUsingIdleFleet(context, reservedUnitIds);
+            var idleBest = AiToolkit.FindBestUnservedPairTouchingWonSlot(context, reservedUnitIds)
+                ?? FindBestUnservedPairCrossRegionFirstUsingIdleFleet(context, reservedUnitIds);
 
             if (idleBest is not null && BaselineAi.HasSlotAtEveryGateway(idleBest.Value.Pair.Origin, idleBest.Value.Pair.Destination, context.AvailableSlotsByCity, slotsReservedByCity))
             {
