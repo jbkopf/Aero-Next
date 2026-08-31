@@ -208,15 +208,30 @@ public class TimelineTests
     }
 
     [Fact]
-    public void DemandGrowthCatalog_LoadFile_LoadsRepoSchedule_Increasing()
+    public void DemandGrowthCatalog_LoadFile_LoadsRepoSchedule_StartsLow_EndsHigh_ContainsRealDips()
     {
+        // M21 round 2: the repo schedule is no longer a smooth,
+        // monotonically-increasing line - it's grounded in real
+        // aviation history, which includes real demand contractions
+        // (the 1973 oil crisis, 9/11, the 2008-09 financial crisis,
+        // ...). A flat "always increasing" assertion would be actively
+        // wrong for this curve now; check what should actually still be
+        // true instead: overall growth from start to end, sorted by
+        // year, and at least one real dip somewhere in between.
         var schedule = DemandGrowthCatalog.LoadFile(DemandGrowthDataPath);
 
         Assert.NotEmpty(schedule);
+        Assert.Equal(1.0, schedule[0].GlobalMultiplier);
+        Assert.True(schedule[^1].GlobalMultiplier > schedule[0].GlobalMultiplier);
+
         for (var i = 1; i < schedule.Count; i++)
         {
-            Assert.True(schedule[i].GlobalMultiplier >= schedule[i - 1].GlobalMultiplier);
+            Assert.True(schedule[i].Year > schedule[i - 1].Year);
         }
+
+        Assert.Contains(
+            Enumerable.Range(1, schedule.Count - 1),
+            i => schedule[i].GlobalMultiplier < schedule[i - 1].GlobalMultiplier);
     }
 
     [Fact]

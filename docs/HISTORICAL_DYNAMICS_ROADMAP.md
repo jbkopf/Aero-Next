@@ -1,6 +1,9 @@
 # Historical Dynamics Roadmap
 
-**Status: M20 done, M21 round 1 done (Dubai; China/oil-crisis remain future rounds), M22 not started.** Builds on the completed sim core
+**Status: M20 done, M21 round 1 done (Dubai), M21 round 2 done (global
+curve redesign — real 1955-2015 growth/shock history), M22 not started.**
+China's opening and the 1997 Asian Financial Crisis remain named,
+not-yet-authored future rounds. Builds on the completed sim core
 (`docs/SIM_CORE_ROADMAP.md`, M0–M14) and game setup system
 (`docs/GAME_SETUP_ROADMAP.md`, M15–M19, plus its ongoing city-expansion
 series). Continues the shared milestone numbering from M20, since this is
@@ -171,7 +174,7 @@ entries (M21's job), so nothing behavioral could have changed yet.
 
 ---
 
-## M21 — Author real historical trends and events (round 1: architecture + Dubai) ✅
+## M21 — Author real historical trends and events (round 1: architecture + Dubai; round 2: global curve redesign) ✅
 
 Content, not mechanics — the same shape as the aircraft-catalog and
 city-expansion series, and expected to become its own ongoing round-by-round
@@ -194,10 +197,21 @@ series:
   round.* Muted through the Cultural Revolution era, a real inflection
   after 1978's opening-up reforms, continuing to climb through the
   1990s–2000s boom.
-- **A global shock** — *not yet authored, a future round.* The 1973 oil
-  crisis is the obvious first candidate: a real, dateable, global (not
-  city-specific) demand contraction, testing the *global*-scope path of
-  the same mechanism M20 built, not just city/region scopes.
+- **A global shock** ✅ (round 2) — redefined from "just the 1973 oil
+  crisis" to the whole baseline curve, on the user's own direction: not
+  one isolated event layered onto the old smooth 4-point line, but the
+  curve's real shape end to end — jet-age growth, the 1973 oil crisis,
+  the 1979-81 second shock, the 1991 Gulf War, 2001, and 2008-09 all
+  included. See round 2's own writeup below.
+- **1997 Asian Financial Crisis** — *not yet authored, a future round.*
+  Real and dateable, but concentrated enough in impact
+  (EastAsia/AustralAsia) that it reads better as a region-scoped round
+  (`data/historical_events.json`) than diluted into the global curve —
+  named here during round 2's own research so it isn't lost.
+- **China's opening (Beijing, Shanghai)** — *not yet authored, a future
+  round.* Muted through the Cultural Revolution era, a real inflection
+  after 1978's opening-up reforms, continuing to climb through the
+  1990s–2000s boom.
 - Further candidates deliberately left open rather than pre-committed —
   each should be picked and authored the way each aircraft/city round
   was: one real, well-documented story at a time, verified against the
@@ -298,6 +312,93 @@ harsh knock-on effect on this simulation's own starting-city mechanics
 region-appropriate starting-city selection ever weight a city's own
 demand trajectory, not just its 1955 snapshot?), not silently absorbed
 into this round's own narrower scope.
+
+### Round 2: the global baseline curve, redesigned against real history ✅
+
+The user's own direction for this round: look at `data/demand_growth.json`
+itself and how it should change over time, not just insert one more
+event on top of the old smooth 4-point line
+(`1955:1.0 → 1970:1.5 → 1990:2.5 → 2015:4.0`, no real historical basis
+at all, not even the roadmap's own already-named 1973 oil crisis).
+
+**Researched real global commercial aviation demand history first, not
+assumed from memory** — confirmed via web search: world scheduled air
+passenger traffic grew ~14%/year 1950-1970 (17.4B→237.4B passenger-miles,
+ICAO), "exceeding 20% a year in the first post-war decade," badly
+understating the old curve's own flat 1955→1970 span; 1970 itself saw a
+real, documented **+31.1% single-year spike attributed to the Boeing 747**
+(Pan Am's inaugural JFK-LHR 747 flight, Jan 22 1970 — contemporary
+accounts describe the 747 as not just serving demand but *creating* it);
+the 1973 oil embargo/1974-75 recession, the 1979-81 second oil shock
+(Iranian Revolution), the 1991 Gulf War, and the 2008-09 financial
+crisis are all real, dateable global contractions; **2001's 9/11** was
+"the second time in history passenger air transport experienced a year
+of negative growth" (a global loss of 35 million passengers 2000→2001)
+— the sharpest single shock in the whole span, more severe than either
+oil crisis by this measure.
+
+**The design tension, resolved explicitly, not glossed over:** literally
+tracking real ~14%/year 1950s-60s compounding would blow the curve's
+endpoint up by orders of magnitude beyond what `GravityDemandModel`'s
+scale/exponent were ever tuned against — the existing 1.0→4.0 envelope
+was itself a gameplay-balance choice ("tuned by inspection... so load
+factor isn't trivially pinned at 100% everywhere"), not a literal
+economic model, same as every other placeholder in this codebase.
+Resolved the same way Dubai's own round was: **real events set the
+curve's shape and timing; magnitudes stay deliberately modest, in the
+existing envelope's own neighborhood, each still (proposed, tunable).**
+
+`data/demand_growth.json` replaced entirely — 17 global-scope
+breakpoints (1955:1.0 through 2015:4.8), each with a `Name` citing its
+real basis: early jet age (1958-59) → the 747 spike (1970) → the 1973
+oil crisis dip (1975) → the second oil shock dip (1981) → recovery
+(1985, landing the same real year Dubai's own story inflects) → the
+Gulf War dip (1991) → 9/11, the sharpest dip in the span (2001) →
+recovery (2004) → the financial crisis dip (2009) → continued growth to
+2015. The existing `DemandGrowthCatalog_LoadFile_LoadsRepoSchedule_Increasing`
+test asserted the repo schedule was monotonically increasing — no longer
+true by design (the dips are the entire point) — rewritten to assert
+what should actually hold instead: starts at 1.0, ends higher than it
+started, years strictly ascending, and contains at least one real dip.
+
+565 tests total (the rewritten test, no net-new count — a data-only
+round). 100% coverage unaffected (no new source lines).
+
+**Measured, not assumed — a real, substantial, mostly-positive shift,
+for the first time in this series.** `AeroNext.Sim`'s M13 loop came back
+byte-for-byte identical again — not a bug, confirmed by reasoning
+through *why*: this loop's game resolves entirely within 1955-1957
+(quarters 1-10), and both the old and new schedules share the exact same
+first breakpoint (1955:1.0) with no other breakpoint before 1960 in the
+new schedule either — so for this specific loop's short window, the two
+curves are identical by construction, not coincidence.
+
+The 150-game QA harness sweep, which runs the full 244-quarter campaign,
+moved substantially:
+
+| Metric | Round 1 (Dubai only) | Round 2 (curve redesigned) |
+|---|---|---|
+| Clean games with a win | 118/150 (avg quarter 26.4) | **123/150 (avg quarter 19.2)** |
+| NorthAmerica bankrupt / avg cash / wins | 120/144, $4.0M, 13 | 117/144, **$23.8M**, 15 |
+| Europe bankrupt / avg cash / wins | 79/95, $2.1M, 4 | 76/95, **$17.0M**, 2 |
+| EastAsia bankrupt / avg cash / wins | 14/142, $113.0M, 92 | 12/142, $139.5M, 94 |
+| SouthWestAsia bankrupt / avg cash / wins | 33/55, $22.1M, 15 | 28/55, **$104.4M**, 17 |
+| AustralAsia bankrupt / avg cash / wins | 22/45, $68.8M, 7 | 21/45, **$236.7M**, 9 |
+| SouthAmerica bankrupt / avg cash / wins | 61/119, $62.8M, 19 | 59/119, $59.3M, 13 |
+
+Win rate rose and games resolve faster (avg quarter 26.4→19.2) — a
+direct, causally-explainable consequence of the new curve's much
+stronger early-campaign growth (1970's real multiplier is 2.6x here,
+versus the old flat curve's 1.5x): every airline's early revenue is
+higher, softening M41's own diagnosed early-bankruptcy danger window
+(quarters ~1-25) across nearly every region. Notably, **SouthWestAsia's
+own cash recovered substantially** (from round 1's Dubai-penalized
+$22.1M average back up to $104.4M) even though Dubai's own early 0.3x
+penalty is still fully in effect — the stronger overall baseline growth
+partially offsets, without erasing, the harsh starting-city side effect
+round 1 already flagged. The regional-dominance imbalance M39-M41 first
+flagged is still present (EastAsia still wins the most, 94/123) and
+remains open for a future round, not addressed here.
 
 ---
 
