@@ -129,7 +129,7 @@ public sealed class DomesticProfitOptimizerStrategy : IAiStrategy
         // close/raise/cut, retire, pay down debt, hire. Never
         // region-filtered - managing what's already there is sound
         // regardless of how it got there.
-        AiToolkit.ApplyManagementToolkit(context, orders, reservedUnitIds);
+        AiToolkit.ApplyManagementToolkit(context, orders, reservedUnitIds, spent);
 
         return orders;
     }

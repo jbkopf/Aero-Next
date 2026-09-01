@@ -1,5 +1,6 @@
 using AeroNext.Core.Ai;
 using AeroNext.Core.Airlines;
+using AeroNext.Core.Finance;
 using AeroNext.Core.Fleet;
 using AeroNext.Core.Turns;
 using AeroNext.Core.World;
@@ -16,8 +17,12 @@ public class AiToolkitTests
     private static readonly GravityDemandModel DemandModel = new();
     private static readonly AircraftType Aircraft = new("t", "Test", Seats: 100, RangeKm: 10_000, CruiseSpeedKmh: 900, CostPerAvailableSeatKm: 0.1);
 
-    private static StrategyContext MakeContext(IReadOnlyList<City> cities, City homeCity, System.Collections.Generic.IReadOnlyDictionary<string, int>? idleContestableSlotsByCity = null) =>
-        new(Array.Empty<Route>(), 3, cities, DemandModel, new[] { Aircraft }, AirlineFleet.Empty, homeCity.Region, homeCity, IdleContestableSlotsByCity: idleContestableSlotsByCity);
+    private static StrategyContext MakeContext(
+        IReadOnlyList<City> cities, City homeCity,
+        System.Collections.Generic.IReadOnlyDictionary<string, int>? idleContestableSlotsByCity = null,
+        int actionCap = 3, Money? availableCash = null) =>
+        new(Array.Empty<Route>(), actionCap, cities, DemandModel, new[] { Aircraft }, AirlineFleet.Empty, homeCity.Region, homeCity,
+            IdleContestableSlotsByCity: idleContestableSlotsByCity, AvailableCash: availableCash);
 
     // --- ComputeCityWideSlotsRemaining ---
 
@@ -232,5 +237,74 @@ public class AiToolkitTests
         };
 
         Assert.Null(AiToolkit.FindBestIdleContestableGateway(context));
+    }
+
+    // --- ApplyManagementToolkit: hiring (M50) ---
+
+    [Fact]
+    public void ApplyManagementToolkit_ActionCapWasBinding_AffordableAndUnderHeadcountCap_Hires()
+    {
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 50);
+        var context = MakeContext(new[] { home }, home, actionCap: 3, availableCash: Money.FromDollars(10_000_000));
+        var orders = new System.Collections.Generic.List<QuarterOrder>();
+
+        AiToolkit.ApplyManagementToolkit(context, orders, new System.Collections.Generic.HashSet<int>(), spentBeforeToolkit: 3);
+
+        Assert.Single(orders.OfType<HireExecutiveOrder>());
+    }
+
+    [Fact]
+    public void ApplyManagementToolkit_ActionCapWasNotBinding_DoesNotHire()
+    {
+        // 1 of 3 actions spent - the cap was never the bottleneck this
+        // quarter, so an extra one wouldn't have helped.
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 50);
+        var context = MakeContext(new[] { home }, home, actionCap: 3, availableCash: Money.FromDollars(10_000_000));
+        var orders = new System.Collections.Generic.List<QuarterOrder>();
+
+        AiToolkit.ApplyManagementToolkit(context, orders, new System.Collections.Generic.HashSet<int>(), spentBeforeToolkit: 1);
+
+        Assert.Empty(orders.OfType<HireExecutiveOrder>());
+    }
+
+    [Fact]
+    public void ApplyManagementToolkit_Unaffordable_DoesNotHireEvenWhenBinding()
+    {
+        // Binding (3 of 3 spent), but cash falls short of ExecutiveHiringCost
+        // ($600,000) x the 3x comfort multiplier ($1,800,000).
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 50);
+        var context = MakeContext(new[] { home }, home, actionCap: 3, availableCash: Money.FromDollars(1_000_000));
+        var orders = new System.Collections.Generic.List<QuarterOrder>();
+
+        AiToolkit.ApplyManagementToolkit(context, orders, new System.Collections.Generic.HashSet<int>(), spentBeforeToolkit: 3);
+
+        Assert.Empty(orders.OfType<HireExecutiveOrder>());
+    }
+
+    [Fact]
+    public void ApplyManagementToolkit_AtHeadcountCap_DoesNotHireEvenWhenBindingAndAffordable()
+    {
+        // ActionCap already at QuarterEngine.MaxActionCap - 4 executives
+        // already on staff (the derivation this method itself uses),
+        // MaxExecutives reached.
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 50);
+        var context = MakeContext(new[] { home }, home, actionCap: QuarterEngine.MaxActionCap, availableCash: Money.FromDollars(10_000_000));
+        var orders = new System.Collections.Generic.List<QuarterOrder>();
+
+        AiToolkit.ApplyManagementToolkit(context, orders, new System.Collections.Generic.HashSet<int>(), spentBeforeToolkit: QuarterEngine.MaxActionCap);
+
+        Assert.Empty(orders.OfType<HireExecutiveOrder>());
+    }
+
+    [Fact]
+    public void ApplyManagementToolkit_NullAvailableCash_TreatedAsAffordable_PermissiveDefault()
+    {
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 50);
+        var context = MakeContext(new[] { home }, home, actionCap: 3, availableCash: null);
+        var orders = new System.Collections.Generic.List<QuarterOrder>();
+
+        AiToolkit.ApplyManagementToolkit(context, orders, new System.Collections.Generic.HashSet<int>(), spentBeforeToolkit: 3);
+
+        Assert.Single(orders.OfType<HireExecutiveOrder>());
     }
 }

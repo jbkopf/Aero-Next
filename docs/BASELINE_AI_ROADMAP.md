@@ -1388,6 +1388,44 @@ whether the current action cap is actually the bottleneck would very
 plausibly recover most of this collapse on its own, but that is a real
 design decision for a future round, not assumed here.
 
+## M50 — Executives: hire only when needed and affordable ✅
+
+Closes M49's own named gap directly: `AiToolkit.ApplyManagementToolkit`
+(the only path either real strategy calls — `BaselineAi.DecideOrders`
+itself stays frozen/legacy, unchanged) no longer hires unconditionally.
+Three checks, all must hold, each independently legible and tested:
+under `QuarterEngine.MaxExecutives` (4, derived from `ActionCap` the same
+way `FinancialResolver.ComputeExecutiveSalaryCost` already does — no new
+state); the action cap was actually binding this quarter (a new
+`spentBeforeToolkit` parameter, populated by both strategies' own
+existing `spent` tracker — a real, reactive-to-current-state proxy for
+"an extra action would have helped," matching this toolkit's own
+close/raise/cut style rather than forecasting future quarters); and cash
+comfortably clears `FinancialResolver.ExecutiveHiringCost` times a new
+`AiToolkit.ExecutiveHireCashComfortMultiplier` (Proposed, tunable = 3,
+directly mirroring `BaselineAi.AircraftOrderCashComfortMultiplier`'s own
+precedent).
+
+**Measured: overall win rate 9.7% (M49) → 23.7%** (71/300, avg quarter
+16.6 → 24.7 — real games surviving longer again). NorthAmerica — the
+region every prior round but M49 crowned dominant — recovers most of the
+way back: 24.1% → 74.6% win share, 28.1% → 38.7% bankrupt. SouthWestAsia,
+M49's unexpected leader, drops back to 25.4%. A real, large recovery, but
+notably still well below M48's own 40.7% baseline — M49's cost, even
+gated correctly, is a genuine permanent tax on the action economy that
+M48 never had to account for, not a full return to the pre-M49 world.
+Confirmed real via the standard ablation (gating disabled reproduces
+M49's own recorded baseline exactly: 29/300, avg 16.6, NorthAmerica
+24.1%, SouthWestAsia 75.9%, identical to the digit).
+
+Not chased further here: why the recovery lands at 23.7% rather than
+recovering all the way to 40.7% is a real open question — plausibly a
+genuinely borderline quarter now goes without a hire it would have
+benefited from a quarter or two later (the gate is deliberately reactive,
+not predictive), or the `spentBeforeToolkit >= ActionCap` proxy is a
+stricter bar than the real underlying need. Flagged for whoever next
+tunes this gate, not treated as a defect of this round.
+
 ---
 
 ## Kept in mind, not scheduled
@@ -1400,6 +1438,13 @@ design decision for a future round, not assumed here.
 - ~~**`HireExecutiveOrder`'s uncapped, costless nature**~~ — closed by
   M49 above: a one-time hiring cost, a recurring per-quarter salary, and
   a hard cap of 4 executives.
+- ~~**Both real strategies hiring unconditionally regardless of cost**~~
+  — the gap M49 itself surfaced, closed by M50 above: hire only when
+  under the headcount cap, the action cap was actually binding this
+  quarter, and cash comfortably clears the hiring cost. New open item
+  this surfaced instead: the recovery (9.7%→23.7%) doesn't fully close
+  M49's own drop from M48's 40.7% — see M50's own "not chased further"
+  note.
 - **The route open/shrink/regrow thrash cycle** — real, diagnosed
   directly (M43 above), not yet fixed. `BaselineAi.FindBestPerformingRoute`
   can pick a route that was *just* shrunk the previous quarter, since

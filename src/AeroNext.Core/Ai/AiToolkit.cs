@@ -367,13 +367,29 @@ public static class AiToolkit
     }
 
     /// <summary>
+    /// M50 (proposed, tunable) — hire only when cash comfortably clears
+    /// this multiple of FinancialResolver.ExecutiveHiringCost, mirroring
+    /// BaselineAi.AircraftOrderCashComfortMultiplier's own precedent
+    /// exactly: never gets its own HireExecutiveOrder rejected, and keeps
+    /// margin for the new recurring ExecutiveSalaryPerQuarter this hire
+    /// commits to, not just the one-time cost.
+    /// </summary>
+    internal const int ExecutiveHireCashComfortMultiplier = 3;
+
+    /// <summary>
     /// Applies BaselineAi's M31/M35/M36/M37 passive toolkit against
     /// whatever this strategy already holds, unconditionally and
     /// unfiltered by region — a route/unit is a route/unit regardless of
     /// how it got there. Mutates `orders` in place, matching
     /// BaselineAi.DecideOrders's own style.
     /// </summary>
-    public static void ApplyManagementToolkit(StrategyContext context, List<QuarterOrder> orders, HashSet<int> reservedUnitIds)
+    /// <param name="spentBeforeToolkit">
+    /// M50: how many of context.ActionCap this strategy's own
+    /// growth/negotiation steps already committed this quarter, before
+    /// this toolkit's own free (Private, per CLAUDE.md) actions run. Used
+    /// only to gate hiring — see the hire check below.
+    /// </param>
+    public static void ApplyManagementToolkit(StrategyContext context, List<QuarterOrder> orders, HashSet<int> reservedUnitIds, int spentBeforeToolkit)
     {
         var routeLoads = RouteEvaluator.EvaluateNetwork(context.CurrentRoutes, context.DemandModel);
 
@@ -431,6 +447,27 @@ public static class AiToolkit
             }
         }
 
-        orders.Add(new HireExecutiveOrder());
+        // M50: hiring used to be unconditional (M31), correct while it
+        // was free and uncapped. M49 made it cost real money — $600,000
+        // up front plus $300,000/quarter forever — so hiring regardless
+        // of need is now a straight, compounding drain (see
+        // docs/OPEN_WORK.md's M49 finding: win rate 40.7%→9.7%). Three
+        // checks, all must hold, each independently legible:
+        var executiveCount = Math.Max(0, (context.ActionCap - QuarterEngine.BaseActionCap) / QuarterEngine.ActionCapPerExecutive);
+        var underHeadcountCap = executiveCount < QuarterEngine.MaxExecutives;
+
+        // The cap was actually the bottleneck this quarter - a real,
+        // reactive-to-current-state proxy for "an extra action would
+        // have helped," not a forecast of future quarters (matching this
+        // toolkit's own close/raise/cut style everywhere else).
+        var actionCapWasBinding = spentBeforeToolkit >= context.ActionCap;
+
+        var canAffordComfortably = context.AvailableCash is null
+            || FinancialState.CanAfford(context.AvailableCash.Value, FinancialResolver.ExecutiveHiringCost * ExecutiveHireCashComfortMultiplier);
+
+        if (underHeadcountCap && actionCapWasBinding && canAffordComfortably)
+        {
+            orders.Add(new HireExecutiveOrder());
+        }
     }
 }

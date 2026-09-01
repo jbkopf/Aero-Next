@@ -18,8 +18,8 @@ Compiled 2026-08-31, cross-referencing every `docs/*_ROADMAP.md`'s own
 writing: M0–M14 (`SIM_CORE_ROADMAP.md`), M15–M19 (`GAME_SETUP_ROADMAP.md`),
 M20–M22 (`HISTORICAL_DYNAMICS_ROADMAP.md`), M23–M24
 (`WIN_CONDITIONS_ROADMAP.md`), M25–M30/M34 (`FINANCIAL_MODEL_ROADMAP.md`,
-M31 retired), M31/M35–M44/M49 (`BASELINE_AI_ROADMAP.md`), M32–M33/M45–M46
-(`ROUTE_CAPACITY_ROADMAP.md`), M47–M48 (`MARKETING_ROADMAP.md`). M49 is
+M31 retired), M31/M35–M44/M49–M50 (`BASELINE_AI_ROADMAP.md`), M32–M33/M45–M46
+(`ROUTE_CAPACITY_ROADMAP.md`), M47–M48 (`MARKETING_ROADMAP.md`). M50 is
 the current highest issued number. Update this line the moment a new
 milestone is opened anywhere.
 
@@ -106,6 +106,20 @@ is the single most direct next target for whoever next works on
 itself, the same scope discipline M47/M48 both held to for their own new
 mechanics.
 
+**M50 (`docs/BASELINE_AI_ROADMAP.md`, executives: hire only when needed
+and affordable) closes that gap directly, the very next round.**
+`AiToolkit.ApplyManagementToolkit` now hires only when under the
+headcount cap, the action cap was actually binding that quarter, and
+cash comfortably clears the hiring cost. Win rate **9.7% → 23.7%**;
+NorthAmerica recovers most of the way back (24.1%→74.6% win share);
+SouthWestAsia drops back to 25.4%. Confirmed real via the standard
+ablation (gating disabled reproduces M49's own baseline exactly). Still
+well below M48's own 40.7% pre-M49 baseline — M49's real, permanent cost
+is a genuine tax on the action economy even correctly gated, not
+something a smarter hire trigger alone fully undoes. Why the recovery
+stops at 23.7% rather than 40.7% is flagged, not chased, in M50's own
+write-up.
+
 Three items found during these investigations, deliberately deferred
 rather than folded in — all filed under `BASELINE_AI_ROADMAP.md`'s own
 "Kept in mind" now:
@@ -177,11 +191,14 @@ AI strategy/network-topology behavior, not starting conditions.
   consequence yet, so teaching the AI to court one would be cosmetic.
 - ~~**`HireExecutiveOrder`'s uncapped, costless action-cap growth**~~ —
   closed by `docs/BASELINE_AI_ROADMAP.md`'s M49: a one-time hiring cost,
-  a recurring per-quarter salary, and a hard cap of 4 executives. New
-  open item this closure surfaced instead: both real strategies still
-  hire unconditionally every quarter regardless of cost, now a genuine
-  problem rather than a harmless default — see the active-priority note
-  below.
+  a recurring per-quarter salary, and a hard cap of 4 executives.
+- ~~**Both real strategies hiring unconditionally regardless of cost**~~
+  — the gap M49 itself surfaced, closed by `docs/BASELINE_AI_ROADMAP.md`'s
+  M50: hire only when the headcount cap has room, the action cap was
+  actually binding this quarter, and cash comfortably clears the cost.
+  Recovers most, not all, of M49's own win-rate drop (9.7%→23.7%,
+  against M48's pre-M49 40.7%) — see the active-priority note below for
+  the still-open gap between 23.7% and 40.7%.
 - **The route open/shrink/regrow thrash cycle** — real (M43), a tried
   static load-factor floor measurably made things worse. Needs real
   cross-quarter state (which route was shrunk how recently), filed for

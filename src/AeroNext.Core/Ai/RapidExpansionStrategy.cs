@@ -155,7 +155,7 @@ public sealed class RapidExpansionStrategy : IAiStrategy
         AiToolkit.NegotiateOrBorrow(context, bestGateway, orders, ref spent);
 
         // 4. Shared toolkit - unchanged from DomesticProfitOptimizerStrategy's own use of it.
-        AiToolkit.ApplyManagementToolkit(context, orders, reservedUnitIds);
+        AiToolkit.ApplyManagementToolkit(context, orders, reservedUnitIds, spent);
 
         return orders;
     }

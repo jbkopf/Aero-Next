@@ -169,7 +169,11 @@ public class DomesticProfitOptimizerStrategyTests
         Assert.Empty(orders.OfType<RouteOrder>());
         Assert.Empty(orders.OfType<LeaseAircraftOrder>());
         Assert.Empty(orders.OfType<AircraftOrder>());
-        Assert.Single(orders.OfType<HireExecutiveOrder>()); // toolkit still applies
+        // M50: no growth/negotiation candidate exists here at all (no
+        // gateway cities in this fixture), so 0 of 3 actions were spent -
+        // the action cap wasn't the bottleneck, so hiring correctly
+        // doesn't fire even though it's otherwise affordable/under cap.
+        Assert.Empty(orders.OfType<HireExecutiveOrder>());
     }
 
     [Fact]
