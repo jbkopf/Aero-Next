@@ -211,3 +211,108 @@ project coverage 99.73%/99.48%. 300-game QA harness sweep: 300/300
 clean, numbers byte-identical to round 1's own (expected — still no AI
 strategy exercises marketing at all, on either the contested or
 uncontested path).
+
+---
+
+## M48 — Fare gets the same demand effect marketing just got ✅
+
+**Origin:** the user's own direct follow-up, immediately after asking
+"how does fare currently affect demand?" and learning the honest answer
+(it doesn't — a pure revenue lever, deliberately scoped out at M34, the
+one deliberate gap left once M47 built marketing's own sibling
+mechanism). The ask: fare should move demand the same *kind* of way
+marketing does, but bidirectionally — a discount raises it (like
+marketing), a premium *lowers* it for that airline specifically
+(marketing never needed a decrease case). Effective on both contested
+and uncontested routes, same as marketing. Explicit, load-bearing
+constraint: "do not force decreased passenger numbers on increase of
+fares... the new lowered demand could still be greater than capacity."
+
+**New `FareCalculator.DemandDeltaFraction(Route)`** — standard price
+elasticity: `-FareDemandElasticity x (FarePerPassenger / SuggestedFarePerPassenger - 1)`,
+`FareDemandElasticity = 1.5` `(Proposed, tunable)` (a 10% discount off
+the suggested fare yields a 15% demand increase; a 10% premium yields a
+15% decrease, symmetrically). Exactly zero whenever `FareOverride` is
+null — `FarePerPassenger` then equals `SuggestedFarePerPassenger` by
+construction, ratio exactly 1.0 — so every route nobody has ever touched
+`SetFareOrder` on is completely unaffected, with no explicit
+null-permissive parameter needed the way M45/M46/M47's own new
+parameters each required: the "opt-in" is already implicit in whether a
+fare override exists at all, the same mechanism that already gated
+whether fare affected *revenue* since M34.
+
+**Reuses M47 round 2's own machinery rather than inventing parallel
+logic** — `CompetitiveMarket`'s contested branch gains one more
+multiplicative weight factor, `EffectiveFareMultiplier` (floored at
+zero so an extreme premium can't make a weight negative); the
+uncontested branch's `ApplyMarketingDemandBoost` is generalized into
+`ApplyDemandAdjustment`, combining marketing's own boost fraction
+(always ≥ 0) with fare's signed fraction (`Legs.Min` across a one-stop
+itinerary, mirroring the existing bottleneck-leg convention) into one
+total delta, then branching on its sign:
+- **Non-negative delta** (net discount): identical to round 2's own
+  growth path — `Math.Min` against the running spare-capacity ledger.
+- **Negative delta** (net premium): shrinks carried, but only past
+  `unmetDemand` (`max(0, DemandPassengers - PassengersCarried)` — how
+  much demand was already going uncarried before this adjustment, zero
+  unless already oversold). The cut is absorbed by that cushion first;
+  carried only actually drops once the cut exceeds it — the entire
+  mechanism behind the user's own "never force a decrease while still
+  above capacity" requirement, falling out of one `Math.Max(0, ...)`
+  rather than a special case. Also clamped at `PassengersCarried` itself
+  (a real bug caught by this round's own tests, not shipped: an extreme
+  premium against a huge demand figure could otherwise drive the
+  reduction — and therefore carried — negative before this floor was
+  added). A genuine reduction correctly *frees* spare capacity on the
+  ledger too, for a later pair sharing the same hub leg.
+
+**Done when:** the two pre-existing `FinancialResolverTests` that
+assumed fare had zero demand effect were rewritten to reflect the new
+reality rather than patched to keep passing (one dropped its
+now-invalidated `FareOverride`, since the test was actually about
+SeatsUsed vs SeatsPerQuarter, not about overriding fare at all; the
+other moved from a 2x premium — which, it turned out, was extreme enough
+to fully sell out the route into the reduction cushion, breaking its own
+"same carried count both sides" premise — to a moderate 20% one,
+verified to still land in the always-oversold regime before trusting the
+revenue assertion built on it); dedicated tests cover
+`DemandDeltaFraction` itself (zero exactly with no override, sign and
+elasticity-formula magnitude for a discount and a premium, symmetry, and
+a degenerate zero-suggested-fare guard engineered via a same-city,
+huge-seat route rather than skipped); `CompetitiveMarket` tests cover a
+low-load-factor discount increasing carried, an at-capacity premium
+never decreasing it, a not-at-capacity premium genuinely decreasing it,
+an extreme premium never going negative, both contested-share directions,
+and marketing/fare stacking together on one pair.
+
+Done. 730 tests total (14 new — 6 `FareCalculator`, 8 `CompetitiveMarket`,
+plus 2 `FinancialResolver` rewritten in place, not counted as new). 100%
+line/branch coverage on `FareCalculator` and `CompetitiveMarket`, the
+only classes this milestone touched. Overall project coverage
+99.74%/99.48%. 300-game QA harness sweep at 244 quarters: 300/300 clean,
+0 invariant violations, 0 crashes.
+
+**Unlike marketing, this one genuinely moved the sweep — confirmed by
+ablation, not assumed.** Unlike M47 (which no `IAiStrategy` ever
+touches), `AiToolkit.ApplyManagementToolkit` has submitted `SetFareOrder`s
+reactively since M37 (`RaisedFare` on a saturated route, `CutFare` on an
+underperforming one) — both real strategies, both real loops, already
+exercising this constantly. Those existing orders suddenly having real
+demand consequences is a genuine behavior change, not a dormant lever.
+Overall win rate **38.7% → 40.7%** (122/300, avg quarter 23.0 → **51.6**
+— games run measurably longer before a winner emerges). Region-by-region
+bankruptcy moved unevenly (EastAsia 60.7% → 74.5% the sharpest move,
+SouthAmerica 92.0% → 80.6% the other direction); win share barely moved
+(NorthAmerica 84.5% → 85.2%, SouthWestAsia 15.5% → 14.8%). Isolated by
+ablation (`FareCalculator.DemandDeltaFraction` temporarily forced to
+return 0.0, reverted before shipping, same instrument-then-revert
+discipline as every prior milestone here): with the effect disabled, the
+sweep reproduces the pre-M48 baseline exactly (116/300, avg 23.0,
+identical region table) — confirms the move is real, not sampling noise.
+Not chased further here (no fix attempted, no root-cause trace beyond
+identifying the mechanism) — flagged plainly, matching this project's
+own established discipline, as a real interaction for whoever next works
+on `BaselineAi`/successor strategies to be aware of: fare reactivity and
+demand elasticity now feed back into each other in a loop neither
+`RaisedFare`/`CutFare` nor this milestone was designed with the other in
+mind.

@@ -592,10 +592,14 @@ public class FinancialResolverTests
     [Fact]
     public void Resolve_Revenue_EqualsFarePerPassengerTimesSeatsUsed_NotSeatsOffered()
     {
+        // No FareOverride - M48 gave fare a real demand effect the
+        // instant it's set away from the computed default, so this test
+        // (about SeatsUsed vs SeatsPerQuarter, not about overriding fare
+        // at all) stays on the always-neutral default fare deliberately.
         var a = MakeCity("a", 0, 0, 1);
         var b = MakeCity("b", 1, 1, 1);
         var aircraft = new AircraftType("t", "Test", Seats: 400); // demand at this distance won't fill it - real load factor < 100%
-        var route = new Route(a, b, aircraft, AircraftCount: 1, FareOverride: Money.FromDollars(100));
+        var route = new Route(a, b, aircraft, AircraftCount: 1);
         var airline = new Airline("A", new[] { route });
         var market = CompetitiveMarket.Resolve(new[] { airline }, new[] { a, b }, DemandModel);
         var state = FinancialState.Start(Money.FromDollars(10_000_000), Money.Zero, interestRatePerQuarter: 0.0);
@@ -605,27 +609,39 @@ public class FinancialResolverTests
 
         Assert.True(seatsUsed > 0);
         Assert.True(seatsUsed < route.SeatsPerQuarter); // genuinely load-factor-constrained, not sold out
-        Assert.Equal(Money.FromDollars(100) * seatsUsed, statement.Revenue);
+        Assert.Equal(route.FarePerPassenger * seatsUsed, statement.Revenue);
     }
 
     [Fact]
     public void Resolve_Revenue_ReflectsACustomFareOverride_NotJustTheComputedDefault()
     {
+        // A modest 20% premium (not M48's own more extreme test scenarios
+        // for the demand effect itself) on a route so oversold that even
+        // the resulting real demand cut leaves it comfortably above
+        // capacity both sides - carried count stays identical (M48's own
+        // "never force a decrease while still above capacity" rule),
+        // isolating fare's effect on revenue from its effect on demand.
         var a = MakeCity("a", 0, 0, 100);
         var b = MakeCity("b", 1, 1, 100); // close + heavy: demand swamps capacity -> full, known load factor
         var aircraft = new AircraftType("t", "Test", Seats: 10);
         var defaultRoute = new Route(a, b, aircraft, AircraftCount: 1);
-        var expensiveRoute = new Route(a, b, aircraft, AircraftCount: 1, FareOverride: defaultRoute.FarePerPassenger * 2);
+        var premiumFare = new Money(defaultRoute.FarePerPassenger.Cents * 6 / 5); // +20%
+        var expensiveRoute = new Route(a, b, aircraft, AircraftCount: 1, FareOverride: premiumFare);
         var defaultAirline = new Airline("Default", new[] { defaultRoute });
         var expensiveAirline = new Airline("Expensive", new[] { expensiveRoute });
         var defaultMarket = CompetitiveMarket.Resolve(new[] { defaultAirline }, new[] { a, b }, DemandModel);
         var expensiveMarket = CompetitiveMarket.Resolve(new[] { expensiveAirline }, new[] { a, b }, DemandModel);
         var state = FinancialState.Start(Money.FromDollars(10_000_000), Money.Zero, interestRatePerQuarter: 0.0);
 
+        // Confirms the test's own premise before trusting the revenue
+        // assertion below - both sides really are still capacity-bound,
+        // same carried count, despite the fare-driven demand cut.
+        Assert.Equal(defaultMarket.RouteUsage.Single().SeatsUsed, expensiveMarket.RouteUsage.Single().SeatsUsed);
+
         var (_, defaultStatement) = FinancialResolver.Resolve(state, defaultAirline, defaultMarket, Array.Empty<QuarterOrder>());
         var (_, expensiveStatement) = FinancialResolver.Resolve(state, expensiveAirline, expensiveMarket, Array.Empty<QuarterOrder>());
 
-        Assert.Equal(defaultStatement.Revenue * 2, expensiveStatement.Revenue); // same carried count both sides (both fully sold out), double the fare
+        Assert.Equal(new Money(defaultStatement.Revenue.Cents * 6 / 5), expensiveStatement.Revenue); // same carried count both sides, +20% fare
     }
 
     [Fact]

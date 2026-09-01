@@ -1,4 +1,5 @@
 using AeroNext.Core.Airlines;
+using AeroNext.Core.Finance;
 using AeroNext.Core.Turns;
 using AeroNext.Core.World;
 
@@ -110,15 +111,15 @@ public static class CompetitiveMarket
             if (competitors.Count == 1)
             {
                 var (airline, load) = competitors[0];
-                var additional = ApplyMarketingDemandBoost(airline, load!, origin, destination, spareCapacityByAirline[airline], marketingByAirlineName);
-                carriedByAirline[airline] = load!.PassengersCarried + additional;
+                var adjustment = ApplyDemandAdjustment(airline, load!, origin, destination, spareCapacityByAirline[airline], marketingByAirlineName);
+                carriedByAirline[airline] = load!.PassengersCarried + adjustment;
             }
             else if (competitors.Count > 1)
             {
                 var weights = competitors
                     .Select(c => (
                         c.Airline,
-                        Weight: c.Load!.Itinerary.Legs.Min(l => l.SeatsPerQuarter) * EffectiveContestedQuality(c.Airline, origin, destination, marketingByAirlineName),
+                        Weight: c.Load!.Itinerary.Legs.Min(l => l.SeatsPerQuarter) * EffectiveContestedQuality(c.Airline, origin, destination, marketingByAirlineName) * EffectiveFareMultiplier(c.Load!),
                         Ceiling: c.Load!.PassengersCarried))
                     .ToList();
                 var totalWeight = weights.Sum(w => w.Weight);
@@ -153,72 +154,107 @@ public static class CompetitiveMarket
         return new CompetitiveMarketResult(pairResults, routeUsage);
     }
 
-    /// <summary>M47: Quality, boosted by this airline's own active marketing campaign on this specific pair, if any — a route campaign's boost, else a network campaign's smaller one, else unboosted. Contested pairs only — see ApplyMarketingDemandBoost for the uncontested-pair mechanism.</summary>
-    private static double EffectiveContestedQuality(Airline airline, City origin, City destination, IReadOnlyDictionary<string, AirlineMarketingCampaign>? marketingByAirlineName)
+    /// <summary>M47: Quality, boosted by this airline's own active marketing campaign on this specific pair, if any — a route campaign's boost, else a network campaign's smaller one, else unboosted. Contested pairs only — see ApplyDemandAdjustment for the uncontested-pair mechanism.</summary>
+    private static double EffectiveContestedQuality(Airline airline, City origin, City destination, IReadOnlyDictionary<string, AirlineMarketingCampaign>? marketingByAirlineName) =>
+        airline.Quality * (1 + MarketingDeltaFraction(airline, origin, destination, marketingByAirlineName));
+
+    /// <summary>M48: FareCalculator.DemandDeltaFraction, as a weight multiplier for the contested branch — a discount widens this airline's share of the pair, a premium narrows it, floored at zero so an extreme premium can never make the weight negative.</summary>
+    private static double EffectiveFareMultiplier(ItineraryLoad load) =>
+        Math.Max(0.0, 1 + load.Itinerary.Legs.Min(leg => FareCalculator.DemandDeltaFraction(leg)));
+
+    /// <summary>M47: this airline's active campaign's own boost fraction for this specific pair — a route campaign's, else a network campaign's smaller one, else zero. Shared by both the contested weight multiplier and the uncontested demand adjustment below.</summary>
+    private static double MarketingDeltaFraction(Airline airline, City origin, City destination, IReadOnlyDictionary<string, AirlineMarketingCampaign>? marketingByAirlineName)
     {
         if (marketingByAirlineName is null || !marketingByAirlineName.TryGetValue(airline.Name, out var campaign))
         {
-            return airline.Quality;
+            return 0.0;
         }
 
-        var multiplier = campaign.RouteKeys.Contains(QuarterEngine.NormalizedPairKey(origin, destination))
-            ? 1 + RouteCampaignBoost
-            : campaign.NetworkWide
-                ? 1 + NetworkCampaignBoost
-                : 1.0;
-
-        return airline.Quality * multiplier;
-    }
-
-    /// <summary>
-    /// M47 round 2: the added-demand mechanism for an uncontested pair —
-    /// there's no rival share to win via Quality here, so instead the
-    /// campaign generates real added demand (RouteCampaignBoost/
-    /// NetworkCampaignBoost applied as a genuine fraction of this pair's
-    /// own DemandPassengers, not a weight multiplier), capped at however
-    /// much spare capacity the itinerary's own tightest leg actually has
-    /// left this quarter. This single Math.Min against spare capacity is
-    /// the whole mechanism behind "real tangible effects would only be
-    /// felt on routes that have lower load factors" (the user's own
-    /// words): a route already near its own ceiling has near-zero spare
-    /// capacity, so the boost has near-nothing left to add regardless of
-    /// its own size, while a route flying half-empty can realize close to
-    /// the full added-demand figure. Mutates remainingSpareCapacityByRoute
-    /// (decrementing whichever legs this itinerary actually uses) so a
-    /// later pair sharing the same leg sees accurate remaining room, not
-    /// the same starting snapshot every pair would otherwise see.
-    /// </summary>
-    private static long ApplyMarketingDemandBoost(
-        Airline airline, ItineraryLoad load, City origin, City destination,
-        Dictionary<Route, long> remainingSpareCapacityByRoute,
-        IReadOnlyDictionary<string, AirlineMarketingCampaign>? marketingByAirlineName)
-    {
-        if (marketingByAirlineName is null || !marketingByAirlineName.TryGetValue(airline.Name, out var campaign))
-        {
-            return 0;
-        }
-
-        var boostFraction = campaign.RouteKeys.Contains(QuarterEngine.NormalizedPairKey(origin, destination))
+        return campaign.RouteKeys.Contains(QuarterEngine.NormalizedPairKey(origin, destination))
             ? RouteCampaignBoost
             : campaign.NetworkWide
                 ? NetworkCampaignBoost
                 : 0.0;
+    }
 
-        if (boostFraction <= 0.0)
+    /// <summary>
+    /// M47 round 2 / M48: the demand-adjustment mechanism for an
+    /// uncontested pair — there's no rival share to win via Quality
+    /// here, so marketing and fare instead adjust real demand directly.
+    /// Combines marketing's own boost fraction (MarketingDeltaFraction,
+    /// always ≥ 0) with fare's own signed fraction (FareCalculator.
+    /// DemandDeltaFraction — positive for a discount, negative for a
+    /// premium) into one total delta against this pair's own
+    /// DemandPassengers.
+    ///
+    /// A non-negative delta (net discount/marketing) grows carried
+    /// passengers, capped by Math.Min against however much spare
+    /// capacity the itinerary's own tightest leg actually has left this
+    /// quarter — the whole mechanism behind "real tangible effects would
+    /// only be felt on routes that have lower load factors": a route
+    /// already near its own ceiling has near-zero spare capacity to add
+    /// to, regardless of the delta's own size.
+    ///
+    /// A negative delta (net fare premium) shrinks demand — but per the
+    /// user's own direct instruction, must never force carried
+    /// passengers down while the now-lower demand is still above
+    /// capacity ("do not force decreased passenger numbers on increase
+    /// of fares... the new lowered demand could still be greater than
+    /// capacity"). unmetDemand is exactly that cushion — how much demand
+    /// was already going uncarried before this adjustment, zero unless
+    /// the route was already sold out — and the cut is absorbed by it
+    /// first; carried only actually drops once the cut exceeds the
+    /// cushion.
+    ///
+    /// Mutates remainingSpareCapacityByRoute either way (decrementing on
+    /// growth, incrementing on an genuine carried-passenger reduction —
+    /// a route that just got less popular really does free up shared hub
+    /// capacity for a later pair) so a later pair sharing the same leg
+    /// sees accurate remaining room, not the same starting snapshot every
+    /// pair would otherwise see.
+    /// </summary>
+    private static long ApplyDemandAdjustment(
+        Airline airline, ItineraryLoad load, City origin, City destination,
+        Dictionary<Route, long> remainingSpareCapacityByRoute,
+        IReadOnlyDictionary<string, AirlineMarketingCampaign>? marketingByAirlineName)
+    {
+        var marketingDeltaFraction = MarketingDeltaFraction(airline, origin, destination, marketingByAirlineName);
+        var fareDeltaFraction = load.Itinerary.Legs.Min(leg => FareCalculator.DemandDeltaFraction(leg));
+        var totalDeltaFraction = marketingDeltaFraction + fareDeltaFraction;
+
+        if (totalDeltaFraction == 0.0)
         {
             return 0;
         }
 
-        var additionalDemand = (long)Math.Round(load.DemandPassengers * boostFraction, MidpointRounding.AwayFromZero);
-        var spareCapacity = load.Itinerary.Legs.Min(leg => remainingSpareCapacityByRoute.GetValueOrDefault(leg));
-        var additionalCarried = Math.Min(additionalDemand, spareCapacity);
+        var deltaDemand = (long)Math.Round(load.DemandPassengers * totalDeltaFraction, MidpointRounding.AwayFromZero);
+
+        if (deltaDemand >= 0)
+        {
+            var spareCapacity = load.Itinerary.Legs.Min(leg => remainingSpareCapacityByRoute.GetValueOrDefault(leg));
+            var additionalCarried = Math.Min(deltaDemand, spareCapacity);
+
+            foreach (var leg in load.Itinerary.Legs)
+            {
+                remainingSpareCapacityByRoute[leg] = remainingSpareCapacityByRoute.GetValueOrDefault(leg) - additionalCarried;
+            }
+
+            return additionalCarried;
+        }
+
+        var unmetDemand = Math.Max(0L, load.DemandPassengers - load.PassengersCarried);
+        // Clamped at PassengersCarried itself - an extreme premium (a large
+        // enough fare hike, or a low elasticity constant applied to a huge
+        // demand figure) must never drive carried below zero; it can only
+        // ever claw back what this itinerary was actually carrying.
+        var excessReduction = Math.Min(load.PassengersCarried, Math.Max(0L, -deltaDemand - unmetDemand));
 
         foreach (var leg in load.Itinerary.Legs)
         {
-            remainingSpareCapacityByRoute[leg] = remainingSpareCapacityByRoute.GetValueOrDefault(leg) - additionalCarried;
+            remainingSpareCapacityByRoute[leg] = remainingSpareCapacityByRoute.GetValueOrDefault(leg) + excessReduction;
         }
 
-        return additionalCarried;
+        return -excessReduction;
     }
 
     private static ItineraryLoad? FindPair(NetworkPlan plan, string originId, string destinationId)

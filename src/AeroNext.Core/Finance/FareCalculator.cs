@@ -36,6 +36,16 @@ public static class FareCalculator
     /// <summary>(Proposed, tunable) — see M34's roadmap writeup.</summary>
     public const double DefaultFareMarginOverCost = 0.30;
 
+    /// <summary>
+    /// (Proposed, tunable) — M48: how strongly a fare set away from
+    /// SuggestedFarePerPassenger moves demand, in the standard
+    /// price-elasticity sense (percent demand change per percent price
+    /// change). 1.5 means a 10% discount off the suggested fare yields a
+    /// 15% demand increase for that route; a 10% premium yields a 15%
+    /// decrease, symmetrically.
+    /// </summary>
+    public const double FareDemandElasticity = 1.5;
+
     public static Money CostPerSeatCarried(Route route)
     {
         var seatsPerQuarterPerAircraft = route.SeatsPerQuarter / route.AircraftCount;
@@ -51,5 +61,37 @@ public static class FareCalculator
         var cents = (long)Math.Round(CostPerSeatCarried(route).Cents * (1 + DefaultFareMarginOverCost), MidpointRounding.AwayFromZero);
 
         return new Money(cents);
+    }
+
+    /// <summary>
+    /// M48: how much this route's own actual fare (FarePerPassenger —
+    /// a player override, or SuggestedFarePerPassenger itself when none
+    /// is set) should move demand, as a signed fraction of baseline
+    /// demand — positive for a discount (fare below suggested), negative
+    /// for a premium (fare above), zero exactly when FareOverride is
+    /// null (no override at all resolves to actual == suggested,
+    /// ratio == 1.0 exactly, so every route nobody has ever touched
+    /// SetFareOrder on is completely unaffected — no migration burden on
+    /// any existing caller, same reasoning FareOverride's own default
+    /// already established). CompetitiveMarket.Resolve is the only real
+    /// consumer — see its own doc comments for how a contested pair uses
+    /// this as one more multiplicative factor alongside Quality/marketing,
+    /// and how an uncontested pair uses it as a genuine demand delta,
+    /// symmetric with a discount's own gain but bounded so a premium can
+    /// never force carried passengers down below whatever spare capacity
+    /// would already have left uncarried anyway.
+    /// </summary>
+    public static double DemandDeltaFraction(Route route)
+    {
+        var suggested = SuggestedFarePerPassenger(route).Cents;
+
+        if (suggested <= 0)
+        {
+            return 0.0;
+        }
+
+        var priceRatio = (double)route.FarePerPassenger.Cents / suggested;
+
+        return -FareDemandElasticity * (priceRatio - 1.0);
     }
 }

@@ -1140,20 +1140,23 @@ not a substitute for teaching it.
   elsewhere — moved to **`docs/BASELINE_AI_ROADMAP.md`**, which reuses
   the M31 number for its own first milestone (nothing was ever built
   under the old scope) and continues from M35.
-- **Fare stance (fully settled by M34) and marketing (fully settled by
-  `docs/MARKETING_ROADMAP.md`'s M47), service level "postures"** —
-  CLAUDE.md's original framing bundled all three as free
-  competitiveness/revenue dials. Fare: M34 built a real, direct per-route
-  price (`Route.FarePerPassenger`, `SetFareOrder`), replacing the old
-  flat `DefaultYieldPerPassengerKm` global rate entirely — it still
-  doesn't affect demand size or competitive share, deliberately (M34
-  scoped that out explicitly, and nothing since has revisited it).
-  Marketing: M47 gave players a real, direct way to set `Airline.Quality`'s
-  own placeholder up for a quarter, on a route or the whole network —
-  `Airline.Quality` itself remains the single knob (still also standing
-  in for service level, which stays unbuilt), but it's no longer inert.
-  Only service level remains a genuinely open gap, adjacent to "financial
-  model" but not this roadmap's own scope.
+- **Fare stance and marketing (both fully settled, via
+  `docs/MARKETING_ROADMAP.md`'s M47/M48), service level "posture"
+  remains the one open gap** — CLAUDE.md's original framing bundled all
+  three as free competitiveness/revenue dials. Fare: M34 built a real,
+  direct per-route price (`Route.FarePerPassenger`, `SetFareOrder`),
+  replacing the old flat `DefaultYieldPerPassengerKm` global rate
+  entirely; M34 itself deliberately scoped out any effect on demand or
+  competitive share, and that stayed true until M48 gave it real price
+  elasticity (a discount grows demand, a premium shrinks it, both
+  bounded so a premium never forces carried passengers down while
+  demand is still above capacity). Marketing: M47 gave players a real,
+  direct way to set `Airline.Quality`'s own placeholder up for a
+  quarter, on a route or the whole network, contested and uncontested
+  alike. `Airline.Quality` itself remains the single knob standing in
+  for service level specifically now (the only one of the original
+  three still unbuilt) — adjacent to "financial model" but not this
+  roadmap's own scope.
 - **Interest rate scaling with leverage** — today's `InterestRatePerQuarter`
   is fixed at game start (2%) regardless of how much debt an airline
   carries. A realistic "the more you borrow, the worse your rate gets"

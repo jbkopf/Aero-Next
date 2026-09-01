@@ -86,4 +86,84 @@ public class FareCalculatorTests
         Assert.Null(route.FareOverride);
         Assert.Equal(FareCalculator.SuggestedFarePerPassenger(route), route.FarePerPassenger);
     }
+
+    // --- M48: DemandDeltaFraction ---
+
+    private static Route MakeRoute(City a, City b, Money? fareOverride = null) =>
+        new(a, b, new AircraftType("t", "Test", Seats: 20, CruiseSpeedKmh: 400, CostPerAvailableSeatKm: 0.10), AircraftCount: 1, fareOverride);
+
+    [Fact]
+    public void DemandDeltaFraction_DegenerateZeroCostRoute_NeverDividesByZero_ReturnsZero()
+    {
+        // A defensive guard, not a realistic scenario: engineered so
+        // SuggestedFarePerPassenger itself rounds to exactly zero (a
+        // same-location "route" with zero distance and an enormous seat
+        // count spreads the flat salary cost thin enough to round away)
+        // - DemandDeltaFraction must not divide by that zero.
+        var a = MakeCity("a", 0, 0);
+        var hugeAircraft = new AircraftType("t", "Test", Seats: 100_000, CruiseSpeedKmh: 400, CostPerAvailableSeatKm: 0.0);
+        var route = new Route(a, a, hugeAircraft, AircraftCount: 1, Money.FromDollars(50)); // a's own coords for both ends
+        Assert.Equal(Money.Zero, FareCalculator.SuggestedFarePerPassenger(route)); // confirms the test's own premise
+
+        Assert.Equal(0.0, FareCalculator.DemandDeltaFraction(route));
+    }
+
+    [Fact]
+    public void DemandDeltaFraction_NoOverride_IsExactlyZero()
+    {
+        var a = MakeCity("a", 0, 0);
+        var b = MakeCity("b", 5, 5);
+        var route = MakeRoute(a, b);
+
+        Assert.Equal(0.0, FareCalculator.DemandDeltaFraction(route));
+    }
+
+    [Fact]
+    public void DemandDeltaFraction_Discount_IsPositive()
+    {
+        var a = MakeCity("a", 0, 0);
+        var b = MakeCity("b", 5, 5);
+        var defaultRoute = MakeRoute(a, b);
+        var discounted = MakeRoute(a, b, new Money(defaultRoute.FarePerPassenger.Cents * 9 / 10)); // -10%
+
+        Assert.True(FareCalculator.DemandDeltaFraction(discounted) > 0.0);
+    }
+
+    [Fact]
+    public void DemandDeltaFraction_Premium_IsNegative()
+    {
+        var a = MakeCity("a", 0, 0);
+        var b = MakeCity("b", 5, 5);
+        var defaultRoute = MakeRoute(a, b);
+        var expensive = MakeRoute(a, b, new Money(defaultRoute.FarePerPassenger.Cents * 11 / 10)); // +10%
+
+        Assert.True(FareCalculator.DemandDeltaFraction(expensive) < 0.0);
+    }
+
+    [Fact]
+    public void DemandDeltaFraction_MatchesElasticityFormula_TenPercentDiscount()
+    {
+        var a = MakeCity("a", 0, 0);
+        var b = MakeCity("b", 5, 5);
+        var defaultRoute = MakeRoute(a, b);
+        var discounted = MakeRoute(a, b, new Money(defaultRoute.FarePerPassenger.Cents * 9 / 10)); // -10%
+
+        // -elasticity * (0.9 - 1.0) = +0.1 * elasticity - within a small
+        // tolerance, since the -10% itself is computed via integer-cents
+        // truncation (Money has no fractional cents), not exactly 0.9x.
+        var expected = FareCalculator.FareDemandElasticity * 0.1;
+        Assert.Equal(expected, FareCalculator.DemandDeltaFraction(discounted), precision: 3);
+    }
+
+    [Fact]
+    public void DemandDeltaFraction_Symmetric_DiscountAndPremiumOfSameMagnitude_OppositeSign()
+    {
+        var a = MakeCity("a", 0, 0);
+        var b = MakeCity("b", 5, 5);
+        var defaultRoute = MakeRoute(a, b);
+        var discounted = MakeRoute(a, b, new Money(defaultRoute.FarePerPassenger.Cents * 8 / 10)); // -20%
+        var expensive = MakeRoute(a, b, new Money(defaultRoute.FarePerPassenger.Cents * 12 / 10)); // +20%
+
+        Assert.Equal(FareCalculator.DemandDeltaFraction(discounted), -FareCalculator.DemandDeltaFraction(expensive), precision: 3);
+    }
 }

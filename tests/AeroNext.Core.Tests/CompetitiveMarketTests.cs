@@ -1,5 +1,7 @@
+using AeroNext.Core;
 using AeroNext.Core.Airlines;
 using AeroNext.Core.Competition;
+using AeroNext.Core.Finance;
 using AeroNext.Core.Turns;
 using AeroNext.Core.World;
 using Xunit;
@@ -453,5 +455,154 @@ public class CompetitiveMarketTests
         var result = CompetitiveMarket.Resolve(new[] { airlineA, airlineB }, new[] { a, b }, demandModel, marketing);
 
         Assert.InRange((double)result.TotalCarried(airlineA) / result.TotalCarried(airlineB), 0.95, 1.05);
+    }
+
+    // --- M48: fare's own demand effect ---
+
+    [Fact]
+    public void Resolve_UncontestedPair_NoFareOverride_NoEffect()
+    {
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 5);
+        var b = MakeCity("b", 5, 5, 5);
+        var aircraft = new AircraftType("t", "Test", Seats: 400);
+        var solo = new Airline("Solo", new[] { new Route(a, b, aircraft, 5) }); // no FareOverride
+
+        var result = CompetitiveMarket.Resolve(new[] { solo }, new[] { a, b }, demandModel);
+        var monopoly = NetworkPlanner.Plan(solo.Routes, new[] { a, b }, demandModel).TotalCarried;
+
+        Assert.Equal(monopoly, result.TotalCarried(solo));
+    }
+
+    [Fact]
+    public void Resolve_UncontestedPair_LowLoadFactor_Discount_IncreasesCarried()
+    {
+        // Compared against NetworkPlanner's own unboosted monopoly figure
+        // directly (the same technique Resolve_SoleCarrier_... above
+        // uses) rather than a second Resolve call with a differently-
+        // identified Airline object - Airline is a record, so two
+        // separately-constructed instances (even with the same name)
+        // are different dictionary keys and TotalCarried would silently
+        // read back zero for one never actually passed into that call.
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 5);
+        var b = MakeCity("b", 5, 5, 5);
+        var aircraft = new AircraftType("t", "Test", Seats: 400);
+        var defaultRoute = new Route(a, b, aircraft, 5);
+        var discountFare = new Money(defaultRoute.FarePerPassenger.Cents * 9 / 10); // -10%
+        var discounted = new Airline("Solo", new[] { new Route(a, b, aircraft, 5, discountFare) });
+
+        var result = CompetitiveMarket.Resolve(new[] { discounted }, new[] { a, b }, demandModel);
+        var unboostedMonopoly = NetworkPlanner.Plan(new[] { defaultRoute }, new[] { a, b }, demandModel).TotalCarried;
+
+        Assert.True(result.TotalCarried(discounted) > unboostedMonopoly);
+    }
+
+    [Fact]
+    public void Resolve_UncontestedPair_AtCapacity_Premium_NeverForcesADecrease()
+    {
+        // The user's own direct instruction: raising fares must not force
+        // carried passengers down while the (now-lower) demand is still
+        // above capacity.
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 100);
+        var b = MakeCity("b", 1, 1, 100); // close + heavy -> demand vastly exceeds a tiny fleet
+        var tinyAircraft = new AircraftType("t", "Test", Seats: 10);
+        var defaultRoute = new Route(a, b, tinyAircraft, AircraftCount: 1);
+        var premiumFare = new Money(defaultRoute.FarePerPassenger.Cents * 12 / 10); // +20%
+        var expensive = new Airline("Solo", new[] { new Route(a, b, tinyAircraft, AircraftCount: 1, premiumFare) });
+
+        var result = CompetitiveMarket.Resolve(new[] { expensive }, new[] { a, b }, demandModel);
+        var unboostedMonopoly = NetworkPlanner.Plan(new[] { defaultRoute }, new[] { a, b }, demandModel).TotalCarried;
+
+        Assert.Equal(unboostedMonopoly, result.TotalCarried(expensive));
+    }
+
+    [Fact]
+    public void Resolve_UncontestedPair_NotAtCapacity_Premium_RealDecrease()
+    {
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 5);
+        var b = MakeCity("b", 5, 5, 5);
+        var bigAircraft = new AircraftType("t", "Test", Seats: 1000); // far from saturating - genuinely demand-bound
+        var defaultRoute = new Route(a, b, bigAircraft, 5);
+        var premiumFare = new Money(defaultRoute.FarePerPassenger.Cents * 12 / 10); // +20%
+        var expensive = new Airline("Solo", new[] { new Route(a, b, bigAircraft, 5, premiumFare) });
+
+        var result = CompetitiveMarket.Resolve(new[] { expensive }, new[] { a, b }, demandModel);
+        var unboostedMonopoly = NetworkPlanner.Plan(new[] { defaultRoute }, new[] { a, b }, demandModel).TotalCarried;
+
+        Assert.True(result.TotalCarried(expensive) < unboostedMonopoly);
+    }
+
+    [Fact]
+    public void Resolve_UncontestedPair_ExtremePremium_NeverGoesNegative()
+    {
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 100);
+        var b = MakeCity("b", 1, 1, 100);
+        var tinyAircraft = new AircraftType("t", "Test", Seats: 10);
+        var defaultRoute = new Route(a, b, tinyAircraft, AircraftCount: 1);
+        var extremeFare = defaultRoute.FarePerPassenger * 10; // +900%, an unrealistically large premium
+        var expensive = new Airline("Solo", new[] { new Route(a, b, tinyAircraft, AircraftCount: 1, extremeFare) });
+
+        var result = CompetitiveMarket.Resolve(new[] { expensive }, new[] { a, b }, demandModel);
+
+        Assert.True(result.TotalCarried(expensive) >= 0);
+    }
+
+    [Fact]
+    public void Resolve_ContestedPair_Discount_CapturesLargerShare()
+    {
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 5);
+        var b = MakeCity("b", 5, 5, 5);
+        var aircraft = new AircraftType("t", "Test", Seats: 1000);
+        var defaultRoute = new Route(a, b, aircraft, 10);
+        var discountFare = new Money(defaultRoute.FarePerPassenger.Cents * 9 / 10);
+        var discounted = new Airline("Discounted", new[] { new Route(a, b, aircraft, 10, discountFare) });
+        var rival = new Airline("Rival", new[] { defaultRoute });
+
+        var result = CompetitiveMarket.Resolve(new[] { discounted, rival }, new[] { a, b }, demandModel);
+
+        Assert.True(result.TotalCarried(discounted) > result.TotalCarried(rival));
+    }
+
+    [Fact]
+    public void Resolve_ContestedPair_Premium_CapturesSmallerShare()
+    {
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 5);
+        var b = MakeCity("b", 5, 5, 5);
+        var aircraft = new AircraftType("t", "Test", Seats: 1000);
+        var defaultRoute = new Route(a, b, aircraft, 10);
+        var premiumFare = new Money(defaultRoute.FarePerPassenger.Cents * 11 / 10);
+        var expensive = new Airline("Expensive", new[] { new Route(a, b, aircraft, 10, premiumFare) });
+        var rival = new Airline("Rival", new[] { defaultRoute });
+
+        var result = CompetitiveMarket.Resolve(new[] { expensive, rival }, new[] { a, b }, demandModel);
+
+        Assert.True(result.TotalCarried(expensive) < result.TotalCarried(rival));
+    }
+
+    [Fact]
+    public void Resolve_UncontestedPair_MarketingAndFareDiscount_Combine()
+    {
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 5);
+        var b = MakeCity("b", 5, 5, 5);
+        var aircraft = new AircraftType("t", "Test", Seats: 400);
+        var defaultRoute = new Route(a, b, aircraft, 5);
+        var discountFare = new Money(defaultRoute.FarePerPassenger.Cents * 9 / 10);
+        var solo = new Airline("Solo", new[] { new Route(a, b, aircraft, 5, discountFare) });
+        var marketing = new Dictionary<string, AirlineMarketingCampaign>
+        {
+            ["Solo"] = new(NetworkWide: false, RouteKeys: new HashSet<(string, string)> { QuarterEngine.NormalizedPairKey(a, b) }),
+        };
+
+        var combined = CompetitiveMarket.Resolve(new[] { solo }, new[] { a, b }, demandModel, marketing);
+        var fareOnly = CompetitiveMarket.Resolve(new[] { solo }, new[] { a, b }, demandModel);
+
+        Assert.True(combined.TotalCarried(solo) > fareOnly.TotalCarried(solo));
     }
 }

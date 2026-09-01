@@ -19,8 +19,8 @@ writing: M0–M14 (`SIM_CORE_ROADMAP.md`), M15–M19 (`GAME_SETUP_ROADMAP.md`),
 M20–M22 (`HISTORICAL_DYNAMICS_ROADMAP.md`), M23–M24
 (`WIN_CONDITIONS_ROADMAP.md`), M25–M30/M34 (`FINANCIAL_MODEL_ROADMAP.md`,
 M31 retired), M31/M35–M44 (`BASELINE_AI_ROADMAP.md`), M32–M33/M45–M46
-(`ROUTE_CAPACITY_ROADMAP.md`), M47 (`MARKETING_ROADMAP.md`, new). M47 is
-the current highest issued number. Update this line the moment a new
+(`ROUTE_CAPACITY_ROADMAP.md`), M47–M48 (`MARKETING_ROADMAP.md`, new). M48
+is the current highest issued number. Update this line the moment a new
 milestone is opened anywhere.
 
 ---
@@ -76,6 +76,18 @@ write-up. `ExpansionPeriodQuarters`/`GrowthIncrementFraction` are both
 marked tunable in code if the growth rate itself turns out to be the
 lever worth pulling, rather than the AI.
 
+**M48 (`docs/MARKETING_ROADMAP.md`, fare gets a real demand effect),
+unlike M47, actually moved this sweep — because unlike marketing,
+`BaselineAi`'s own toolkit already submits `SetFareOrder`s reactively
+(`RaisedFare`/`CutFare`, since M37) in both real loops.** Win rate
+38.7%→40.7%, but average quarters-to-win roughly doubled (23.0→51.6) and
+regional bankruptcy moved unevenly (EastAsia worse, SouthAmerica
+better) — confirmed real via the same disable-and-reproduce ablation
+every round here uses. Not root-caused further: fare reactivity and
+demand elasticity now feed back into each other in a loop neither was
+designed with the other in mind, flagged for whoever next works on
+`BaselineAi`/successor strategies rather than chased here.
+
 Three items found during these investigations, deliberately deferred
 rather than folded in — all filed under `BASELINE_AI_ROADMAP.md`'s own
 "Kept in mind" now:
@@ -127,7 +139,9 @@ AI strategy/network-topology behavior, not starting conditions.
 - **Service level** remains open — `Airline.Quality` is still a single
   placeholder knob, now standing in for service level alone (marketing
   got a real, direct lever via `docs/MARKETING_ROADMAP.md`'s M47; fare
-  itself was already fully settled by M34).
+  itself was settled by M34 and, as of M48, genuinely affects demand
+  too — elasticity-based, bidirectional, bounded so a premium never
+  forces carried passengers down while demand is still above capacity).
 - **Interest rate doesn't scale with leverage** — fixed 2% regardless of
   debt carried.
 - ~~**No ongoing gate-holding cost**~~ — closed by
