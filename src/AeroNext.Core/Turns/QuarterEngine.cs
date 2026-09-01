@@ -1,4 +1,5 @@
 using AeroNext.Core.Airlines;
+using AeroNext.Core.Finance;
 using AeroNext.Core.Fleet;
 using AeroNext.Core.World;
 
@@ -39,6 +40,9 @@ namespace AeroNext.Core.Turns;
 public static class QuarterEngine
 {
     public const int BaseActionCap = 3;
+
+    /// <summary>M47: how many distinct RouteMarketingOrders one airline can have accepted in a single quarter — a real cap independent of ActionCap, which can otherwise grow past 3 via HireExecutiveOrder.</summary>
+    public const int MaxConcurrentRouteMarketingCampaigns = 3;
 
     /// <param name="fleet">
     /// Null (the default) preserves fully permissive behavior — any
@@ -173,6 +177,8 @@ public static class QuarterEngine
         var slotsSpentByCity = new Dictionary<string, int>();
         var autoSlotsSpentByCity = new Dictionary<string, int>();
         var debtPaidDownSoFar = Money.Zero;
+        var networkMarketingAcceptedThisQuarter = false;
+        var routeMarketingPairsAcceptedThisQuarter = new HashSet<(string, string)>();
         var year = Timeline.YearForQuarter(quarterNumber);
         var workingFleet = fleet;
 
@@ -280,6 +286,36 @@ public static class QuarterEngine
                 var operatesPair = currentRoutes.Any(r => r.Origin.Id == fareOrder.Origin.Id && r.Destination.Id == fareOrder.Destination.Id);
 
                 if (!operatesPair || fareOrder.FarePerPassenger < Money.Zero)
+                {
+                    rejected.Add(order);
+                    continue;
+                }
+            }
+
+            if (order is NetworkMarketingOrder)
+            {
+                var conflictsWithRouteCampaign = routeMarketingPairsAcceptedThisQuarter.Count > 0;
+                var campaignCost = MarketingCostCalculator.NetworkCampaignCost(currentRoutes.Count);
+                var unaffordable = availableCash is not null && cashSpent + campaignCost > availableCash.Value;
+
+                if (conflictsWithRouteCampaign || unaffordable)
+                {
+                    rejected.Add(order);
+                    continue;
+                }
+            }
+
+            if (order is RouteMarketingOrder routeMarketingOrder)
+            {
+                var operatesPair = currentRoutes.Any(r => r.Origin.Id == routeMarketingOrder.Origin.Id && r.Destination.Id == routeMarketingOrder.Destination.Id);
+                var pairKey = NormalizedPairKey(routeMarketingOrder.Origin, routeMarketingOrder.Destination);
+                var conflictsWithNetworkCampaign = networkMarketingAcceptedThisQuarter;
+                var alreadyTargetedThisQuarter = routeMarketingPairsAcceptedThisQuarter.Contains(pairKey);
+                var atConcurrentCap = routeMarketingPairsAcceptedThisQuarter.Count >= MaxConcurrentRouteMarketingCampaigns;
+                var campaignCost = MarketingCostCalculator.RouteCampaignCost(demandModel.ForPair(routeMarketingOrder.Origin, routeMarketingOrder.Destination).PassengersPerQuarter);
+                var unaffordable = availableCash is not null && cashSpent + campaignCost > availableCash.Value;
+
+                if (!operatesPair || conflictsWithNetworkCampaign || alreadyTargetedThisQuarter || atConcurrentCap || unaffordable)
                 {
                     rejected.Add(order);
                     continue;
@@ -433,6 +469,26 @@ public static class QuarterEngine
                 }
             }
 
+            if (order is NetworkMarketingOrder)
+            {
+                if (availableCash is not null)
+                {
+                    cashSpent += MarketingCostCalculator.NetworkCampaignCost(currentRoutes.Count);
+                }
+
+                networkMarketingAcceptedThisQuarter = true;
+            }
+
+            if (order is RouteMarketingOrder appliedRouteMarketingOrder)
+            {
+                if (availableCash is not null)
+                {
+                    cashSpent += MarketingCostCalculator.RouteCampaignCost(demandModel.ForPair(appliedRouteMarketingOrder.Origin, appliedRouteMarketingOrder.Destination).PassengersPerQuarter);
+                }
+
+                routeMarketingPairsAcceptedThisQuarter.Add(NormalizedPairKey(appliedRouteMarketingOrder.Origin, appliedRouteMarketingOrder.Destination));
+            }
+
             applied.Add(order);
             spent += cost;
         }
@@ -467,6 +523,8 @@ public static class QuarterEngine
         AircraftOrder => 1,
         LeaseAircraftOrder => 1,
         AllianceCourtOrder => 1,
+        NetworkMarketingOrder => 1,
+        RouteMarketingOrder => 1,
         _ => throw new NotSupportedException($"Unknown order type: {order.GetType().Name}"),
     };
 
@@ -551,6 +609,21 @@ public static class QuarterEngine
     /// <summary>M45: the AutoCapacity-modeled sibling of GatewayEndpoints — mutually exclusive per-city, never both non-null.</summary>
     private static IEnumerable<City> AutoCapacityEndpoints(RouteOrder order) =>
         new[] { order.Origin, order.Destination }.Where(c => c.AutoCapacity is not null);
+
+    /// <summary>
+    /// M47: an unordered pair key for RouteMarketingOrder tracking - a
+    /// route's own stored Origin/Destination orientation isn't
+    /// necessarily what a caller submits a marketing order with, and
+    /// NetworkPlanner's own itinerary construction doesn't guarantee
+    /// preserving one direction either, so matching must not assume one.
+    /// Public, not private - CompetitiveMarket needs the exact same
+    /// normalization to match a quarter's own accepted route campaigns
+    /// against its own pair iteration, and the orchestration layer
+    /// (AeroNext.QaHarness/FullGameRunner.cs, a different assembly)
+    /// needs it directly to build that same per-quarter campaign state.
+    /// </summary>
+    public static (string, string) NormalizedPairKey(City a, City b) =>
+        string.CompareOrdinal(a.Id, b.Id) <= 0 ? (a.Id, b.Id) : (b.Id, a.Id);
 
     private static bool IsAircraftAvailable(QuarterOrder order, int year) => order switch
     {

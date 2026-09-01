@@ -1,5 +1,6 @@
 using AeroNext.Core.Airlines;
 using AeroNext.Core.Competition;
+using AeroNext.Core.Turns;
 using AeroNext.Core.World;
 using Xunit;
 
@@ -221,5 +222,150 @@ public class CompetitiveMarketTests
         Assert.Equal(
             original.RouteUsage.Select(u => (u.Airline.Name, u.Route.Origin.Id, u.Route.Destination.Id, u.SeatsUsed)),
             shuffled.RouteUsage.Select(u => (u.Airline.Name, u.Route.Origin.Id, u.Route.Destination.Id, u.SeatsUsed)));
+    }
+
+    // --- M47: marketing campaigns ---
+
+    [Fact]
+    public void Resolve_RouteCampaign_CapturesLargerShare_OnTheTargetedPair()
+    {
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 5);
+        var b = MakeCity("b", 5, 5, 5);
+        var aircraft = new AircraftType("t", "Test", Seats: 1000);
+
+        var campaigning = new Airline("Campaigning", new[] { new Route(a, b, aircraft, 10) });
+        var rival = new Airline("Rival", new[] { new Route(a, b, aircraft, 10) });
+        var marketing = new Dictionary<string, AirlineMarketingCampaign>
+        {
+            ["Campaigning"] = new(NetworkWide: false, RouteKeys: new HashSet<(string, string)> { QuarterEngine.NormalizedPairKey(a, b) }),
+        };
+
+        var result = CompetitiveMarket.Resolve(new[] { campaigning, rival }, new[] { a, b }, demandModel, marketing);
+
+        Assert.True(result.TotalCarried(campaigning) > result.TotalCarried(rival));
+    }
+
+    [Fact]
+    public void Resolve_NetworkCampaign_BoostsEveryPair_NotJustOne()
+    {
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 5);
+        var b = MakeCity("b", 5, 5, 5);
+        var c = MakeCity("c", 10, 10, 5);
+        var aircraft = new AircraftType("t", "Test", Seats: 1000);
+
+        var campaigning = new Airline("Campaigning", new[] { new Route(a, b, aircraft, 10), new Route(a, c, aircraft, 10) });
+        var rival = new Airline("Rival", new[] { new Route(a, b, aircraft, 10), new Route(a, c, aircraft, 10) });
+        var marketing = new Dictionary<string, AirlineMarketingCampaign>
+        {
+            ["Campaigning"] = new(NetworkWide: true, RouteKeys: new HashSet<(string, string)>()),
+        };
+
+        var result = CompetitiveMarket.Resolve(new[] { campaigning, rival }, new[] { a, b, c }, demandModel, marketing);
+
+        var carriedAB = result.Pairs.Single(p => p.Origin.Id == "a" && p.Destination.Id == "b").CarriedByAirline;
+        var carriedAC = result.Pairs.Single(p => p.Origin.Id == "a" && p.Destination.Id == "c").CarriedByAirline;
+        Assert.True(carriedAB[campaigning] > carriedAB[rival]);
+        Assert.True(carriedAC[campaigning] > carriedAC[rival]);
+    }
+
+    [Fact]
+    public void Resolve_RouteCampaignBoost_BiggerThanNetworkCampaignBoost()
+    {
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 5);
+        var b = MakeCity("b", 5, 5, 5);
+        var aircraft = new AircraftType("t", "Test", Seats: 1000);
+
+        var routeCampaigner = new Airline("RouteCampaigner", new[] { new Route(a, b, aircraft, 10) });
+        var networkCampaigner = new Airline("NetworkCampaigner", new[] { new Route(a, b, aircraft, 10) });
+        var marketing = new Dictionary<string, AirlineMarketingCampaign>
+        {
+            ["RouteCampaigner"] = new(NetworkWide: false, RouteKeys: new HashSet<(string, string)> { QuarterEngine.NormalizedPairKey(a, b) }),
+            ["NetworkCampaigner"] = new(NetworkWide: true, RouteKeys: new HashSet<(string, string)>()),
+        };
+
+        var result = CompetitiveMarket.Resolve(new[] { routeCampaigner, networkCampaigner }, new[] { a, b }, demandModel, marketing);
+
+        Assert.True(result.TotalCarried(routeCampaigner) > result.TotalCarried(networkCampaigner));
+    }
+
+    [Fact]
+    public void Resolve_MarketingCampaign_UncontestedPair_HasNoEffect()
+    {
+        // Matches Quality's own pre-existing behavior: the solo-carrier
+        // branch never reads Quality (or now, a campaign's boost) at all
+        // - a monopoly ceiling is a monopoly ceiling regardless.
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 5);
+        var b = MakeCity("b", 5, 5, 5);
+        var aircraft = new AircraftType("t", "Test", Seats: 400);
+        var solo = new Airline("Solo", new[] { new Route(a, b, aircraft, 5) });
+        var marketing = new Dictionary<string, AirlineMarketingCampaign>
+        {
+            ["Solo"] = new(NetworkWide: false, RouteKeys: new HashSet<(string, string)> { QuarterEngine.NormalizedPairKey(a, b) }),
+        };
+
+        var withCampaign = CompetitiveMarket.Resolve(new[] { solo }, new[] { a, b }, demandModel, marketing);
+        var withoutCampaign = CompetitiveMarket.Resolve(new[] { solo }, new[] { a, b }, demandModel);
+
+        Assert.Equal(withoutCampaign.TotalCarried(solo), withCampaign.TotalCarried(solo));
+    }
+
+    [Fact]
+    public void Resolve_NullMarketingByAirlineName_PreservesPreExistingBehavior()
+    {
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 5);
+        var b = MakeCity("b", 5, 5, 5);
+        var aircraft = new AircraftType("t", "Test", Seats: 1000);
+        var airlineA = new Airline("A", new[] { new Route(a, b, aircraft, 10) });
+        var airlineB = new Airline("B", new[] { new Route(a, b, aircraft, 10) });
+
+        var withExplicitNull = CompetitiveMarket.Resolve(new[] { airlineA, airlineB }, new[] { a, b }, demandModel, marketingByAirlineName: null);
+        var withDefault = CompetitiveMarket.Resolve(new[] { airlineA, airlineB }, new[] { a, b }, demandModel);
+
+        Assert.Equal(withDefault.TotalCarried(airlineA), withExplicitNull.TotalCarried(airlineA));
+    }
+
+    [Fact]
+    public void Resolve_RouteCampaign_TargetingADifferentPair_NoBoostHere()
+    {
+        // The airline has a real, active route campaign - just not on
+        // this pair. Distinct from having no marketing entry at all.
+        var a = MakeCity("a", 0, 0, 5);
+        var b = MakeCity("b", 5, 5, 5);
+        var c = MakeCity("c", 10, 10, 5);
+        var demandModel = new GravityDemandModel();
+        var aircraft = new AircraftType("t", "Test", Seats: 1000);
+        var airlineA = new Airline("A", new[] { new Route(a, b, aircraft, 10), new Route(a, c, aircraft, 10) });
+        var airlineB = new Airline("B", new[] { new Route(a, b, aircraft, 10) });
+        var marketing = new Dictionary<string, AirlineMarketingCampaign>
+        {
+            // Campaign targets a-c, not a-b.
+            ["A"] = new(NetworkWide: false, RouteKeys: new HashSet<(string, string)> { QuarterEngine.NormalizedPairKey(a, c) }),
+        };
+
+        var result = CompetitiveMarket.Resolve(new[] { airlineA, airlineB }, new[] { a, b, c }, demandModel, marketing);
+
+        var carriedOnAB = result.Pairs.Single(p => p.Origin.Id == "a" && p.Destination.Id == "b").CarriedByAirline;
+        Assert.InRange((double)carriedOnAB[airlineA] / carriedOnAB[airlineB], 0.95, 1.05); // no boost on a-b specifically
+    }
+
+    [Fact]
+    public void Resolve_AirlineWithNoEntryInMarketingDictionary_NoBoost()
+    {
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 5);
+        var b = MakeCity("b", 5, 5, 5);
+        var aircraft = new AircraftType("t", "Test", Seats: 1000);
+        var airlineA = new Airline("A", new[] { new Route(a, b, aircraft, 10) });
+        var airlineB = new Airline("B", new[] { new Route(a, b, aircraft, 10) });
+        var marketing = new Dictionary<string, AirlineMarketingCampaign>(); // neither airline has an entry
+
+        var result = CompetitiveMarket.Resolve(new[] { airlineA, airlineB }, new[] { a, b }, demandModel, marketing);
+
+        Assert.InRange((double)result.TotalCarried(airlineA) / result.TotalCarried(airlineB), 0.95, 1.05);
     }
 }

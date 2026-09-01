@@ -21,6 +21,12 @@ namespace AeroNext.Core.Finance;
 /// M30: SalaryCost is a flat, per-aircraft-unit charge (owned + leased,
 /// idle or assigned) — the same "broken out, not folded" legibility
 /// treatment, folded into NetIncome like an ordinary operating cost.
+///
+/// M47: MarketingCost is the same treatment again — every applied
+/// NetworkMarketingOrder/RouteMarketingOrder's own cost this quarter
+/// (see MarketingCostCalculator), folded into NetIncome like an ordinary
+/// operating cost, broken out on its own line rather than silently
+/// absorbed.
 /// </summary>
 public sealed record QuarterlyStatement(
     Money Revenue,
@@ -36,4 +42,5 @@ public sealed record QuarterlyStatement(
     Money NegotiationBidCost = default,
     Money PrincipalRepayment = default,
     Money ManualDebtPaydown = default,
-    Money SalaryCost = default);
+    Money SalaryCost = default,
+    Money MarketingCost = default);

@@ -268,8 +268,23 @@ public static class FullGameRunner
             landingBoard = landingBoard.AdvanceIdleTracking(routes);
             (landingBoard, _) = LandingRightsResolver.ResolveQuarter(landingBoard, q, routes, capacityBoard.CapacityBonusByCity);
 
+            // M47: each airline's own accepted marketing campaign this
+            // quarter (at most one of network-wide or up to
+            // MaxConcurrentRouteMarketingCampaigns route-targeted -
+            // QuarterEngine.RunQuarter's own mutual-exclusivity/cap
+            // enforcement already guarantees this shape), built fresh
+            // from this quarter's own AppliedOrders.
+            var marketingByAirlineName = names.ToDictionary(
+                n => n,
+                n => new AirlineMarketingCampaign(
+                    NetworkWide: appliedOrdersByName[n].OfType<NetworkMarketingOrder>().Any(),
+                    RouteKeys: appliedOrdersByName[n].OfType<RouteMarketingOrder>()
+                        .Select(o => QuarterEngine.NormalizedPairKey(o.Origin, o.Destination))
+                        .ToHashSet()),
+                StringComparer.Ordinal);
+
             var league = seats.Select(s => new Airline(s.AirlineName, routes[s.AirlineName])).ToArray();
-            var market = CompetitiveMarket.Resolve(league, cities, yearDemandModel);
+            var market = CompetitiveMarket.Resolve(league, cities, yearDemandModel, marketingByAirlineName);
 
             foreach (var airline in league)
             {

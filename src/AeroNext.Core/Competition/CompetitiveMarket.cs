@@ -1,4 +1,5 @@
 using AeroNext.Core.Airlines;
+using AeroNext.Core.Turns;
 using AeroNext.Core.World;
 
 namespace AeroNext.Core.Competition;
@@ -35,7 +36,26 @@ namespace AeroNext.Core.Competition;
 /// </summary>
 public static class CompetitiveMarket
 {
-    public static CompetitiveMarketResult Resolve(IReadOnlyList<Airline> airlines, IReadOnlyList<City> cities, GravityDemandModel demandModel)
+    /// <summary>(Proposed, tunable) — the "good effect" a route-targeted campaign gives that specific pair.</summary>
+    public const double RouteCampaignQualityBoost = 0.5;
+
+    /// <summary>(Proposed, tunable) — the smaller effect a network-wide campaign gives every pair.</summary>
+    public const double NetworkCampaignQualityBoost = 0.15;
+
+    /// <param name="marketingByAirlineName">
+    /// M47: null (the default) preserves fully permissive behavior — no
+    /// airline's Quality is ever boosted, exactly as before this
+    /// parameter existed. Passing each airline's own active campaign for
+    /// the quarter (QuarterEngine.RunQuarter's own accepted
+    /// NetworkMarketingOrder/RouteMarketingOrder for that airline)
+    /// multiplies its Quality up on the pairs the campaign covers — the
+    /// same weight formula below already uses Quality to split contested
+    /// demand, so a solo (uncontested) pair is never affected, matching
+    /// how Quality itself already behaves there.
+    /// </param>
+    public static CompetitiveMarketResult Resolve(
+        IReadOnlyList<Airline> airlines, IReadOnlyList<City> cities, GravityDemandModel demandModel,
+        IReadOnlyDictionary<string, AirlineMarketingCampaign>? marketingByAirlineName = null)
     {
         var monopolyPlans = airlines.ToDictionary(a => a, a => NetworkPlanner.Plan(a.Routes, cities, demandModel));
 
@@ -71,7 +91,7 @@ public static class CompetitiveMarket
                 var weights = competitors
                     .Select(c => (
                         c.Airline,
-                        Weight: c.Load!.Itinerary.Legs.Min(l => l.SeatsPerQuarter) * c.Airline.Quality,
+                        Weight: c.Load!.Itinerary.Legs.Min(l => l.SeatsPerQuarter) * EffectiveQuality(c.Airline, origin, destination, marketingByAirlineName),
                         Ceiling: c.Load!.PassengersCarried))
                     .ToList();
                 var totalWeight = weights.Sum(w => w.Weight);
@@ -104,6 +124,23 @@ public static class CompetitiveMarket
             .ToList();
 
         return new CompetitiveMarketResult(pairResults, routeUsage);
+    }
+
+    /// <summary>M47: Quality, boosted by this airline's own active marketing campaign on this specific pair, if any — a route campaign's boost, else a network campaign's smaller one, else unboosted.</summary>
+    private static double EffectiveQuality(Airline airline, City origin, City destination, IReadOnlyDictionary<string, AirlineMarketingCampaign>? marketingByAirlineName)
+    {
+        if (marketingByAirlineName is null || !marketingByAirlineName.TryGetValue(airline.Name, out var campaign))
+        {
+            return airline.Quality;
+        }
+
+        var multiplier = campaign.RouteKeys.Contains(QuarterEngine.NormalizedPairKey(origin, destination))
+            ? 1 + RouteCampaignQualityBoost
+            : campaign.NetworkWide
+                ? 1 + NetworkCampaignQualityBoost
+                : 1.0;
+
+        return airline.Quality * multiplier;
     }
 
     private static ItineraryLoad? FindPair(NetworkPlan plan, string originId, string destinationId)

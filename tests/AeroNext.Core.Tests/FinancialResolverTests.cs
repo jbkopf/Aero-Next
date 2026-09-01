@@ -667,4 +667,98 @@ public class FinancialResolverTests
             state = newState;
         }
     }
+
+    // --- M47: marketing campaign costs ---
+
+    [Fact]
+    public void Resolve_NetworkMarketingOrder_DeductsCostScaledByRouteCount()
+    {
+        var a = MakeCity("a", 0, 0, 1);
+        var b = MakeCity("b", 1, 1, 1);
+        var aircraft = new AircraftType("t", "Test", Seats: 100);
+        var airline = new Airline("A", new[] { new Route(a, b, aircraft, AircraftCount: 1) }); // 1 route
+        var market = CompetitiveMarket.Resolve(new[] { airline }, new[] { a, b }, DemandModel);
+        var state = FinancialState.Start(Money.FromDollars(10_000_000), Money.Zero, interestRatePerQuarter: 0.0);
+        var orders = new QuarterOrder[] { new NetworkMarketingOrder() };
+
+        var (newState, statement) = FinancialResolver.Resolve(state, airline, market, orders);
+
+        Assert.Equal(MarketingCostCalculator.NetworkCampaignCost(1), statement.MarketingCost);
+        Assert.Equal(newState.CashBalance, statement.CashBalanceAfter);
+    }
+
+    [Fact]
+    public void Resolve_RouteMarketingOrder_DeductsCostScaledByThatPairsOwnDemand()
+    {
+        var origin = MakeCity("origin", 0, 0, 1);
+        var destination = MakeCity("destination", 1, 1, 1);
+        var aircraft = new AircraftType("t", "Test", Seats: 100);
+        var route = new Route(origin, destination, aircraft, AircraftCount: 1);
+        var airline = new Airline("A", new[] { route });
+        const long demand = 4_000;
+        var pair = new CompetitivePairResult(origin, destination, demand, new Dictionary<Airline, long> { [airline] = 100 });
+        var market = new CompetitiveMarketResult(new[] { pair }, new[] { new CompetitiveRouteUsage(airline, route, route.SeatsPerQuarter, 100) });
+        var state = FinancialState.Start(Money.FromDollars(10_000_000), Money.Zero, interestRatePerQuarter: 0.0);
+        var orders = new QuarterOrder[] { new RouteMarketingOrder(origin, destination) };
+
+        var (_, statement) = FinancialResolver.Resolve(state, airline, market, orders);
+
+        Assert.Equal(MarketingCostCalculator.RouteCampaignCost(demand), statement.MarketingCost);
+    }
+
+    [Fact]
+    public void Resolve_RouteMarketingOrder_MatchesPairRegardlessOfOrientation()
+    {
+        // market.Pairs stores this pair as (origin, destination); the
+        // applied order names it in the reverse orientation - the lookup
+        // must still find the right demand figure via the normalized key.
+        var origin = MakeCity("origin", 0, 0, 1);
+        var destination = MakeCity("destination", 1, 1, 1);
+        var aircraft = new AircraftType("t", "Test", Seats: 100);
+        var route = new Route(origin, destination, aircraft, AircraftCount: 1);
+        var airline = new Airline("A", new[] { route });
+        const long demand = 6_000;
+        var pair = new CompetitivePairResult(origin, destination, demand, new Dictionary<Airline, long> { [airline] = 100 });
+        var market = new CompetitiveMarketResult(new[] { pair }, new[] { new CompetitiveRouteUsage(airline, route, route.SeatsPerQuarter, 100) });
+        var state = FinancialState.Start(Money.FromDollars(10_000_000), Money.Zero, interestRatePerQuarter: 0.0);
+        var orders = new QuarterOrder[] { new RouteMarketingOrder(destination, origin) }; // reversed
+
+        var (_, statement) = FinancialResolver.Resolve(state, airline, market, orders);
+
+        Assert.Equal(MarketingCostCalculator.RouteCampaignCost(demand), statement.MarketingCost);
+    }
+
+    [Fact]
+    public void Resolve_RouteMarketingOrder_PairNotInMarketResult_CostsZero_NotAThrow()
+    {
+        // A real, unrelated pair is present (forcing the lookup's own
+        // equality check to actually evaluate false at least once, not
+        // just fall through an empty list), but never the targeted one.
+        var origin = MakeCity("origin", 0, 0, 1);
+        var destination = MakeCity("destination", 1, 1, 1);
+        var unrelatedA = MakeCity("ua", 10, 10, 1);
+        var unrelatedB = MakeCity("ub", 11, 11, 1);
+        var airline = new Airline("A", Array.Empty<Route>());
+        var unrelatedPair = new CompetitivePairResult(unrelatedA, unrelatedB, 500, new Dictionary<Airline, long>());
+        var market = new CompetitiveMarketResult(new[] { unrelatedPair }, Array.Empty<CompetitiveRouteUsage>());
+        var state = FinancialState.Start(Money.FromDollars(10_000_000), Money.Zero, interestRatePerQuarter: 0.0);
+        var orders = new QuarterOrder[] { new RouteMarketingOrder(origin, destination) };
+
+        var (_, statement) = FinancialResolver.Resolve(state, airline, market, orders);
+
+        Assert.Equal(Money.Zero, statement.MarketingCost);
+    }
+
+    [Fact]
+    public void Resolve_NoMarketingOrders_MarketingCostIsZero()
+    {
+        var a = MakeCity("a", 0, 0, 1);
+        var airline = new Airline("A", Array.Empty<Route>());
+        var market = CompetitiveMarket.Resolve(new[] { airline }, new[] { a }, DemandModel);
+        var state = FinancialState.Start(Money.FromDollars(10_000_000), Money.Zero, interestRatePerQuarter: 0.0);
+
+        var (_, statement) = FinancialResolver.Resolve(state, airline, market, Array.Empty<QuarterOrder>());
+
+        Assert.Equal(Money.Zero, statement.MarketingCost);
+    }
 }

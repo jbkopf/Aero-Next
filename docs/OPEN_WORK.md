@@ -14,13 +14,14 @@ Compiled 2026-08-31, cross-referencing every `docs/*_ROADMAP.md`'s own
 
 ## Milestone status
 
-**Every milestone across all 8 roadmap docs is complete** as of this
+**Every milestone across all 9 roadmap docs is complete** as of this
 writing: M0–M14 (`SIM_CORE_ROADMAP.md`), M15–M19 (`GAME_SETUP_ROADMAP.md`),
 M20–M22 (`HISTORICAL_DYNAMICS_ROADMAP.md`), M23–M24
 (`WIN_CONDITIONS_ROADMAP.md`), M25–M30/M34 (`FINANCIAL_MODEL_ROADMAP.md`,
 M31 retired), M31/M35–M44 (`BASELINE_AI_ROADMAP.md`), M32–M33/M45–M46
-(`ROUTE_CAPACITY_ROADMAP.md`). M46 is the current highest issued number.
-Update this line the moment a new milestone is opened anywhere.
+(`ROUTE_CAPACITY_ROADMAP.md`), M47 (`MARKETING_ROADMAP.md`, new). M47 is
+the current highest issued number. Update this line the moment a new
+milestone is opened anywhere.
 
 ---
 
@@ -123,9 +124,10 @@ AI strategy/network-topology behavior, not starting conditions.
   above.
 
 ### `FINANCIAL_MODEL_ROADMAP.md`
-- **Service level and marketing** remain a single placeholder
-  (`Airline.Quality`) standing in for both; fare itself is fully settled
-  (M34).
+- **Service level** remains open — `Airline.Quality` is still a single
+  placeholder knob, now standing in for service level alone (marketing
+  got a real, direct lever via `docs/MARKETING_ROADMAP.md`'s M47; fare
+  itself was already fully settled by M34).
 - **Interest rate doesn't scale with leverage** — fixed 2% regardless of
   debt carried.
 - ~~**No ongoing gate-holding cost**~~ — closed by

@@ -152,13 +152,14 @@ public static class FinancialResolver
         var retirementProceeds = ComputeRetirementProceeds(retiredUnits);
         var negotiationBidCost = appliedOrders.OfType<NegotiationOrder>().Aggregate(Money.Zero, (sum, o) => sum + o.Bid);
         var salaryCost = ComputeSalaryCost(fleet);
+        var marketingCost = ComputeMarketingCost(airline, marketResult, appliedOrders);
 
-        var netIncome = revenue - operatingCost - debtService - purchaseCost - leaseFee + retirementProceeds - negotiationBidCost - salaryCost;
+        var netIncome = revenue - operatingCost - debtService - purchaseCost - leaseFee + retirementProceeds - negotiationBidCost - salaryCost - marketingCost;
         var cashAfter = state.CashBalance + borrowed - manualPaydown + netIncome;
         var isBankrupt = cashAfter < Money.Zero || finalDebtBalance > Money.FromDollars(DebtCeilingDollars);
 
         var newState = state with { CashBalance = cashAfter, DebtBalance = finalDebtBalance, IsBankrupt = isBankrupt };
-        var statement = new QuarterlyStatement(revenue, operatingCost, debtService, borrowed, netIncome, cashAfter, isBankrupt, purchaseCost, leaseFee, retirementProceeds, negotiationBidCost, principalRepayment, manualPaydown, salaryCost);
+        var statement = new QuarterlyStatement(revenue, operatingCost, debtService, borrowed, netIncome, cashAfter, isBankrupt, purchaseCost, leaseFee, retirementProceeds, negotiationBidCost, principalRepayment, manualPaydown, salaryCost, marketingCost);
 
         return (newState, statement);
     }
@@ -209,6 +210,36 @@ public static class FinancialResolver
         }
 
         return new Money(cents);
+    }
+
+    /// <summary>
+    /// M47: re-derives each applied campaign's own cost independently
+    /// from state this resolver already has — network size from the
+    /// airline's own route count, a route campaign's demand from
+    /// marketResult.Pairs (an orientation-insensitive lookup, via
+    /// QuarterEngine.NormalizedPairKey, since a pair's canonical
+    /// Origin/Destination there isn't guaranteed to match the order's
+    /// own) — never a value threaded from QuarterEngine's own
+    /// affordability gate, so the two can never drift apart; see
+    /// MarketingCostCalculator's own doc comment.
+    /// </summary>
+    private static Money ComputeMarketingCost(Airline airline, CompetitiveMarketResult marketResult, IReadOnlyList<QuarterOrder> appliedOrders)
+    {
+        var cost = Money.Zero;
+
+        foreach (var _ in appliedOrders.OfType<NetworkMarketingOrder>())
+        {
+            cost += MarketingCostCalculator.NetworkCampaignCost(airline.Routes.Count);
+        }
+
+        foreach (var order in appliedOrders.OfType<RouteMarketingOrder>())
+        {
+            var pairKey = QuarterEngine.NormalizedPairKey(order.Origin, order.Destination);
+            var demand = marketResult.Pairs.FirstOrDefault(p => QuarterEngine.NormalizedPairKey(p.Origin, p.Destination) == pairKey)?.DemandPassengers ?? 0;
+            cost += MarketingCostCalculator.RouteCampaignCost(demand);
+        }
+
+        return cost;
     }
 
     /// <summary>

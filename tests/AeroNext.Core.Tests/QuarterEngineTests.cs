@@ -790,6 +790,273 @@ public class QuarterEngineTests
         Assert.Single(result.RejectedOrders);
     }
 
+    // --- M47: marketing campaigns ---
+
+    [Fact]
+    public void RunQuarter_RouteMarketingOrder_UnservedPair_Rejected()
+    {
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 50);
+        var b = MakeCity("b", 1, 1, 50);
+        var order = new RouteMarketingOrder(a, b); // no route between a and b
+
+        var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, new[] { a, b }, demandModel);
+
+        Assert.Empty(result.AppliedOrders);
+        Assert.Single(result.RejectedOrders);
+    }
+
+    [Fact]
+    public void RunQuarter_RouteMarketingOrder_AirlineServesADifferentPair_StillRejected()
+    {
+        // A real route exists, but to a different destination - the
+        // Origin-matches/Destination-doesn't case, distinct from "no
+        // routes at all".
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 50);
+        var b = MakeCity("b", 1, 1, 50);
+        var c = MakeCity("c", 2, 2, 50);
+        var existing = new[] { new Route(a, c, Aircraft, AircraftCount: 1) }; // a-c, not a-b
+        var order = new RouteMarketingOrder(a, b);
+
+        var result = QuarterEngine.RunQuarter(1, existing, QuarterEngine.BaseActionCap, new[] { order }, new[] { a, b, c }, demandModel);
+
+        Assert.Empty(result.AppliedOrders);
+        Assert.Single(result.RejectedOrders);
+    }
+
+    [Fact]
+    public void RunQuarter_RouteMarketingOrder_ExistingRouteWithWhollyDifferentOrigin_ShortCircuitsOriginCheck_Rejected()
+    {
+        // A route sharing neither origin nor destination (x-y exists,
+        // targeting a-b) must short-circuit on the origin mismatch alone
+        // - distinct from the same-origin-different-destination case
+        // above (SetFareOrder's own equivalent test guards the same &&).
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 50);
+        var b = MakeCity("b", 1, 1, 50);
+        var x = MakeCity("x", 5, 5, 50);
+        var y = MakeCity("y", 6, 6, 50);
+        var existing = new[] { new Route(x, y, Aircraft, AircraftCount: 1) };
+        var order = new RouteMarketingOrder(a, b);
+
+        var result = QuarterEngine.RunQuarter(1, existing, QuarterEngine.BaseActionCap, new[] { order }, new[] { a, b, x, y }, demandModel);
+
+        Assert.Empty(result.AppliedOrders);
+        Assert.Single(result.RejectedOrders);
+    }
+
+    [Fact]
+    public void RunQuarter_RouteMarketingOrder_ServedPair_Accepted()
+    {
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 50);
+        var b = MakeCity("b", 1, 1, 50);
+        var existing = new[] { new Route(a, b, Aircraft, AircraftCount: 1) };
+        var order = new RouteMarketingOrder(a, b);
+
+        var result = QuarterEngine.RunQuarter(1, existing, QuarterEngine.BaseActionCap, new[] { order }, new[] { a, b }, demandModel);
+
+        Assert.Single(result.AppliedOrders);
+        Assert.Empty(result.RejectedOrders);
+    }
+
+    [Fact]
+    public void RunQuarter_NetworkMarketingOrder_NoExistingRoutesNeeded_Accepted()
+    {
+        var demandModel = new GravityDemandModel();
+        var order = new NetworkMarketingOrder();
+
+        var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, Array.Empty<City>(), demandModel);
+
+        Assert.Single(result.AppliedOrders);
+        Assert.Empty(result.RejectedOrders);
+    }
+
+    [Fact]
+    public void RunQuarter_NetworkAndRouteMarketing_SameBatch_RouteFirst_NetworkRejected()
+    {
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 50);
+        var b = MakeCity("b", 1, 1, 50);
+        var existing = new[] { new Route(a, b, Aircraft, AircraftCount: 1) };
+        var orders = new QuarterOrder[] { new RouteMarketingOrder(a, b), new NetworkMarketingOrder() };
+
+        var result = QuarterEngine.RunQuarter(1, existing, QuarterEngine.BaseActionCap, orders, new[] { a, b }, demandModel);
+
+        Assert.Single(result.AppliedOrders);
+        Assert.IsType<RouteMarketingOrder>(result.AppliedOrders.Single());
+        Assert.Single(result.RejectedOrders);
+        Assert.IsType<NetworkMarketingOrder>(result.RejectedOrders.Single());
+    }
+
+    [Fact]
+    public void RunQuarter_NetworkAndRouteMarketing_SameBatch_NetworkFirst_RouteRejected()
+    {
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 50);
+        var b = MakeCity("b", 1, 1, 50);
+        var existing = new[] { new Route(a, b, Aircraft, AircraftCount: 1) };
+        var orders = new QuarterOrder[] { new NetworkMarketingOrder(), new RouteMarketingOrder(a, b) };
+
+        var result = QuarterEngine.RunQuarter(1, existing, QuarterEngine.BaseActionCap, orders, new[] { a, b }, demandModel);
+
+        Assert.Single(result.AppliedOrders);
+        Assert.IsType<NetworkMarketingOrder>(result.AppliedOrders.Single());
+        Assert.Single(result.RejectedOrders);
+        Assert.IsType<RouteMarketingOrder>(result.RejectedOrders.Single());
+    }
+
+    [Fact]
+    public void RunQuarter_ThreeDistinctRouteMarketingOrders_AllAccepted()
+    {
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 50);
+        var b = MakeCity("b", 1, 1, 50);
+        var c = MakeCity("c", 2, 2, 50);
+        var d = MakeCity("d", 3, 3, 50);
+        var existing = new[]
+        {
+            new Route(a, b, Aircraft, AircraftCount: 1),
+            new Route(a, c, Aircraft, AircraftCount: 1),
+            new Route(a, d, Aircraft, AircraftCount: 1),
+        };
+        var orders = new QuarterOrder[] { new RouteMarketingOrder(a, b), new RouteMarketingOrder(a, c), new RouteMarketingOrder(a, d) };
+
+        var result = QuarterEngine.RunQuarter(1, existing, currentActionCap: 3, orders, new[] { a, b, c, d }, demandModel);
+
+        Assert.Equal(3, result.AppliedOrders.Count);
+        Assert.Empty(result.RejectedOrders);
+    }
+
+    [Fact]
+    public void RunQuarter_FourthRouteMarketingOrder_Rejected_CapIsThreeRegardlessOfActionCap()
+    {
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 50);
+        var b = MakeCity("b", 1, 1, 50);
+        var c = MakeCity("c", 2, 2, 50);
+        var d = MakeCity("d", 3, 3, 50);
+        var e = MakeCity("e", 4, 4, 50);
+        var existing = new[]
+        {
+            new Route(a, b, Aircraft, AircraftCount: 1),
+            new Route(a, c, Aircraft, AircraftCount: 1),
+            new Route(a, d, Aircraft, AircraftCount: 1),
+            new Route(a, e, Aircraft, AircraftCount: 1),
+        };
+        var orders = new QuarterOrder[]
+        {
+            new RouteMarketingOrder(a, b), new RouteMarketingOrder(a, c), new RouteMarketingOrder(a, d), new RouteMarketingOrder(a, e),
+        };
+
+        // Action cap raised past 3 (e.g. via HireExecutiveOrder growth over
+        // the campaign) - the concurrent-campaign cap is still exactly 3,
+        // independent of ActionCap.
+        var result = QuarterEngine.RunQuarter(1, existing, currentActionCap: 10, orders, new[] { a, b, c, d, e }, demandModel);
+
+        Assert.Equal(3, result.AppliedOrders.Count);
+        Assert.Single(result.RejectedOrders);
+    }
+
+    [Fact]
+    public void RunQuarter_DuplicateRouteMarketingOrder_SamePairTwice_SecondRejected()
+    {
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 50);
+        var b = MakeCity("b", 1, 1, 50);
+        var existing = new[] { new Route(a, b, Aircraft, AircraftCount: 1) };
+        var orders = new QuarterOrder[] { new RouteMarketingOrder(a, b), new RouteMarketingOrder(a, b) };
+
+        var result = QuarterEngine.RunQuarter(1, existing, QuarterEngine.BaseActionCap, orders, new[] { a, b }, demandModel);
+
+        Assert.Single(result.AppliedOrders);
+        Assert.Single(result.RejectedOrders);
+    }
+
+    [Fact]
+    public void RunQuarter_NetworkMarketingOrder_Unaffordable_Rejected()
+    {
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 50);
+        var b = MakeCity("b", 1, 1, 50);
+        var existing = new[] { new Route(a, b, Aircraft, AircraftCount: 1) }; // 1 route -> costs $100,000
+        var order = new NetworkMarketingOrder();
+
+        var result = QuarterEngine.RunQuarter(
+            1, existing, QuarterEngine.BaseActionCap, new[] { order }, new[] { a, b }, demandModel,
+            availableCash: Money.FromDollars(50_000)); // less than the $100,000 cost
+
+        Assert.Empty(result.AppliedOrders);
+        Assert.Single(result.RejectedOrders);
+    }
+
+    [Fact]
+    public void RunQuarter_NetworkMarketingOrder_Affordable_Accepted()
+    {
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 50);
+        var b = MakeCity("b", 1, 1, 50);
+        var existing = new[] { new Route(a, b, Aircraft, AircraftCount: 1) };
+        var order = new NetworkMarketingOrder();
+
+        var result = QuarterEngine.RunQuarter(
+            1, existing, QuarterEngine.BaseActionCap, new[] { order }, new[] { a, b }, demandModel,
+            availableCash: Money.FromDollars(10_000_000));
+
+        Assert.Single(result.AppliedOrders);
+        Assert.Empty(result.RejectedOrders);
+    }
+
+    [Fact]
+    public void RunQuarter_RouteMarketingOrder_Affordable_Accepted()
+    {
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 5);
+        var b = MakeCity("b", 1, 1, 5); // light weights -> modest demand -> modest, affordable cost
+        var existing = new[] { new Route(a, b, Aircraft, AircraftCount: 1) };
+        var order = new RouteMarketingOrder(a, b);
+
+        var result = QuarterEngine.RunQuarter(
+            1, existing, QuarterEngine.BaseActionCap, new[] { order }, new[] { a, b }, demandModel,
+            availableCash: Money.FromDollars(10_000_000));
+
+        Assert.Single(result.AppliedOrders);
+        Assert.Empty(result.RejectedOrders);
+    }
+
+    [Fact]
+    public void RunQuarter_RouteMarketingOrder_Unaffordable_Rejected()
+    {
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 500);
+        var b = MakeCity("b", 1, 1, 500); // heavy weights -> real, substantial demand -> real, substantial cost
+        var existing = new[] { new Route(a, b, Aircraft, AircraftCount: 1) };
+        var order = new RouteMarketingOrder(a, b);
+
+        var result = QuarterEngine.RunQuarter(
+            1, existing, QuarterEngine.BaseActionCap, new[] { order }, new[] { a, b }, demandModel,
+            availableCash: Money.Zero);
+
+        Assert.Empty(result.AppliedOrders);
+        Assert.Single(result.RejectedOrders);
+    }
+
+    [Fact]
+    public void RunQuarter_MarketingOrders_CostFreeWhenAvailableCashIsNull()
+    {
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 500);
+        var b = MakeCity("b", 1, 1, 500);
+        var existing = new[] { new Route(a, b, Aircraft, AircraftCount: 1) };
+        var order = new RouteMarketingOrder(a, b);
+
+        var result = QuarterEngine.RunQuarter(1, existing, QuarterEngine.BaseActionCap, new[] { order }, new[] { a, b }, demandModel);
+
+        Assert.Single(result.AppliedOrders);
+        Assert.Empty(result.RejectedOrders);
+    }
+
     // --- M27: closing a route (detaching one aircraft at a time) ---
 
     [Fact]
