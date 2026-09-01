@@ -20,8 +20,8 @@ public class AiToolkitTests
     private static StrategyContext MakeContext(
         IReadOnlyList<City> cities, City homeCity,
         System.Collections.Generic.IReadOnlyDictionary<string, int>? idleContestableSlotsByCity = null,
-        int actionCap = 3, Money? availableCash = null) =>
-        new(Array.Empty<Route>(), actionCap, cities, DemandModel, new[] { Aircraft }, AirlineFleet.Empty, homeCity.Region, homeCity,
+        int actionCap = 3, Money? availableCash = null, IReadOnlyList<Route>? routes = null) =>
+        new(routes ?? Array.Empty<Route>(), actionCap, cities, DemandModel, new[] { Aircraft }, AirlineFleet.Empty, homeCity.Region, homeCity,
             IdleContestableSlotsByCity: idleContestableSlotsByCity, AvailableCash: availableCash);
 
     // --- ComputeCityWideSlotsRemaining ---
@@ -308,7 +308,59 @@ public class AiToolkitTests
         Assert.Single(orders.OfType<HireExecutiveOrder>());
     }
 
-    // --- ApplyMarketingCampaign (M52) ---
+    // --- ApplyManagementToolkit: fare cut (M37, removed by M51, reinstated by M53) ---
+
+    [Fact]
+    public void ApplyManagementToolkit_StrugglingRoute_CutsFare()
+    {
+        // BigAircraft's huge capacity against real demand for these
+        // close, weight-50 cities gives a low load factor - below
+        // BaselineAi.CloseRouteLoadFactorFloor.
+        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
+        var route = new Route(a, b, BigAircraft, AircraftCount: 1);
+        var context = MakeContext(new[] { a, b }, a, routes: new[] { route });
+        var orders = new System.Collections.Generic.List<QuarterOrder>();
+
+        AiToolkit.ApplyManagementToolkit(context, orders, new System.Collections.Generic.HashSet<int>(), spentBeforeToolkit: 0);
+
+        var order = Assert.Single(orders.OfType<SetFareOrder>());
+        Assert.Equal(new HashSet<string> { "a", "b" }, new HashSet<string> { order.Origin.Id, order.Destination.Id });
+        Assert.True(order.FarePerPassenger < route.FarePerPassenger); // sanity: this is a cut, not a raise
+    }
+
+    [Fact]
+    public void ApplyManagementToolkit_HealthyRoute_DoesNotCutFare()
+    {
+        // Aircraft's small capacity against the same demand gives a high
+        // (likely oversold/saturated) load factor - not struggling.
+        // Asserts specifically that no cut happened (rather than "no
+        // SetFareOrder at all") since a saturated route legitimately
+        // still gets a raise from the separate RaisedFare branch above.
+        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
+        var route = new Route(a, b, Aircraft, AircraftCount: 1);
+        var context = MakeContext(new[] { a, b }, a, routes: new[] { route });
+        var orders = new System.Collections.Generic.List<QuarterOrder>();
+
+        AiToolkit.ApplyManagementToolkit(context, orders, new System.Collections.Generic.HashSet<int>(), spentBeforeToolkit: 0);
+
+        // No SetFareOrder below the route's own current (suggested) fare
+        // - a raise (if the route also happens to be saturated) is fine,
+        // a cut is not.
+        Assert.DoesNotContain(orders.OfType<SetFareOrder>(), o => o.FarePerPassenger < route.FarePerPassenger);
+    }
+
+    // --- ApplyMarketingCampaign (M52, retargeted at struggling routes by M53) ---
+
+    // M53: Aircraft (100 seats) against these tests' own close, weight-50
+    // city pairs produces demand well above capacity - a "healthy"
+    // (oversold, high load factor) route, exactly why the pre-M53 tests
+    // below broke when the struggling-only filter landed. BigAircraft's
+    // huge capacity against the same demand produces a "struggling" (near
+    // -zero load factor) route instead - the two together let a test
+    // build both kinds from the same cities/demand.
+    private static readonly AircraftType BigAircraft = new("big", "Big", Seats: 100_000, RangeKm: 10_000, CruiseSpeedKmh: 900, CostPerAvailableSeatKm: 0.1);
 
     private static StrategyContext MakeMarketingContext(
         IReadOnlyList<Route> routes,
@@ -357,11 +409,11 @@ public class AiToolkitTests
     }
 
     [Fact]
-    public void ApplyMarketingCampaign_OneContestedRoute_ProposesRouteMarketingOrder()
+    public void ApplyMarketingCampaign_OneStrugglingContestedRoute_ProposesRouteMarketingOrder()
     {
         var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
         var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
-        var route = new Route(a, b, Aircraft, AircraftCount: 1);
+        var route = new Route(a, b, BigAircraft, AircraftCount: 1); // huge capacity against real demand - low load factor
         var key = QuarterEngine.NormalizedPairKey(a, b);
         var rivalCount = new System.Collections.Generic.Dictionary<(string, string), int> { [key] = 1 };
         var context = MakeMarketingContext(new[] { route }, rivalCount, availableCash: Money.FromDollars(50_000_000));
@@ -377,13 +429,63 @@ public class AiToolkitTests
     }
 
     [Fact]
-    public void ApplyMarketingCampaign_TwoContestedRoutes_ProposesNetworkMarketingOrder()
+    public void ApplyMarketingCampaign_ContestedRouteNotStruggling_NoOp()
+    {
+        // M53: a contested route with a HIGH load factor (demand exceeds
+        // this small aircraft's capacity) no longer draws a campaign at
+        // all - M52's own original demand-ranking would have picked it
+        // unconditionally; the retargeted version requires it be
+        // genuinely struggling first.
+        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
+        var route = new Route(a, b, Aircraft, AircraftCount: 1); // small capacity against real demand - high load factor
+        var key = QuarterEngine.NormalizedPairKey(a, b);
+        var rivalCount = new System.Collections.Generic.Dictionary<(string, string), int> { [key] = 1 };
+        var context = MakeMarketingContext(new[] { route }, rivalCount, availableCash: Money.FromDollars(50_000_000));
+        var orders = new System.Collections.Generic.List<QuarterOrder>();
+        var spent = 0;
+
+        AiToolkit.ApplyMarketingCampaign(context, orders, ref spent);
+
+        Assert.Empty(orders);
+        Assert.Equal(0, spent);
+    }
+
+    [Fact]
+    public void ApplyMarketingCampaign_StrugglingContestedRoute_PickedOverHealthierHigherDemandOne()
+    {
+        // M53: two contested routes, only one struggling - the healthier
+        // one (route to c, high raw demand, high load factor) must NOT
+        // be picked even though M52's own original demand-ranking would
+        // have preferred it.
+        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
+        var c = MakeCity("c", Region.NorthAmerica, 2, 2, 200); // much bigger demand weight
+        var strugglingRoute = new Route(a, b, BigAircraft, AircraftCount: 1);
+        var healthyRoute = new Route(a, c, Aircraft, AircraftCount: 1);
+        var rivalCount = new System.Collections.Generic.Dictionary<(string, string), int>
+        {
+            [QuarterEngine.NormalizedPairKey(a, b)] = 1,
+            [QuarterEngine.NormalizedPairKey(a, c)] = 1,
+        };
+        var context = MakeMarketingContext(new[] { strugglingRoute, healthyRoute }, rivalCount, availableCash: Money.FromDollars(50_000_000));
+        var orders = new System.Collections.Generic.List<QuarterOrder>();
+        var spent = 0;
+
+        AiToolkit.ApplyMarketingCampaign(context, orders, ref spent);
+
+        var order = Assert.Single(orders.OfType<RouteMarketingOrder>());
+        Assert.Equal(new HashSet<string> { "a", "b" }, new HashSet<string> { order.Origin.Id, order.Destination.Id });
+    }
+
+    [Fact]
+    public void ApplyMarketingCampaign_TwoStrugglingContestedRoutes_ProposesNetworkMarketingOrder()
     {
         var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
         var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
         var c = MakeCity("c", Region.NorthAmerica, 2, 2, 50);
-        var routeAb = new Route(a, b, Aircraft, AircraftCount: 1);
-        var routeAc = new Route(a, c, Aircraft, AircraftCount: 1);
+        var routeAb = new Route(a, b, BigAircraft, AircraftCount: 1);
+        var routeAc = new Route(a, c, BigAircraft, AircraftCount: 1);
         var rivalCount = new System.Collections.Generic.Dictionary<(string, string), int>
         {
             [QuarterEngine.NormalizedPairKey(a, b)] = 1,
@@ -401,13 +503,13 @@ public class AiToolkitTests
     }
 
     [Fact]
-    public void ApplyMarketingCampaign_TwoContestedRoutes_Unaffordable_NoOp()
+    public void ApplyMarketingCampaign_TwoStrugglingContestedRoutes_Unaffordable_NoOp()
     {
         var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
         var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
         var c = MakeCity("c", Region.NorthAmerica, 2, 2, 50);
-        var routeAb = new Route(a, b, Aircraft, AircraftCount: 1);
-        var routeAc = new Route(a, c, Aircraft, AircraftCount: 1);
+        var routeAb = new Route(a, b, BigAircraft, AircraftCount: 1);
+        var routeAc = new Route(a, c, BigAircraft, AircraftCount: 1);
         var rivalCount = new System.Collections.Generic.Dictionary<(string, string), int>
         {
             [QuarterEngine.NormalizedPairKey(a, b)] = 1,
@@ -428,7 +530,7 @@ public class AiToolkitTests
     {
         var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
         var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
-        var route = new Route(a, b, Aircraft, AircraftCount: 1);
+        var route = new Route(a, b, BigAircraft, AircraftCount: 1);
         var key = QuarterEngine.NormalizedPairKey(a, b);
         var rivalCount = new System.Collections.Generic.Dictionary<(string, string), int> { [key] = 1 };
         var context = MakeMarketingContext(new[] { route }, rivalCount, availableCash: Money.FromDollars(1));
@@ -464,7 +566,7 @@ public class AiToolkitTests
     {
         var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
         var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
-        var route = new Route(a, b, Aircraft, AircraftCount: 1);
+        var route = new Route(a, b, BigAircraft, AircraftCount: 1);
         var key = QuarterEngine.NormalizedPairKey(a, b);
         var rivalCount = new System.Collections.Generic.Dictionary<(string, string), int> { [key] = 1 };
         var context = MakeMarketingContext(new[] { route }, rivalCount, availableCash: null);
@@ -474,6 +576,29 @@ public class AiToolkitTests
         AiToolkit.ApplyMarketingCampaign(context, orders, ref spent);
 
         Assert.Single(orders.OfType<RouteMarketingOrder>());
+        Assert.Equal(1, spent);
+    }
+
+    [Fact]
+    public void ApplyMarketingCampaign_TwoStrugglingContestedRoutes_NullAvailableCash_TreatedAsAffordable()
+    {
+        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
+        var c = MakeCity("c", Region.NorthAmerica, 2, 2, 50);
+        var routeAb = new Route(a, b, BigAircraft, AircraftCount: 1);
+        var routeAc = new Route(a, c, BigAircraft, AircraftCount: 1);
+        var rivalCount = new System.Collections.Generic.Dictionary<(string, string), int>
+        {
+            [QuarterEngine.NormalizedPairKey(a, b)] = 1,
+            [QuarterEngine.NormalizedPairKey(a, c)] = 2,
+        };
+        var context = MakeMarketingContext(new[] { routeAb, routeAc }, rivalCount, availableCash: null);
+        var orders = new System.Collections.Generic.List<QuarterOrder>();
+        var spent = 0;
+
+        AiToolkit.ApplyMarketingCampaign(context, orders, ref spent);
+
+        Assert.Single(orders.OfType<NetworkMarketingOrder>());
         Assert.Equal(1, spent);
     }
 }

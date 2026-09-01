@@ -1510,6 +1510,59 @@ finds a target to use. Flagged, not chased further, for whoever next
 works on route-overlap/contestation dynamics between the two real
 strategies.
 
+## M53 — Fare cuts and marketing become load-factor-recovery tools ✅
+
+**Origin:** the user's own direct instruction, immediately after M52
+shipped: "fare adjustments and marketing should be tools the AI uses to
+try to help routes with lower load factors." Reshapes two just-shipped
+milestones, not a new mechanic — both are true, correct answers to the
+different questions each one asked at the time, not contradicted here:
+
+- **M51** measured the fare-cut branch as net *revenue*-negative under
+  M48's real elasticity and removed it. That finding still stands. But
+  under the user's own reframing — a cut is a tool to help load factor
+  recover, not a revenue-positivity bet — it does exactly that by
+  construction (M48's elasticity genuinely raises demand on the route it
+  targets). Reinstated in `AiToolkit.ApplyManagementToolkit`, byte-for-byte
+  the same loop M51 removed (`BaselineAi.CutFare`, triggered on
+  `LoadFactor < CloseRouteLoadFactorFloor`), doc comment reframed
+  accordingly. Free action, coexists with a same-quarter `CloseRouteOrder`
+  shrink or marketing campaign on the same route.
+- **M52** targeted whichever contested route had the *highest raw
+  demand*, healthy or not. `AiToolkit.ApplyMarketingCampaign` retargeted:
+  filter to contested routes below `CloseRouteLoadFactorFloor` first (one
+  consistent "struggling" definition, shared with the fare cut and
+  `CloseRouteOrder`), then rank the survivors worst-load-factor-first
+  instead of demand-first. Same 1-vs-2+ → `RouteMarketingOrder`-vs-`NetworkMarketingOrder`
+  split as before.
+
+**Measured: overall win rate 25.0% (M52) → 23.7%** (71/300, avg win
+quarter 30.4 → 24.7) — NorthAmerica 77.3%→74.6%, SouthWestAsia
+22.7%→25.4%. Isolated by ablation (each change disabled independently,
+then together): **the retargeted marketing filter produces zero
+campaigns across the entire 300-game population** — disabling only the
+fare cut reproduces M51's own pre-marketing baseline exactly (76/300,
+avg 30.1, identical region table, not M52's 75/300), and disabling only
+marketing (fare cut left on) reproduces the full M53 result exactly
+(71/300, avg 24.7) — the two numbers match to the digit. So the entire
+measured move is the fare-cut reinstatement alone; retargeting marketing
+at struggling routes made it strictly *more* conservative than M52's own
+already-rare triggering (a route is now required to be both contested
+*and* below the load-factor floor at once — evidently something that
+never once co-occurred in this population, on top of M52's own finding
+that genuinely contested routes are already rare for these two
+strategies). The fare-cut reinstatement's own effect exactly reopens
+M51's finding: reframing it as a load-factor tool doesn't change that it
+measurably costs win rate under today's metric — expected and accepted,
+not a defect, given the user's own explicit direction on what the tool
+is for.
+
+Not chased further here: whether the marketing retarget should fall back
+to a looser threshold when no route is both contested and struggling (so
+it isn't effectively dead code in practice), or whether contested-and-struggling
+should be a lower bar entirely, is flagged for whoever next works on
+this lever.
+
 ---
 
 ## Kept in mind, not scheduled

@@ -18,8 +18,8 @@ Compiled 2026-08-31, cross-referencing every `docs/*_ROADMAP.md`'s own
 writing: M0–M14 (`SIM_CORE_ROADMAP.md`), M15–M19 (`GAME_SETUP_ROADMAP.md`),
 M20–M22 (`HISTORICAL_DYNAMICS_ROADMAP.md`), M23–M24
 (`WIN_CONDITIONS_ROADMAP.md`), M25–M30/M34 (`FINANCIAL_MODEL_ROADMAP.md`,
-M31 retired), M31/M35–M44/M49–M52 (`BASELINE_AI_ROADMAP.md`), M32–M33/M45–M46
-(`ROUTE_CAPACITY_ROADMAP.md`), M47–M48 (`MARKETING_ROADMAP.md`). M52 is
+M31 retired), M31/M35–M44/M49–M53 (`BASELINE_AI_ROADMAP.md`), M32–M33/M45–M46
+(`ROUTE_CAPACITY_ROADMAP.md`), M47–M48 (`MARKETING_ROADMAP.md`). M53 is
 the current highest issued number. Update this line the moment a new
 milestone is opened anywhere.
 
@@ -148,6 +148,28 @@ finding: these two strategies rarely end up genuinely contesting the
 same pair as each other in the first place (`DomesticProfitOptimizerStrategy`
 stays home-region-only; `RapidExpansionStrategy` spreads thin rather
 than concentrating), so the new lever rarely finds a target.
+
+**M53 (`docs/BASELINE_AI_ROADMAP.md`, fare cuts and marketing reframed as
+load-factor-recovery tools) directly reshapes M51 and M52, per the
+user's own explicit instruction.** Fare cut reinstated in
+`AiToolkit.ApplyManagementToolkit` (M51's own removal was a correct
+answer to "is this revenue-positive?" — the user's reframing asks a
+different question: does it help load factor recover, which it does by
+construction under M48's elasticity). `ApplyMarketingCampaign` retargeted
+from "highest-demand contested route" to "worst-load-factor contested
+route below `CloseRouteLoadFactorFloor`." Win rate **25.0% → 23.7%**
+(75/300 → 71/300) — isolated by ablation to be *entirely* the fare-cut
+reinstatement: the retargeted marketing filter produced **zero**
+campaigns across the whole 300-game population (disabling only marketing
+reproduces the full M53 result to the digit; disabling only the fare cut
+reproduces M51's own pre-marketing baseline, not M52's). Requiring a
+route be both contested *and* struggling at once turned out to be
+stricter than M52's own already-rare "just contested" trigger — evidently
+never co-occurring here. Expected, not a defect: the fare-cut's
+win-rate cost is the same tension M51 already found, now deliberately
+accepted because the tool's purpose changed. Whether marketing's
+targeting needs a looser fallback to actually fire in practice is
+flagged, not chased, for whoever next works on this lever.
 
 Three items found during these investigations, deliberately deferred
 rather than folded in — all filed under `BASELINE_AI_ROADMAP.md`'s own
