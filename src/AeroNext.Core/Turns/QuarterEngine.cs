@@ -44,6 +44,15 @@ public static class QuarterEngine
     /// <summary>M47: how many distinct RouteMarketingOrders one airline can have accepted in a single quarter — a real cap independent of ActionCap, which can otherwise grow past 3 via HireExecutiveOrder.</summary>
     public const int MaxConcurrentRouteMarketingCampaigns = 3;
 
+    /// <summary>M49: a hard headcount cap — an airline can never have more than this many executives on staff at once. No RelinquishSlotOrder-style "let one go" order exists, so today this also happens to be a lifetime total, but it's tracked as a live headcount (derived from ActionCap), not a counter, so a future release-an-executive order would need no rearchitecting.</summary>
+    public const int MaxExecutives = 4;
+
+    /// <summary>M49: how much one executive raises the action cap by, starting next quarter — fixed, not a player-chosen amount (HireExecutiveOrder itself carries no field), so MaxExecutives is a coherent headcount cap rather than an arbitrary point pool.</summary>
+    public const int ActionCapPerExecutive = 1;
+
+    /// <summary>M49: the highest ActionCap can ever reach — BaseActionCap plus every executive the headcount cap allows.</summary>
+    public const int MaxActionCap = BaseActionCap + MaxExecutives * ActionCapPerExecutive;
+
     /// <param name="fleet">
     /// Null (the default) preserves fully permissive behavior — any
     /// era-available, in-range aircraft type can be assigned to a route
@@ -179,6 +188,7 @@ public static class QuarterEngine
         var debtPaidDownSoFar = Money.Zero;
         var networkMarketingAcceptedThisQuarter = false;
         var routeMarketingPairsAcceptedThisQuarter = new HashSet<(string, string)>();
+        var executivesHiredThisQuarter = 0;
         var year = Timeline.YearForQuarter(quarterNumber);
         var workingFleet = fleet;
 
@@ -316,6 +326,19 @@ public static class QuarterEngine
                 var unaffordable = availableCash is not null && cashSpent + campaignCost > availableCash.Value;
 
                 if (!operatesPair || conflictsWithNetworkCampaign || alreadyTargetedThisQuarter || atConcurrentCap || unaffordable)
+                {
+                    rejected.Add(order);
+                    continue;
+                }
+            }
+
+            if (order is HireExecutiveOrder)
+            {
+                var currentExecutiveCount = Math.Max(0, (currentActionCap - BaseActionCap) / ActionCapPerExecutive);
+                var atHeadcountCap = currentExecutiveCount + executivesHiredThisQuarter >= MaxExecutives;
+                var unaffordable = availableCash is not null && cashSpent + FinancialResolver.ExecutiveHiringCost > availableCash.Value;
+
+                if (atHeadcountCap || unaffordable)
                 {
                     rejected.Add(order);
                     continue;
@@ -489,12 +512,22 @@ public static class QuarterEngine
                 routeMarketingPairsAcceptedThisQuarter.Add(NormalizedPairKey(appliedRouteMarketingOrder.Origin, appliedRouteMarketingOrder.Destination));
             }
 
+            if (order is HireExecutiveOrder)
+            {
+                if (availableCash is not null)
+                {
+                    cashSpent += FinancialResolver.ExecutiveHiringCost;
+                }
+
+                executivesHiredThisQuarter += 1;
+            }
+
             applied.Add(order);
             spent += cost;
         }
 
         var routes = ApplyRouteOrders(currentRoutes, applied.Where(o => o is RouteOrder or CloseRouteOrder or SetFareOrder));
-        var nextActionCap = currentActionCap + applied.OfType<HireExecutiveOrder>().Sum(h => h.CapIncrease);
+        var nextActionCap = Math.Min(MaxActionCap, currentActionCap + applied.OfType<HireExecutiveOrder>().Count() * ActionCapPerExecutive);
         var plan = NetworkPlanner.Plan(routes, cities, demandModel);
 
         return new QuarterResult(quarterNumber, routes, plan, nextActionCap, applied, rejected, workingFleet, retiredUnits);

@@ -291,7 +291,7 @@ public static class FullGameRunner
                 var name = airline.Name;
                 var wasBankruptEnteringQuarter = finances[name].IsBankrupt;
 
-                var (nextState, _) = FinancialResolver.Resolve(finances[name], airline, market, appliedOrdersByName[name], fleet: fleets[name], retiredUnits: retiredUnitsByName[name]);
+                var (nextState, _) = FinancialResolver.Resolve(finances[name], airline, market, appliedOrdersByName[name], fleet: fleets[name], retiredUnits: retiredUnitsByName[name], currentActionCap: capsAtQuarterStart[name]);
                 finances[name] = nextState;
 
                 if (wasBankruptEnteringQuarter)

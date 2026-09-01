@@ -185,11 +185,11 @@ public class QuarterEngineTests
     {
         var demandModel = new GravityDemandModel();
         var cities = new[] { MakeCity("a", 0, 0, 50), MakeCity("b", 1, 1, 50) };
-        var orders = new QuarterOrder[] { new HireExecutiveOrder(CapIncrease: 2) };
+        var orders = new QuarterOrder[] { new HireExecutiveOrder() };
 
         var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, orders, cities, demandModel);
 
-        Assert.Equal(QuarterEngine.BaseActionCap + 2, result.ActionCap);
+        Assert.Equal(QuarterEngine.BaseActionCap + QuarterEngine.ActionCapPerExecutive, result.ActionCap);
     }
 
     [Fact]
@@ -208,6 +208,94 @@ public class QuarterEngineTests
         var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, orders, cities, demandModel);
 
         Assert.Equal(3, result.Routes.Count); // still only 3 new routes, not 4
+    }
+
+    // --- M49: executives cost real money and are capped ---
+
+    [Fact]
+    public void RunQuarter_HireExecutive_AtHeadcountCap_Rejected()
+    {
+        var demandModel = new GravityDemandModel();
+        var cities = new[] { MakeCity("a", 0, 0, 50) };
+        var order = new HireExecutiveOrder();
+
+        var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.MaxActionCap, new[] { order }, cities, demandModel);
+
+        Assert.Empty(result.AppliedOrders);
+        Assert.Single(result.RejectedOrders);
+        Assert.Equal(QuarterEngine.MaxActionCap, result.ActionCap); // never grows past the cap
+    }
+
+    [Fact]
+    public void RunQuarter_HireExecutive_BelowHeadcountCap_Accepted()
+    {
+        var demandModel = new GravityDemandModel();
+        var cities = new[] { MakeCity("a", 0, 0, 50) };
+        var order = new HireExecutiveOrder();
+
+        var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.MaxActionCap - 1, new[] { order }, cities, demandModel);
+
+        Assert.Single(result.AppliedOrders);
+        Assert.Empty(result.RejectedOrders);
+    }
+
+    [Fact]
+    public void RunQuarter_MultipleHiresInOneBatch_CappedAtHeadcountRegardlessOfOrder()
+    {
+        // Starting one executive below the cap - only one of two
+        // HireExecutiveOrders in the same batch can fit.
+        var demandModel = new GravityDemandModel();
+        var cities = new[] { MakeCity("a", 0, 0, 50) };
+        var orders = new QuarterOrder[] { new HireExecutiveOrder(), new HireExecutiveOrder() };
+
+        var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.MaxActionCap - 1, orders, cities, demandModel);
+
+        Assert.Single(result.AppliedOrders);
+        Assert.Single(result.RejectedOrders);
+        Assert.Equal(QuarterEngine.MaxActionCap, result.ActionCap);
+    }
+
+    [Fact]
+    public void RunQuarter_HireExecutive_Unaffordable_Rejected()
+    {
+        var demandModel = new GravityDemandModel();
+        var cities = new[] { MakeCity("a", 0, 0, 50) };
+        var order = new HireExecutiveOrder();
+
+        var result = QuarterEngine.RunQuarter(
+            1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, cities, demandModel,
+            availableCash: Money.Zero);
+
+        Assert.Empty(result.AppliedOrders);
+        Assert.Single(result.RejectedOrders);
+    }
+
+    [Fact]
+    public void RunQuarter_HireExecutive_Affordable_Accepted()
+    {
+        var demandModel = new GravityDemandModel();
+        var cities = new[] { MakeCity("a", 0, 0, 50) };
+        var order = new HireExecutiveOrder();
+
+        var result = QuarterEngine.RunQuarter(
+            1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, cities, demandModel,
+            availableCash: Money.FromDollars(10_000_000));
+
+        Assert.Single(result.AppliedOrders);
+        Assert.Empty(result.RejectedOrders);
+    }
+
+    [Fact]
+    public void RunQuarter_HireExecutive_CostFreeWhenAvailableCashIsNull()
+    {
+        var demandModel = new GravityDemandModel();
+        var cities = new[] { MakeCity("a", 0, 0, 50) };
+        var order = new HireExecutiveOrder();
+
+        var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, cities, demandModel);
+
+        Assert.Single(result.AppliedOrders);
+        Assert.Empty(result.RejectedOrders);
     }
 
     [Fact]

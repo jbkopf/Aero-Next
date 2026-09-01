@@ -1269,6 +1269,127 @@ regional-balance effort, is a call for the user, not decided here.
 
 ---
 
+## M49 — Executives cost real money, and are capped at 4 ✅
+
+**Origin:** the user asked directly, right after a plain explanation of
+how the mechanic worked today (free, uncapped, `HireExecutiveOrder`
+submitted unconditionally by both real strategies every single quarter)
+— closing exactly the gap M31 itself flagged and this roadmap's own
+"Kept in mind" section carried forward unresolved ever since: "should
+raising the action cap ever cost something, or have a ceiling?" Both,
+now: a one-time hiring cost, a recurring per-quarter salary for as long
+as the executive stays on staff, and a hard headcount cap of 4.
+
+**`HireExecutiveOrder` simplified to a parameterless record** — it used
+to carry its own `CapIncrease` (defaulting to 1, but player-settable);
+now every hire always means exactly "one executive," a fixed
+`QuarterEngine.ActionCapPerExecutive = 1` cap boost each. A coherent
+4-executive headcount cap needs a fixed per-hire unit, not an arbitrary
+point pool a single order could front-load. `BriefingGenerator`'s own
+capIncrease display (`h.CapIncrease` → `count *
+QuarterEngine.ActionCapPerExecutive`) and one test that exercised the
+old field were the only two real call sites this touched.
+
+**No new state — the existing `ActionCap` already *is* the executive
+headcount**, derived rather than tracked separately:
+`executiveCount = (currentActionCap - BaseActionCap) / ActionCapPerExecutive`.
+Since `HireExecutiveOrder` is the only thing that has ever raised
+`ActionCap`, this is exact, not an approximation, and needed no new
+board the way M45/M46's own new mechanics did.
+
+**`QuarterEngine.RunQuarter` gains the rejection rules**, in the
+existing sequential per-order loop: reject a `HireExecutiveOrder` once
+`currentExecutiveCount + executivesHiredThisQuarter >= MaxExecutives`
+(4) — tracked as a running per-quarter counter, so two hires in one
+batch are correctly capped together, not independently; reject if
+unaffordable (`FinancialResolver.ExecutiveHiringCost`, the standard
+`availableCash`-gated pattern every other costed order already uses).
+`nextActionCap` is also now clamped at `MaxActionCap` (`Math.Min`) as a
+direct, cheap statement of the invariant in the code itself, not just
+relied on implicitly from the rejection logic being correct.
+
+**`FinancialResolver` gains two new constants and two new statement
+lines**, both `(Proposed, tunable)`, both broken out rather than folded
+into `NetIncome` silently: `ExecutiveHiringCost` ($600,000, charged the
+same quarter a hire is applied — recruiting/signing/relocation, an
+upfront cost like an aircraft purchase) and `ExecutiveSalaryPerQuarter`
+($300,000 per executive currently on staff, the same "broken out, not
+folded" treatment `SalaryCostPerAircraftPerQuarter` already gets). A new
+optional `currentActionCap` parameter (null-permissive, preserving every
+pre-M49 call site) — deliberately the cap *entering* the quarter, not
+`QuarterResult`'s own post-hire one, so a newly hired executive's salary
+starts next quarter too, symmetric with when their own action-cap boost
+takes effect (`QuarterEngine`'s existing "never affects the budget for
+the quarter it's submitted in" rule) — a hire costs its one-time fee
+immediately but doesn't start drawing a full salary the same quarter.
+
+**`FullGameRunner.cs` wiring** — the only real loop wired end to end,
+matching M33/M45/M46/M47's own precedent of leaving `AeroNext.Sim`'s M13
+loop permissive: `FinancialResolver.Resolve` now receives
+`capsAtQuarterStart[name]` (a value the loop already snapshots every
+quarter for an unrelated bankruptcy-freeze check), no new state needed.
+
+**Done when:** the full pre-existing suite passes unmodified or is
+updated to reflect the new reality rather than patched around it — one
+`BaselineAiTests` case did (`DecideOrders_BorrowThenNegotiate_ProducesLegalOrders_WhenRunThroughQuarterEngine`
+deliberately keeps `BaselineAi`'s own frozen unconditional hire cash-short
+of both the negotiation bid *and* the new $600,000 hiring cost; the hire
+being correctly rejected for affordability is now the documented,
+asserted behavior, not an unexpected failure); dedicated tests cover the
+headcount cap (single hire, two hires in one batch, cap independent of
+being below vs. at the limit), affordability both directions, the
+permissive `availableCash: null` default, the one-time hiring cost
+scaling by count, `currentActionCap: null` charging no salary, zero
+executives charging no salary, salary scaling by headcount, and hiring
+this quarter not also charging a same-quarter salary.
+
+Done. 743 tests total (13 new — 6 `QuarterEngine`, 7 `FinancialResolver`).
+100% line/branch coverage on both touched classes, except
+`HireExecutiveOrder`'s own 0%-line/100%-branch reading — the same
+confirmed coverlet artifact `NetworkMarketingOrder`/`QuarterOrder`
+already carry for an empty positional record, not a real gap. Overall
+project coverage 99.70%/99.48%. 300-game QA harness sweep at 244
+quarters: 300/300 clean, 0 invariant violations, 0 crashes.
+
+**By far the largest single-milestone move measured in this entire
+recent run — confirmed real by ablation, not assumed.** Both real
+strategies hire unconditionally every quarter (M31's own design, never
+revisited); that habit, once it has a real recurring cost attached,
+compounds hard over a 244-quarter campaign. Overall win rate **40.7%
+(M48) → 9.7%** (29/300, avg quarter 51.6 → 16.6 — games that *do*
+produce a winner now resolve much faster, since so few airlines survive
+long enough to build anything). Bankruptcy cleared 96%+ in four of six
+regions (Europe 100%, AustralAsia 100%, SouthAmerica 96.6%, EastAsia
+97.2%); even NorthAmerica, dominant in every prior round (84-85% win
+share), collapsed to 28.1% bankrupt / 24.1% win share, with
+**SouthWestAsia taking over as the leading region (75.9% win share)** —
+a genuine reshuffling, not just a uniform decline, not root-caused
+further here. Isolated by a two-step ablation (both changes temporarily
+reverted, sweep re-run after each, then restored before shipping — same
+discipline as every milestone in this roadmap): the recurring salary
+alone accounts for most of the collapse (disabling it alone recovers to
+37.0%, close to but still below M48's 40.7%, meaning the one-time
+hiring cost contributes a real, smaller drag on its own); disabling both
+reproduces M48's own recorded baseline exactly (122/300, avg 51.6,
+identical region table), confirming the ablation methodology itself.
+
+**Flagged plainly, matching this roadmap's own repeated pattern
+(M32/M33/M43/M45/M46/M48 each moved this same un-tuned heuristic AI's
+trajectory, in one direction or the other) — not fixed here.** Both real
+strategies' own unconditional "hire every quarter regardless of cash or
+whether the extra capacity gets used" habit was correct when hiring was
+free; it is very much not correct now, and this milestone deliberately
+does not change it, the same scope discipline M47/M48 both held to for
+their own new player-facing mechanics. `AiToolkit.ApplyManagementToolkit`'s
+own unconditional `orders.Add(new HireExecutiveOrder())` is the single
+most direct next target for whoever next works on `BaselineAi`/successor
+strategies — teaching it to weigh a hire's real, permanent cost against
+whether the current action cap is actually the bottleneck would very
+plausibly recover most of this collapse on its own, but that is a real
+design decision for a future round, not assumed here.
+
+---
+
 ## Kept in mind, not scheduled
 
 - **`AllianceCourtOrder`** — deliberately excluded from every milestone
@@ -1276,10 +1397,9 @@ regional-balance effort, is a call for the user, not decided here.
   the alliance mechanic has no consequence today that would change this
   AI's route decisions, so teaching it to court an alliance partner
   would be cosmetic. Revisit once alliances actually do something.
-- **`HireExecutiveOrder`'s uncapped, costless nature** — flagged under
-  M31 above. Not a `BaselineAi` gap; a pre-existing core-mechanic
-  question (should raising the action cap ever cost something, or have
-  a ceiling?) that this roadmap surfaces but doesn't resolve.
+- ~~**`HireExecutiveOrder`'s uncapped, costless nature**~~ — closed by
+  M49 above: a one-time hiring cost, a recurring per-quarter salary, and
+  a hard cap of 4 executives.
 - **The route open/shrink/regrow thrash cycle** — real, diagnosed
   directly (M43 above), not yet fixed. `BaselineAi.FindBestPerformingRoute`
   can pick a route that was *just* shrunk the previous quarter, since

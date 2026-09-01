@@ -732,6 +732,15 @@ public class BaselineAiTests
     [Fact]
     public void DecideOrders_BorrowThenNegotiate_ProducesLegalOrders_WhenRunThroughQuarterEngine()
     {
+        // M49: BaselineAi (frozen/legacy - see its own class doc comment)
+        // still appends its unconditional HireExecutiveOrder regardless of
+        // cash. That's no longer free, so with only $500,000 available
+        // (deliberately short of both the negotiation bid *and*
+        // FinancialResolver.ExecutiveHiringCost's own $600,000) the hire
+        // itself is legitimately rejected for affordability - a real,
+        // correct behavior change this test now documents rather than
+        // works around. Everything else this AI proposed - the borrow,
+        // the negotiation it unlocks - still resolves legally.
         var a = MakeCity("a", 0, 0, 100);
         var gateway = MakeGateway("gw", 30, 30, 80);
         var cities = new[] { a, gateway };
@@ -743,7 +752,8 @@ public class BaselineAiTests
             1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, orders, cities, DemandModel, FleetWithAircraft,
             availableCash: Money.FromDollars(500_000), currentDebtBalance: Money.Zero);
 
-        Assert.Empty(result.RejectedOrders);
+        Assert.Empty(result.RejectedOrders.Where(o => o is not HireExecutiveOrder));
+        Assert.Single(result.RejectedOrders.OfType<HireExecutiveOrder>());
     }
 
     [Fact]

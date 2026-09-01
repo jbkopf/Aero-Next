@@ -83,8 +83,9 @@ public static class FinancialResolver
     /// <summary>
     /// M30: flat, per-aircraft-unit quarterly staffing cost — rank-and-file
     /// crew, maintenance, and scheduling staff, independent of
-    /// HireExecutiveOrder (which stays free and only raises the action
-    /// cap). Scaled by total fleet size (owned + leased, from M25's
+    /// ExecutiveSalaryPerQuarter (a separate, M49 line for the executives
+    /// who raise the action cap, not this rank-and-file fleet staff).
+    /// Scaled by total fleet size (owned + leased, from M25's
     /// ledger), not route count — a route already uses an aircraft unit
     /// that's counted, so scaling by both would double-count the same
     /// capacity. Charged regardless of whether a unit is idle or actively
@@ -94,6 +95,12 @@ public static class FinancialResolver
     /// purchase price the way a lease payment does.
     /// </summary>
     public static readonly Money SalaryCostPerAircraftPerQuarter = Money.FromDollars(250_000);
+
+    /// <summary>(Proposed, tunable) — M49: HireExecutiveOrder's one-time cost, charged the same quarter it's applied — recruiting/signing/relocation, not an ongoing expense (see ExecutiveSalaryPerQuarter for that).</summary>
+    public static readonly Money ExecutiveHiringCost = Money.FromDollars(600_000);
+
+    /// <summary>(Proposed, tunable) — M49: recurring per-quarter cost for every executive currently on staff, same "broken out, not folded" legibility treatment as SalaryCostPerAircraftPerQuarter. Charged starting the quarter an executive's own action-cap boost takes effect (one quarter after hiring), not the quarter they're hired — symmetric with when they start actually helping, not the same quarter as the one-time hiring cost above.</summary>
+    public static readonly Money ExecutiveSalaryPerQuarter = Money.FromDollars(300_000);
 
     /// <summary>
     /// M34 amendment to M30: an idle (unassigned) unit costs less than a
@@ -124,13 +131,27 @@ public static class FinancialResolver
     /// `fleet` no longer has them to look up. Null (the default) credits
     /// no retirement proceeds, preserving every pre-M26 call site.
     /// </param>
+    /// <param name="currentActionCap">
+    /// M49: the airline's own ActionCap entering this quarter (before any
+    /// HireExecutiveOrder applied this same quarter takes effect) — the
+    /// same value QuarterEngine.RunQuarter's own currentActionCap
+    /// parameter was called with. Null (the default) charges no executive
+    /// salary at all, preserving every pre-M49 call site's behavior.
+    /// Passing a real value derives the currently-on-staff executive
+    /// headcount from it (ActionCap - QuarterEngine.BaseActionCap) and
+    /// charges ExecutiveSalaryPerQuarter for each — using the cap as it
+    /// stood *entering* the quarter, not QuarterResult's own post-hire
+    /// ActionCap, so a newly hired executive's salary starts next quarter
+    /// too, the same delay their own action-cap boost already has.
+    /// </param>
     public static (FinancialState State, QuarterlyStatement Statement) Resolve(
         FinancialState state,
         Airline airline,
         CompetitiveMarketResult marketResult,
         IReadOnlyList<QuarterOrder> appliedOrders,
         AirlineFleet? fleet = null,
-        IReadOnlyList<FleetUnit>? retiredUnits = null)
+        IReadOnlyList<FleetUnit>? retiredUnits = null,
+        int? currentActionCap = null)
     {
         if (state.IsBankrupt)
         {
@@ -153,13 +174,15 @@ public static class FinancialResolver
         var negotiationBidCost = appliedOrders.OfType<NegotiationOrder>().Aggregate(Money.Zero, (sum, o) => sum + o.Bid);
         var salaryCost = ComputeSalaryCost(fleet);
         var marketingCost = ComputeMarketingCost(airline, marketResult, appliedOrders);
+        var executiveHiringCost = ExecutiveHiringCost * appliedOrders.OfType<HireExecutiveOrder>().Count();
+        var executiveSalaryCost = ComputeExecutiveSalaryCost(currentActionCap);
 
-        var netIncome = revenue - operatingCost - debtService - purchaseCost - leaseFee + retirementProceeds - negotiationBidCost - salaryCost - marketingCost;
+        var netIncome = revenue - operatingCost - debtService - purchaseCost - leaseFee + retirementProceeds - negotiationBidCost - salaryCost - marketingCost - executiveHiringCost - executiveSalaryCost;
         var cashAfter = state.CashBalance + borrowed - manualPaydown + netIncome;
         var isBankrupt = cashAfter < Money.Zero || finalDebtBalance > Money.FromDollars(DebtCeilingDollars);
 
         var newState = state with { CashBalance = cashAfter, DebtBalance = finalDebtBalance, IsBankrupt = isBankrupt };
-        var statement = new QuarterlyStatement(revenue, operatingCost, debtService, borrowed, netIncome, cashAfter, isBankrupt, purchaseCost, leaseFee, retirementProceeds, negotiationBidCost, principalRepayment, manualPaydown, salaryCost, marketingCost);
+        var statement = new QuarterlyStatement(revenue, operatingCost, debtService, borrowed, netIncome, cashAfter, isBankrupt, purchaseCost, leaseFee, retirementProceeds, negotiationBidCost, principalRepayment, manualPaydown, salaryCost, marketingCost, executiveHiringCost, executiveSalaryCost);
 
         return (newState, statement);
     }
@@ -193,6 +216,19 @@ public static class FinancialResolver
         var idleRateCents = (long)Math.Round(SalaryCostPerAircraftPerQuarter.Cents * IdleSalaryCostFraction, MidpointRounding.AwayFromZero);
 
         return SalaryCostPerAircraftPerQuarter * assignedCount + new Money(idleRateCents) * idleCount;
+    }
+
+    /// <summary>M49: null (the default, preserving every pre-M49 call site) charges nothing; otherwise ExecutiveSalaryPerQuarter times however many executives ActionCap - QuarterEngine.BaseActionCap implies were already on staff entering the quarter.</summary>
+    private static Money ComputeExecutiveSalaryCost(int? currentActionCap)
+    {
+        if (currentActionCap is null)
+        {
+            return Money.Zero;
+        }
+
+        var executiveCount = Math.Max(0, (currentActionCap.Value - QuarterEngine.BaseActionCap) / QuarterEngine.ActionCapPerExecutive);
+
+        return ExecutiveSalaryPerQuarter * executiveCount;
     }
 
     private static Money ComputeRetirementProceeds(IReadOnlyList<FleetUnit>? retiredUnits)

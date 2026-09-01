@@ -26,7 +26,7 @@ public static class BriefingGenerator
             items.Add(DescribeRejection(order, year));
         }
 
-        var capIncrease = current.AppliedOrders.OfType<HireExecutiveOrder>().Sum(h => h.CapIncrease);
+        var capIncrease = current.AppliedOrders.OfType<HireExecutiveOrder>().Count() * QuarterEngine.ActionCapPerExecutive;
         if (capIncrease > 0)
         {
             items.Add(new BriefingItem(

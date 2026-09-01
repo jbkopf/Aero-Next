@@ -777,4 +777,110 @@ public class FinancialResolverTests
 
         Assert.Equal(Money.Zero, statement.MarketingCost);
     }
+
+    // --- M49: executives cost real money ---
+
+    [Fact]
+    public void Resolve_HireExecutiveOrder_DeductsTheOneTimeHiringCost()
+    {
+        var a = MakeCity("a", 0, 0, 1);
+        var airline = new Airline("A", Array.Empty<Route>());
+        var market = CompetitiveMarket.Resolve(new[] { airline }, new[] { a }, DemandModel);
+        var state = FinancialState.Start(Money.FromDollars(10_000_000), Money.Zero, interestRatePerQuarter: 0.0);
+        var orders = new QuarterOrder[] { new HireExecutiveOrder() };
+
+        var (newState, statement) = FinancialResolver.Resolve(state, airline, market, orders);
+
+        Assert.Equal(FinancialResolver.ExecutiveHiringCost, statement.ExecutiveHiringCost);
+        Assert.Equal(state.CashBalance - FinancialResolver.ExecutiveHiringCost, newState.CashBalance);
+    }
+
+    [Fact]
+    public void Resolve_MultipleHiresInOneQuarter_HiringCostScalesByCount()
+    {
+        var a = MakeCity("a", 0, 0, 1);
+        var airline = new Airline("A", Array.Empty<Route>());
+        var market = CompetitiveMarket.Resolve(new[] { airline }, new[] { a }, DemandModel);
+        var state = FinancialState.Start(Money.FromDollars(10_000_000), Money.Zero, interestRatePerQuarter: 0.0);
+        var orders = new QuarterOrder[] { new HireExecutiveOrder(), new HireExecutiveOrder() };
+
+        var (_, statement) = FinancialResolver.Resolve(state, airline, market, orders);
+
+        Assert.Equal(FinancialResolver.ExecutiveHiringCost * 2, statement.ExecutiveHiringCost);
+    }
+
+    [Fact]
+    public void Resolve_NoHireExecutiveOrders_HiringCostIsZero()
+    {
+        var a = MakeCity("a", 0, 0, 1);
+        var airline = new Airline("A", Array.Empty<Route>());
+        var market = CompetitiveMarket.Resolve(new[] { airline }, new[] { a }, DemandModel);
+        var state = FinancialState.Start(Money.FromDollars(10_000_000), Money.Zero, interestRatePerQuarter: 0.0);
+
+        var (_, statement) = FinancialResolver.Resolve(state, airline, market, Array.Empty<QuarterOrder>());
+
+        Assert.Equal(Money.Zero, statement.ExecutiveHiringCost);
+    }
+
+    [Fact]
+    public void Resolve_CurrentActionCapNull_NoExecutiveSalaryCharged()
+    {
+        var a = MakeCity("a", 0, 0, 1);
+        var airline = new Airline("A", Array.Empty<Route>());
+        var market = CompetitiveMarket.Resolve(new[] { airline }, new[] { a }, DemandModel);
+        var state = FinancialState.Start(Money.FromDollars(10_000_000), Money.Zero, interestRatePerQuarter: 0.0);
+
+        var (_, statement) = FinancialResolver.Resolve(state, airline, market, Array.Empty<QuarterOrder>(), currentActionCap: null);
+
+        Assert.Equal(Money.Zero, statement.ExecutiveSalaryCost);
+    }
+
+    [Fact]
+    public void Resolve_CurrentActionCapAtBase_NoExecutivesYet_NoSalaryCharged()
+    {
+        var a = MakeCity("a", 0, 0, 1);
+        var airline = new Airline("A", Array.Empty<Route>());
+        var market = CompetitiveMarket.Resolve(new[] { airline }, new[] { a }, DemandModel);
+        var state = FinancialState.Start(Money.FromDollars(10_000_000), Money.Zero, interestRatePerQuarter: 0.0);
+
+        var (_, statement) = FinancialResolver.Resolve(state, airline, market, Array.Empty<QuarterOrder>(), currentActionCap: QuarterEngine.BaseActionCap);
+
+        Assert.Equal(Money.Zero, statement.ExecutiveSalaryCost);
+    }
+
+    [Fact]
+    public void Resolve_CurrentActionCapImpliesExecutivesOnStaff_SalaryScalesByHeadcount()
+    {
+        var a = MakeCity("a", 0, 0, 1);
+        var airline = new Airline("A", Array.Empty<Route>());
+        var market = CompetitiveMarket.Resolve(new[] { airline }, new[] { a }, DemandModel);
+        var state = FinancialState.Start(Money.FromDollars(10_000_000), Money.Zero, interestRatePerQuarter: 0.0);
+        var capImplyingThreeExecutives = QuarterEngine.BaseActionCap + 3 * QuarterEngine.ActionCapPerExecutive;
+
+        var (newState, statement) = FinancialResolver.Resolve(state, airline, market, Array.Empty<QuarterOrder>(), currentActionCap: capImplyingThreeExecutives);
+
+        Assert.Equal(FinancialResolver.ExecutiveSalaryPerQuarter * 3, statement.ExecutiveSalaryCost);
+        Assert.Equal(state.CashBalance - statement.ExecutiveSalaryCost, newState.CashBalance);
+    }
+
+    [Fact]
+    public void Resolve_HiringThisQuarter_DoesNotAlsoChargeSalaryThisQuarter()
+    {
+        // A newly hired executive's own salary starts next quarter -
+        // symmetric with when their action-cap boost itself takes effect
+        // (QuarterEngine.RunQuarter's own "never affects the budget for
+        // the quarter it's submitted in" rule). currentActionCap here is
+        // the cap *entering* the quarter (0 executives), even though a
+        // HireExecutiveOrder was applied this same quarter.
+        var a = MakeCity("a", 0, 0, 1);
+        var airline = new Airline("A", Array.Empty<Route>());
+        var market = CompetitiveMarket.Resolve(new[] { airline }, new[] { a }, DemandModel);
+        var state = FinancialState.Start(Money.FromDollars(10_000_000), Money.Zero, interestRatePerQuarter: 0.0);
+        var orders = new QuarterOrder[] { new HireExecutiveOrder() };
+
+        var (_, statement) = FinancialResolver.Resolve(state, airline, market, orders, currentActionCap: QuarterEngine.BaseActionCap);
+
+        Assert.Equal(FinancialResolver.ExecutiveHiringCost, statement.ExecutiveHiringCost); // the one-time cost, charged now
+        Assert.Equal(Money.Zero, statement.ExecutiveSalaryCost); // but no salary yet
+    }
 }

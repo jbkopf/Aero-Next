@@ -27,6 +27,12 @@ namespace AeroNext.Core.Finance;
 /// (see MarketingCostCalculator), folded into NetIncome like an ordinary
 /// operating cost, broken out on its own line rather than silently
 /// absorbed.
+///
+/// M49: ExecutiveHiringCost (a one-time charge the same quarter a
+/// HireExecutiveOrder is applied) and ExecutiveSalaryCost (a recurring
+/// per-quarter charge for however many executives are already on staff)
+/// get the same treatment — both fold into NetIncome, both broken out on
+/// their own line.
 /// </summary>
 public sealed record QuarterlyStatement(
     Money Revenue,
@@ -43,4 +49,6 @@ public sealed record QuarterlyStatement(
     Money PrincipalRepayment = default,
     Money ManualDebtPaydown = default,
     Money SalaryCost = default,
-    Money MarketingCost = default);
+    Money MarketingCost = default,
+    Money ExecutiveHiringCost = default,
+    Money ExecutiveSalaryCost = default);

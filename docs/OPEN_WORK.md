@@ -18,9 +18,9 @@ Compiled 2026-08-31, cross-referencing every `docs/*_ROADMAP.md`'s own
 writing: M0–M14 (`SIM_CORE_ROADMAP.md`), M15–M19 (`GAME_SETUP_ROADMAP.md`),
 M20–M22 (`HISTORICAL_DYNAMICS_ROADMAP.md`), M23–M24
 (`WIN_CONDITIONS_ROADMAP.md`), M25–M30/M34 (`FINANCIAL_MODEL_ROADMAP.md`,
-M31 retired), M31/M35–M44 (`BASELINE_AI_ROADMAP.md`), M32–M33/M45–M46
-(`ROUTE_CAPACITY_ROADMAP.md`), M47–M48 (`MARKETING_ROADMAP.md`, new). M48
-is the current highest issued number. Update this line the moment a new
+M31 retired), M31/M35–M44/M49 (`BASELINE_AI_ROADMAP.md`), M32–M33/M45–M46
+(`ROUTE_CAPACITY_ROADMAP.md`), M47–M48 (`MARKETING_ROADMAP.md`). M49 is
+the current highest issued number. Update this line the moment a new
 milestone is opened anywhere.
 
 ---
@@ -87,6 +87,24 @@ every round here uses. Not root-caused further: fare reactivity and
 demand elasticity now feed back into each other in a loop neither was
 designed with the other in mind, flagged for whoever next works on
 `BaselineAi`/successor strategies rather than chased here.
+
+**M49 (`docs/BASELINE_AI_ROADMAP.md`, executives cost real money and are
+capped at 4) is by far the largest single-milestone move in this entire
+run.** Both real strategies hire unconditionally every quarter (M31's
+own original design, never revisited) — harmless while free, a
+compounding drain now that it costs $600,000 up front plus $300,000/quarter
+per executive on staff. Overall win rate **40.7% → 9.7%**; bankruptcy
+cleared 96%+ in four of six regions; NorthAmerica — dominant in *every*
+prior round (84-85% win share) — collapsed to 24.1%, with SouthWestAsia
+taking over as the leading region (75.9%). A genuine reshuffling, not
+just a uniform decline, not root-caused past the mechanism itself.
+Confirmed real by a two-step ablation (recurring salary alone accounts
+for most of the collapse; disabling both changes reproduces M48's own
+baseline exactly). Both real strategies' own unconditional hiring habit
+is the single most direct next target for whoever next works on
+`BaselineAi`/successor strategies — deliberately not touched by M49
+itself, the same scope discipline M47/M48 both held to for their own new
+mechanics.
 
 Three items found during these investigations, deliberately deferred
 rather than folded in — all filed under `BASELINE_AI_ROADMAP.md`'s own
@@ -157,9 +175,13 @@ AI strategy/network-topology behavior, not starting conditions.
 ### `BASELINE_AI_ROADMAP.md`
 - **`AllianceCourtOrder`** — excluded everywhere; alliances have no game
   consequence yet, so teaching the AI to court one would be cosmetic.
-- **`HireExecutiveOrder`'s uncapped, costless action-cap growth** — a
-  pre-existing core-mechanic question (should raising the cap ever cost
-  something, or have a ceiling?), surfaced but not resolved.
+- ~~**`HireExecutiveOrder`'s uncapped, costless action-cap growth**~~ —
+  closed by `docs/BASELINE_AI_ROADMAP.md`'s M49: a one-time hiring cost,
+  a recurring per-quarter salary, and a hard cap of 4 executives. New
+  open item this closure surfaced instead: both real strategies still
+  hire unconditionally every quarter regardless of cost, now a genuine
+  problem rather than a harmless default — see the active-priority note
+  below.
 - **The route open/shrink/regrow thrash cycle** — real (M43), a tried
   static load-factor floor measurably made things worse. Needs real
   cross-quarter state (which route was shrunk how recently), filed for
