@@ -1426,6 +1426,45 @@ not predictive), or the `spentBeforeToolkit >= ActionCap` proxy is a
 stricter bar than the real underlying need. Flagged for whoever next
 tunes this gate, not treated as a defect of this round.
 
+## M51 — Fare cut: measured under real elasticity, removed ✅
+
+`AiToolkit`'s `RaisedFare`/`CutFare` reactive logic (M37) predates M48's
+real fare-demand elasticity; the cut branch's own doc comment called it
+"revenue-negative under today's demand model" back when fare had zero
+demand effect at all. M48 gives a cut a real, positive demand effect, so
+this was a genuine measurement question, not a design one — never
+isolated on its own even in M48's own sweep (which bundled raise and
+cut together). Measured directly, post-M50 (so the signal isn't
+confounded by M49's own regression): a 300-game sweep with the cut
+branch's `FareCutFraction` at its shipped 0.20, then 0.10, then 0.05,
+then the branch removed entirely —
+
+| FareCutFraction | Win rate | Avg win quarter |
+|---|---|---|
+| 0.20 (shipped, pre-M51) | 23.7% (71/300) | 24.7 |
+| 0.10 | 24.0% (72/300) | 26.0 |
+| 0.05 | 24.7% (74/300) | 30.2 |
+| removed entirely | **25.3% (76/300)** | 30.1 |
+
+Monotonic and one-directional: every tested fraction landed at or below
+"removed," converging toward it (never past it) as the cut shrinks. Not
+a tuning problem — a route bad enough to trip `CloseRouteLoadFactorFloor`
+(load factor below 0.5) evidently isn't usually demand-constrained
+enough for M48's elasticity gain to outweigh the per-passenger revenue
+given up on the passengers it would have carried at the old fare anyway.
+Per the plan's own decision rule (retune if a value clears the "removed"
+bar, remove if none does), the branch is removed from
+`AiToolkit.ApplyManagementToolkit` — the only path either real
+`IAiStrategy` calls. Confirmed real via the standard ablation: the
+shipped state's own sweep reproduces the "removed" row exactly (76/300,
+avg 30.1, identical region table).
+
+`BaselineAi.CutFare`/`BaselineAi.DecideOrders`'s own inline cut branch is
+untouched — frozen legacy, unchanged, same precedent M50 already
+followed. `FareRaiseFraction`/`SaturatedLoadFactorCeiling`/
+`CloseRouteLoadFactorFloor` are untouched too — no evidence from this
+round that any of them need revisiting.
+
 ---
 
 ## Kept in mind, not scheduled

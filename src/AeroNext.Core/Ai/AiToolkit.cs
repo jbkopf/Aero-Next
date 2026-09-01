@@ -412,18 +412,20 @@ public static class AiToolkit
             }
         }
 
-        foreach (var underperforming in routeLoads
-            .Where(load => load.LoadFactor < BaselineAi.CloseRouteLoadFactorFloor)
-            .Select(load => load.Route))
-        {
-            var target = BaselineAi.CutFare(underperforming);
-
-            if (underperforming.FarePerPassenger > target)
-            {
-                orders.Add(new SetFareOrder(underperforming.Origin, underperforming.Destination, target));
-            }
-        }
-
+        // M51: no fare cut here (unlike BaselineAi.DecideOrders's own
+        // frozen legacy branch, which still cuts). Measured directly
+        // under M48's real elasticity, post-M50: cutting fare on an
+        // underperforming route (LoadFactor < CloseRouteLoadFactorFloor)
+        // is still net negative even with a real demand-boost effect, not
+        // just over-tuned — a 300-game sweep at FareCutFraction 0.20,
+        // 0.10, and 0.05 landed at 23.7%/24.0%/24.7% win rate, all below
+        // (never above) the 25.3% measured with the branch removed
+        // entirely, converging toward but never reaching it as the cut
+        // shrinks. A route bad enough to trigger this floor evidently
+        // isn't usually demand-constrained enough for the elasticity gain
+        // to outweigh the per-passenger revenue given up on the
+        // passengers it would have carried anyway. See
+        // docs/BASELINE_AI_ROADMAP.md's M51 for the full numbers.
         var validOriginCityIds = ValidOriginCityIds(context);
 
         foreach (var stranded in context.OwnFleet.Idle

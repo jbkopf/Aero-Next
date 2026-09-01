@@ -18,8 +18,8 @@ Compiled 2026-08-31, cross-referencing every `docs/*_ROADMAP.md`'s own
 writing: M0–M14 (`SIM_CORE_ROADMAP.md`), M15–M19 (`GAME_SETUP_ROADMAP.md`),
 M20–M22 (`HISTORICAL_DYNAMICS_ROADMAP.md`), M23–M24
 (`WIN_CONDITIONS_ROADMAP.md`), M25–M30/M34 (`FINANCIAL_MODEL_ROADMAP.md`,
-M31 retired), M31/M35–M44/M49–M50 (`BASELINE_AI_ROADMAP.md`), M32–M33/M45–M46
-(`ROUTE_CAPACITY_ROADMAP.md`), M47–M48 (`MARKETING_ROADMAP.md`). M50 is
+M31 retired), M31/M35–M44/M49–M51 (`BASELINE_AI_ROADMAP.md`), M32–M33/M45–M46
+(`ROUTE_CAPACITY_ROADMAP.md`), M47–M48 (`MARKETING_ROADMAP.md`). M51 is
 the current highest issued number. Update this line the moment a new
 milestone is opened anywhere.
 
@@ -119,6 +119,20 @@ is a genuine tax on the action economy even correctly gated, not
 something a smarter hire trigger alone fully undoes. Why the recovery
 stops at 23.7% rather than 40.7% is flagged, not chased, in M50's own
 write-up.
+
+**M51 (`docs/BASELINE_AI_ROADMAP.md`, fare cut removed from the shared
+toolkit) answers the M48 question left open above.** M48's own doc
+comment on the cut branch predates real fare elasticity ("revenue-negative
+under today's demand model"); measured directly post-M50, at three
+`FareCutFraction` values plus removed entirely, the branch nets out
+negative regardless of magnitude — every tested fraction landed at or
+below "removed" (23.7%/24.0%/24.7% win rate vs. **25.3% removed**),
+converging toward but never reaching it. Not a tuning problem: a route
+bad enough to trip the cut threshold isn't usually demand-constrained
+enough for the elasticity gain to outweigh the revenue given up on
+passengers it would have carried at the old fare anyway. Removed from
+`AiToolkit.ApplyManagementToolkit`; `BaselineAi.DecideOrders`'s own
+frozen legacy branch is untouched, same precedent M50 held to.
 
 Three items found during these investigations, deliberately deferred
 rather than folded in — all filed under `BASELINE_AI_ROADMAP.md`'s own
