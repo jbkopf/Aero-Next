@@ -475,16 +475,34 @@ via `GravityDemandModel.AllPairs`) once, at quarter 1/year 1955 — the
 fixed reference point every later check measures growth against.
 `AdvanceQuarter(quarterNumber, cities, demandModel)` is a no-op unless
 `quarterNumber % ExpansionPeriodQuarters == 0` (20 quarters = 5 years,
-`(Proposed, tunable)`); on a check quarter, each city's bonus becomes
-`Max(existingBonus, floor(max(0, currentDemand - baseline) / (baseline * GrowthIncrementFraction)))`
-— `GrowthIncrementFraction = 0.5` (`(Proposed, tunable)`: every +50% of
-cumulative growth over the 1955 baseline earns one more slot). Pure
-function of (fixed baseline, current demand, previous bonus) — no
-"demand at last check" to drift if a check is ever skipped — and a
-ratchet (`Max` with the existing bonus): a later demand dip from a
-reverting shock event never un-builds a terminal already earned. No cap
-on total bonus, matching CLAUDE.md's own "chokepoints obsolete as range
-improves" precedent for scarcity fading late-campaign.
+`(Proposed, tunable)`).
+
+**Round 2, per the user's own direct follow-up request:** growth is not
+one flat fraction shared by every city — each city gets its own
+`GrowthBreakpoints` schedule, sized to its own starting capacity
+(`GateCapacity` or `AutoCapacity`, M45's own mutual-exclusivity rule).
+Breakpoints are `BaseGrowthIncrementFraction x ReferenceBaseCapacity /
+startingCapacity` apart (both `(Proposed, tunable)`: 0.5 and 2
+respectively — a city exactly at `ReferenceBaseCapacity` reproduces
+round 1's original flat-50%-per-slot pace exactly), and there are always
+exactly `startingCapacity` of them — a city that starts with 1 slot gets
+one single breakpoint, at *double* its own baseline demand, and can never
+earn more than that one bonus slot regardless of how much further demand
+grows; a city that starts with 4 gets four, more closely spaced, and can
+earn up to four more. Every city's own *last* breakpoint always lands at
+exactly double baseline, by construction — only how many chances it gets
+on the way there differs by size. On a check quarter, a city's bonus
+becomes `Max(existingBonus, GrowthBreakpoints(city).Count(bp => currentDemand >= baseline * bp))`
+— still a pure function of (fixed baseline, current demand, its own
+schedule, previous bonus), still a ratchet, same reasoning as round 1.
+**Directly closes round 1's own real gap**: a flat fraction let a small
+city rack up just as many bonus slots as a major hub from a large
+*relative* swing alone, even though its *absolute* volume never
+remotely justified a real terminal expansion — exactly the failure mode
+the user named. No cap on a *large* city's total bonus beyond its own
+schedule length, matching CLAUDE.md's own "chokepoints obsolete as range
+improves" precedent for scarcity fading late-campaign at cities that
+actually earn it.
 
 **Consumed via two small optional parameters on paths that already read
 capacity:** `LandingRightsBoard.SlotsRemaining(city, capacityBonus = 0)`
@@ -509,55 +527,72 @@ in mind" already accepts for win-streak progress.
 
 **Done when:** every pre-existing call site's default/null behavior is
 unchanged (confirmed: the full pre-existing suite passed unmodified);
-dedicated tests cover `Initialize`'s baseline computation, `AdvanceQuarter`'s
-no-op off-cadence, the earned-bonus formula at/below/above the growth
-threshold, the ratchet, a zero-baseline city never dividing by zero, and
-cities evaluated independently of each other; `SlotsRemaining`/`ResolveQuarter`/
+dedicated tests cover `Initialize`'s baseline computation, `GrowthBreakpoints`
+itself (schedule length matches starting capacity, the reference-capacity
+case reproduces round 1's own two-breakpoint schedule exactly, every
+breakpoint lands between 1x and 2x, the last always at exactly 2x, a city
+with neither capacity field returns an empty schedule), `AdvanceQuarter`'s
+no-op off-cadence, a small city never earning more than its own starting
+capacity even under enormous growth, a small city earning nothing from a
+swing that would have earned a bonus at `ReferenceBaseCapacity`, the
+ratchet, a zero-baseline city never dividing by zero, and cities
+evaluated independently of each other; `SlotsRemaining`/`ResolveQuarter`/
 `ComputeCityWideSlotsRemaining` each tested with and without a bonus.
 
-Done. 672 tests total (19 new — 11 `CityCapacityBoard` (new file), 6
-`LandingRightsBoard`/`Resolver`, 2 `AiToolkit`). 100% line/branch coverage
-on every touched/new class (`CityCapacityBoard`, `LandingRightsBoard`,
+Done. 680 tests total (27 new over M45's own baseline — 19
+`CityCapacityBoard` (new file, including round 2's own dedicated
+`GrowthBreakpoints` tests, replacing several of round 1's flat-formula
+tests in place), 6 `LandingRightsBoard`/`Resolver`, 2 `AiToolkit`). 100%
+line/branch coverage on every
+touched/new class (`CityCapacityBoard`, `LandingRightsBoard`,
 `LandingRightsResolver`); `AiToolkit`'s own gaps are pre-existing and
 already documented (M44's `TryOrientFromValidOrigin`), confirmed
 untouched by this milestone via `git diff`. Overall project coverage
 99.77%/99.44%. 300-game QA harness sweep at 244 quarters: 300/300 clean,
 0 invariant violations, 0 crashes.
 
-**Measured, ablation-isolated — capacity growth did not recover M45's
-own win-rate drop, and made bankruptcy worse almost everywhere.** Overall
-win rate **36.3% (M45) → 38.7%** (116/300, avg quarter 20.9 → 23.0) — a
-small move, not the meaningful recovery the plan's own verification step
-floated as a hypothesis to test, not assume (and it didn't hold).
-Region-by-region (bankrupt, M45 → M46): NorthAmerica **8.4% → 27.0%**,
-Europe 85.8% → 99.0%, EastAsia 59.7% → 61.4%, SouthWestAsia 22.9% →
-36.2%, AustralAsia 33.0% → 68.0%, SouthAmerica 66.7% → 92.0% — every
-single region's bankruptcy rate rose. Win share barely moved (NorthAmerica
-83.5% → 84.5%, SouthWestAsia 16.5% → 15.5%, everyone else still 0%).
-Isolated by ablation (`AdvanceQuarter`'s own call temporarily commented
-out in `FullGameRunner.cs`, reverted before shipping, same
-instrument-then-revert discipline as every prior milestone here): with
-M46 disabled, the sweep reproduces M45's exact recorded numbers, byte for
-byte (109/300, avg 20.9, identical region table) — confirms the effect is
-real and correctly isolated, not sampling noise.
+**Measured, both rounds, ablation-isolated throughout.** Round 1 (flat
+50%-per-slot, no cap): overall win rate **36.3% (M45) → 38.7%** (116/300,
+avg quarter 20.9 → 23.0), and bankruptcy rose in *every single region* —
+NorthAmerica **8.4% → 27.0%** the sharpest, Europe 85.8% → 99.0%, EastAsia
+59.7% → 61.4%, SouthWestAsia 22.9% → 36.2%, AustralAsia 33.0% → 68.0%,
+SouthAmerica 66.7% → 92.0%. Isolated by ablation (`AdvanceQuarter`'s own
+call temporarily commented out in `FullGameRunner.cs`, reverted before
+shipping): with M46 disabled, the sweep reproduces M45's exact recorded
+numbers byte for byte — confirmed the round-1 effect was real, not
+sampling noise, and directly motivated the round-2 redesign above.
 
-**A plausible, mechanism-grounded read, not asserted as certain:**
-by 2015 the global demand trend alone reaches 4.5x its 1955 level
-(`data/demand_growth.json`), which under `GrowthIncrementFraction = 0.5`
-earns roughly +7 bonus slots almost everywhere from the global curve
-alone, before any city/region-specific event on top — a large loosening
-against gateways that start at 2-3 slots and `AutoCapacity` cities that
-start at 1-4. The room this opens up doesn't sit idle: `BaselineAi`
-successor strategies have no real profitability judgment (the standing
-conclusion from M32/M33/M45 alike) — they grow whenever legally
-possible, so a growing ceiling reads as more legal room to keep piling on
-leased aircraft and debt into cities whose *demand* growth doesn't
-actually translate into *profit* growth at the same rate. The same
-"legitimate, individually-correct mechanic makes this un-tuned heuristic
-AI's trajectory worse" pattern as M26/M32/M33/M45, from the opposite
-direction this time — less scarcity, not more, still hurts it. Whether
-`ExpansionPeriodQuarters`/`GrowthIncrementFraction` should be tuned
-slower, or whether this is squarely `BaselineAi`'s own reachability
-problem regardless of the specific numbers, is a call for the user, not
-decided here — both constants are marked `(Proposed, tunable)` in code
-precisely so this can be revisited without a structural change.
+**Round 2 (per-city schedule) — the same 300 seeds, directly against
+round 1:** overall win rate essentially unchanged, **38.7%** (116/300,
+avg quarter 23.0 — identical win count to round 1). Region-by-region
+(bankrupt, round 1 → round 2): NorthAmerica **27.0% → 23.7%**, Europe
+99.0% → 99.0% (unchanged), EastAsia 61.4% → 60.7%, SouthWestAsia
+36.2% → 32.4%, AustralAsia 68.0% → 64.9%, SouthAmerica 92.0% → 92.0%
+(unchanged). Win share barely moved either (NorthAmerica 84.5% both
+rounds, SouthWestAsia 15.5% both rounds). A genuine, if modest,
+improvement in the intended direction — every region that moved at all
+moved *toward* round 1's own pre-M46 (M45) numbers, never past them —
+but not a large one: capping small cities' own runaway growth measurably
+helps without being the dominant lever on this AI's own campaign
+trajectory.
+
+**The standing mechanism-grounded read carries forward, largely
+unrevised by round 2:** by 2015 the global demand trend alone reaches
+4.5x its 1955 level (`data/demand_growth.json`); at `ReferenceBaseCapacity`
+(2) that's still ~7 bonus slots' worth of relative growth room from the
+global curve alone (now genuinely earnable only by cities *at or above*
+that reference size — round 2's whole point), before any city/region
+event on top. `BaselineAi`/successor strategies still have no real
+profitability judgment (the standing conclusion from M32/M33/M45/M46
+alike) — they grow whenever legally possible, so a growing ceiling still
+reads as more legal room to keep piling on leased aircraft and debt, now
+just correctly withheld from cities too small to have earned it. The
+same "legitimate, individually-correct mechanic makes this un-tuned
+heuristic AI's trajectory worse" pattern as M26/M32/M33/M45, still
+present, now measurably softened rather than eliminated. Whether
+`ExpansionPeriodQuarters`/`BaseGrowthIncrementFraction`/`ReferenceBaseCapacity`
+should be tuned further, or whether this remains squarely `BaselineAi`'s
+own reachability problem regardless of the specific numbers, is a call
+for the user, not decided here — all three constants are marked
+`(Proposed, tunable)` in code precisely so this can be revisited without
+a structural change.
