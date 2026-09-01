@@ -36,28 +36,54 @@ namespace AeroNext.Core.Competition;
 /// </summary>
 public static class CompetitiveMarket
 {
-    /// <summary>(Proposed, tunable) — the "good effect" a route-targeted campaign gives that specific pair.</summary>
-    public const double RouteCampaignQualityBoost = 0.5;
+    /// <summary>(Proposed, tunable) — the "good effect" a route-targeted campaign gives that specific pair: a Quality multiplier on a contested pair, a genuine added-demand fraction on an uncontested one.</summary>
+    public const double RouteCampaignBoost = 0.5;
 
-    /// <summary>(Proposed, tunable) — the smaller effect a network-wide campaign gives every pair.</summary>
-    public const double NetworkCampaignQualityBoost = 0.15;
+    /// <summary>(Proposed, tunable) — the smaller effect a network-wide campaign gives every pair, same two forms as RouteCampaignBoost.</summary>
+    public const double NetworkCampaignBoost = 0.15;
 
     /// <param name="marketingByAirlineName">
     /// M47: null (the default) preserves fully permissive behavior — no
-    /// airline's Quality is ever boosted, exactly as before this
-    /// parameter existed. Passing each airline's own active campaign for
-    /// the quarter (QuarterEngine.RunQuarter's own accepted
-    /// NetworkMarketingOrder/RouteMarketingOrder for that airline)
-    /// multiplies its Quality up on the pairs the campaign covers — the
-    /// same weight formula below already uses Quality to split contested
-    /// demand, so a solo (uncontested) pair is never affected, matching
-    /// how Quality itself already behaves there.
+    /// airline's Quality is boosted and no extra demand is ever generated,
+    /// exactly as before this parameter existed. Passing each airline's
+    /// own active campaign for the quarter (QuarterEngine.RunQuarter's
+    /// own accepted NetworkMarketingOrder/RouteMarketingOrder for that
+    /// airline) has two different effects depending on whether the pair
+    /// is contested: on a *contested* pair, it multiplies Quality up in
+    /// the weight formula below, same as always. On an *uncontested*
+    /// (solo-carrier) pair — round 2, per the user's own direct
+    /// follow-up — it generates real added demand instead, since there's
+    /// no rival share to win there; see ApplyMarketingDemandBoost's own
+    /// doc comment for the "little gain near capacity" mechanics.
     /// </param>
     public static CompetitiveMarketResult Resolve(
         IReadOnlyList<Airline> airlines, IReadOnlyList<City> cities, GravityDemandModel demandModel,
         IReadOnlyDictionary<string, AirlineMarketingCampaign>? marketingByAirlineName = null)
     {
         var monopolyPlans = airlines.ToDictionary(a => a, a => NetworkPlanner.Plan(a.Routes, cities, demandModel));
+
+        // M47 round 2: a running per-airline, per-leg spare-capacity
+        // ledger for the uncontested-pair demand boost below - seeded
+        // from each airline's own already-finalized NetworkPlan.RouteUsage
+        // (SeatsPerQuarter minus SeatsUsed: what's left after this
+        // airline's own real network was fully allocated), then
+        // decremented as boosted pairs actually consume it, in the same
+        // deterministic pair order the main loop below already iterates
+        // in - so two of one airline's own itineraries sharing a hub leg
+        // (e.g. both covered by one network-wide campaign) can never
+        // combine to claim more than that leg's own real spare capacity.
+        // Deliberately does not interact with the contested branch below
+        // (a contested pair's own ceiling stays the original, unboosted
+        // monopoly figure) - a known, small simplification: a leg shared
+        // between an uncontested boosted itinerary and a separately
+        // contested one isn't re-checked against the contested side after
+        // the boost consumes some of it. Accepted rather than rebuilding
+        // NetworkPlanner's own full allocation with marketing-aware
+        // demand, which would be a much larger change for a soft,
+        // tunable revenue lever, not a hard scarcity mechanic.
+        var spareCapacityByAirline = airlines.ToDictionary(
+            a => a,
+            a => monopolyPlans[a].RouteUsage.ToDictionary(u => u.Route, u => Math.Max(0L, u.SeatsPerQuarter - u.SeatsUsed)));
 
         var pairKeys = monopolyPlans.Values
             .SelectMany(p => p.Itineraries.Where(i => i.Itinerary.Kind != ItineraryKind.Unserved))
@@ -84,14 +110,15 @@ public static class CompetitiveMarket
             if (competitors.Count == 1)
             {
                 var (airline, load) = competitors[0];
-                carriedByAirline[airline] = load!.PassengersCarried;
+                var additional = ApplyMarketingDemandBoost(airline, load!, origin, destination, spareCapacityByAirline[airline], marketingByAirlineName);
+                carriedByAirline[airline] = load!.PassengersCarried + additional;
             }
             else if (competitors.Count > 1)
             {
                 var weights = competitors
                     .Select(c => (
                         c.Airline,
-                        Weight: c.Load!.Itinerary.Legs.Min(l => l.SeatsPerQuarter) * EffectiveQuality(c.Airline, origin, destination, marketingByAirlineName),
+                        Weight: c.Load!.Itinerary.Legs.Min(l => l.SeatsPerQuarter) * EffectiveContestedQuality(c.Airline, origin, destination, marketingByAirlineName),
                         Ceiling: c.Load!.PassengersCarried))
                     .ToList();
                 var totalWeight = weights.Sum(w => w.Weight);
@@ -126,8 +153,8 @@ public static class CompetitiveMarket
         return new CompetitiveMarketResult(pairResults, routeUsage);
     }
 
-    /// <summary>M47: Quality, boosted by this airline's own active marketing campaign on this specific pair, if any — a route campaign's boost, else a network campaign's smaller one, else unboosted.</summary>
-    private static double EffectiveQuality(Airline airline, City origin, City destination, IReadOnlyDictionary<string, AirlineMarketingCampaign>? marketingByAirlineName)
+    /// <summary>M47: Quality, boosted by this airline's own active marketing campaign on this specific pair, if any — a route campaign's boost, else a network campaign's smaller one, else unboosted. Contested pairs only — see ApplyMarketingDemandBoost for the uncontested-pair mechanism.</summary>
+    private static double EffectiveContestedQuality(Airline airline, City origin, City destination, IReadOnlyDictionary<string, AirlineMarketingCampaign>? marketingByAirlineName)
     {
         if (marketingByAirlineName is null || !marketingByAirlineName.TryGetValue(airline.Name, out var campaign))
         {
@@ -135,12 +162,63 @@ public static class CompetitiveMarket
         }
 
         var multiplier = campaign.RouteKeys.Contains(QuarterEngine.NormalizedPairKey(origin, destination))
-            ? 1 + RouteCampaignQualityBoost
+            ? 1 + RouteCampaignBoost
             : campaign.NetworkWide
-                ? 1 + NetworkCampaignQualityBoost
+                ? 1 + NetworkCampaignBoost
                 : 1.0;
 
         return airline.Quality * multiplier;
+    }
+
+    /// <summary>
+    /// M47 round 2: the added-demand mechanism for an uncontested pair —
+    /// there's no rival share to win via Quality here, so instead the
+    /// campaign generates real added demand (RouteCampaignBoost/
+    /// NetworkCampaignBoost applied as a genuine fraction of this pair's
+    /// own DemandPassengers, not a weight multiplier), capped at however
+    /// much spare capacity the itinerary's own tightest leg actually has
+    /// left this quarter. This single Math.Min against spare capacity is
+    /// the whole mechanism behind "real tangible effects would only be
+    /// felt on routes that have lower load factors" (the user's own
+    /// words): a route already near its own ceiling has near-zero spare
+    /// capacity, so the boost has near-nothing left to add regardless of
+    /// its own size, while a route flying half-empty can realize close to
+    /// the full added-demand figure. Mutates remainingSpareCapacityByRoute
+    /// (decrementing whichever legs this itinerary actually uses) so a
+    /// later pair sharing the same leg sees accurate remaining room, not
+    /// the same starting snapshot every pair would otherwise see.
+    /// </summary>
+    private static long ApplyMarketingDemandBoost(
+        Airline airline, ItineraryLoad load, City origin, City destination,
+        Dictionary<Route, long> remainingSpareCapacityByRoute,
+        IReadOnlyDictionary<string, AirlineMarketingCampaign>? marketingByAirlineName)
+    {
+        if (marketingByAirlineName is null || !marketingByAirlineName.TryGetValue(airline.Name, out var campaign))
+        {
+            return 0;
+        }
+
+        var boostFraction = campaign.RouteKeys.Contains(QuarterEngine.NormalizedPairKey(origin, destination))
+            ? RouteCampaignBoost
+            : campaign.NetworkWide
+                ? NetworkCampaignBoost
+                : 0.0;
+
+        if (boostFraction <= 0.0)
+        {
+            return 0;
+        }
+
+        var additionalDemand = (long)Math.Round(load.DemandPassengers * boostFraction, MidpointRounding.AwayFromZero);
+        var spareCapacity = load.Itinerary.Legs.Min(leg => remainingSpareCapacityByRoute.GetValueOrDefault(leg));
+        var additionalCarried = Math.Min(additionalDemand, spareCapacity);
+
+        foreach (var leg in load.Itinerary.Legs)
+        {
+            remainingSpareCapacityByRoute[leg] = remainingSpareCapacityByRoute.GetValueOrDefault(leg) - additionalCarried;
+        }
+
+        return additionalCarried;
     }
 
     private static ItineraryLoad? FindPair(NetworkPlan plan, string originId, string destinationId)

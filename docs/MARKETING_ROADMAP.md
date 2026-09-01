@@ -53,20 +53,17 @@ already receives `airline.Routes` and `CompetitiveMarketResult.Pairs`,
 which already carries each pair's own `DemandPassengers`) — the two can
 never drift apart since neither reads a value the other computed.
 
-**The actual effect plugs directly into the existing competitive-share
-mechanism**, no new demand-splitting logic: `CompetitiveMarket.Resolve`'s
-weight formula (`bottleneck-leg seats x Quality`, used only when a pair
-has more than one real competitor) becomes `bottleneck-leg seats x
-Quality x campaign multiplier` — `1 + RouteCampaignQualityBoost` (0.5,
-`(Proposed, tunable)` — the "good effect") when this specific pair is in
-the airline's own active route campaign, `1 + NetworkCampaignQualityBoost`
-(0.15, `(Proposed, tunable)` — the smaller, everywhere effect) if it has
-an active network-wide one instead, else unboosted. Deliberately
-consistent with how `Quality` itself already behaves: the solo
-(uncontested) branch never reads `Quality` at all today, so a campaign
-only visibly matters on a genuinely contested route — not a new gap
-this introduces, the same shape the mechanism it plugs into already
-has, confirmed by a dedicated test (`Resolve_MarketingCampaign_UncontestedPair_HasNoEffect`).
+**The contested-pair effect plugs directly into the existing
+competitive-share mechanism**, no new demand-splitting logic:
+`CompetitiveMarket.Resolve`'s weight formula (`bottleneck-leg seats x
+Quality`, used only when a pair has more than one real competitor)
+becomes `bottleneck-leg seats x Quality x campaign multiplier` — `1 +
+RouteCampaignBoost` (0.5, `(Proposed, tunable)` — the "good effect")
+when this specific pair is in the airline's own active route campaign,
+`1 + NetworkCampaignBoost` (0.15, `(Proposed, tunable)` — the smaller,
+everywhere effect) if it has an active network-wide one instead, else
+unboosted. (Round 2 below extends this to uncontested pairs too — see
+that section for the original round 1 gap this closed.)
 
 **QuarterEngine's own rejection rules**, all in the existing sequential
 per-order loop with new local per-quarter tracking: mutual exclusivity
@@ -122,9 +119,9 @@ each order type (including the orientation-insensitive pair lookup, and
 a pair genuinely absent from `CompetitiveMarketResult.Pairs` costing
 zero rather than throwing).
 
-Done. 713 tests total (33 new — 6 `MarketingCostCalculator` (new file),
-15 `QuarterEngine`, 7 `CompetitiveMarket`, 5 `FinancialResolver`). 100%
-line/branch coverage on every touched/new class except
+Done (round 1). 713 tests total (33 new — 6 `MarketingCostCalculator`
+(new file), 15 `QuarterEngine`, 7 `CompetitiveMarket`, 5 `FinancialResolver`).
+100% line/branch coverage on every touched/new class except
 `NetworkMarketingOrder`'s own 0%-line/100%-branch reading — confirmed to
 be the exact same coverlet artifact `QuarterOrder`'s own abstract,
 bodyless record declaration already carries (a zero-parameter positional
@@ -136,3 +133,81 @@ QA harness sweep at 244 quarters: 300/300 clean, 0 invariant violations,
 0 crashes, numbers byte-identical to M46's own (expected and confirmed,
 per the out-of-scope note above — no AI strategy exercises this milestone
 at all).
+
+---
+
+## M47 round 2 — marketing on uncontested routes too, bounded by spare capacity ✅
+
+**Origin:** the user's own direct follow-up, immediately after round 1
+shipped: marketing should also raise *general demand* on uncontested
+routes, not just win competitive share on contested ones — "real
+tangible effects would only be felt on routes that have lower load
+factors. Routes at or very near capacity will see little gain." Round
+1's own solo-carrier branch never read a campaign at all (mirroring how
+`Quality` itself never applied there either) — this was the real,
+correctly-scoped gap round 1 left open, not a bug.
+
+**A genuinely new mechanism for the uncontested case, not a reuse of
+the contested weight formula** — there's no rival share to win on a
+solo pair, so `CompetitiveMarket.Resolve`'s solo branch instead adds
+real carried passengers: `RouteCampaignBoost`/`NetworkCampaignBoost`
+(the *same* two constants round 1 already defined, renamed from
+`...QualityBoost` to `...Boost` since they now drive two different
+mechanisms) applied as a genuine fraction of the pair's own
+`DemandPassengers` — "how much *additional* demand this campaign
+generates" — then capped by `Math.Min` against the itinerary's own
+tightest leg's real remaining spare capacity. That single `Math.Min` is
+the entire "little gain near capacity" mechanic: a route already near
+its own seat ceiling has near-zero spare capacity regardless of how big
+the campaign's own demand figure is, while a half-empty route realizes
+close to the campaign's full stated effect — exactly the load-factor-gated
+behavior requested, and directly verified
+(`Resolve_MarketingCampaign_UncontestedPair_LowLoadFactor_GeneratesRealAddedDemand`,
+`Resolve_MarketingCampaign_UncontestedPair_AtCapacity_NoGain`).
+
+**A running, per-airline, per-leg spare-capacity ledger**, seeded once
+from each airline's own already-finalized `NetworkPlan.RouteUsage`
+(`SeatsPerQuarter - SeatsUsed`) and decremented as each of that
+airline's own boosted pairs actually consumes it, in the same
+deterministic pair order `Resolve` already iterates in — so two
+one-stop itineraries sharing a hub leg (both covered by one network-wide
+campaign, say) can never combine to claim more of that leg's spare
+capacity than genuinely exists
+(`Resolve_MarketingCampaign_UncontestedPair_SharedHubLeg_NeverDoubleClaimsSpareCapacity`
+builds exactly this scenario and checks the combined claim against the
+leg's own real spare capacity directly, not just that nothing crashes).
+
+**A deliberate, explicitly-flagged simplification, not silently
+absorbed:** this ledger does **not** interact with the contested branch
+— a contested pair's own ceiling is still computed from the original,
+unboosted monopoly plan, so a leg shared between an uncontested boosted
+itinerary and a separately contested one isn't re-checked against the
+contested side after the boost consumes some of that leg's capacity.
+Fully reconciling the two would mean rebuilding `NetworkPlanner`'s own
+allocation with marketing-aware demand baked into its per-leg sharing
+logic — correct in principle, but a much larger change for what's meant
+to be a soft, tunable revenue lever, not a hard scarcity mechanic on
+par with `LandingRightsBoard`'s own slot accounting. Flagged here for
+the same reason every other real limitation in this codebase is: so it
+can be revisited deliberately if it ever turns out to matter in
+practice, not discovered by surprise.
+
+**No new order types, no new cost, no new `QuarterEngine`/`FinancialResolver`
+changes** — this is a richer *effect* of the exact same already-paid-for
+campaign a player already submitted in round 1, not a new action.
+
+**Done when:** the full round-1 suite passes unmodified (confirmed) or
+is updated in place where round 1's own test asserted the *old*,
+now-superseded "no effect on uncontested pairs" behavior (one test
+rewritten into two, reflecting the new load-factor-gated reality rather
+than patched to keep passing); dedicated tests cover the low-load-factor
+case, the at-capacity case, network-vs-route campaign magnitude on an
+uncontested pair, and the shared-hub-leg non-double-claiming property.
+
+Done. 716 tests total (3 net new over round 1 — `CompetitiveMarketTests`
+gained 4 and lost the 1 now-superseded test). 100% line/branch coverage
+on `CompetitiveMarket`, the only class this round touched. Overall
+project coverage 99.73%/99.48%. 300-game QA harness sweep: 300/300
+clean, numbers byte-identical to round 1's own (expected — still no AI
+strategy exercises marketing at all, on either the contested or
+uncontested path).

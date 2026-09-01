@@ -292,11 +292,13 @@ public class CompetitiveMarketTests
     }
 
     [Fact]
-    public void Resolve_MarketingCampaign_UncontestedPair_HasNoEffect()
+    public void Resolve_MarketingCampaign_UncontestedPair_LowLoadFactor_GeneratesRealAddedDemand()
     {
-        // Matches Quality's own pre-existing behavior: the solo-carrier
-        // branch never reads Quality (or now, a campaign's boost) at all
-        // - a monopoly ceiling is a monopoly ceiling regardless.
+        // M47 round 2: an uncontested pair now DOES benefit from
+        // marketing - real added demand, not a Quality weight (there's
+        // no rival share to win here). Plenty of spare capacity in this
+        // setup, so the campaign realizes its full RouteCampaignBoost
+        // fraction of the pair's own DemandPassengers.
         var demandModel = new GravityDemandModel();
         var a = MakeCity("a", 0, 0, 5);
         var b = MakeCity("b", 5, 5, 5);
@@ -310,7 +312,91 @@ public class CompetitiveMarketTests
         var withCampaign = CompetitiveMarket.Resolve(new[] { solo }, new[] { a, b }, demandModel, marketing);
         var withoutCampaign = CompetitiveMarket.Resolve(new[] { solo }, new[] { a, b }, demandModel);
 
+        var demand = withoutCampaign.Pairs.Single().DemandPassengers;
+        var expectedAdditional = (long)Math.Round(demand * CompetitiveMarket.RouteCampaignBoost, MidpointRounding.AwayFromZero);
+        Assert.Equal(withoutCampaign.TotalCarried(solo) + expectedAdditional, withCampaign.TotalCarried(solo));
+    }
+
+    [Fact]
+    public void Resolve_MarketingCampaign_UncontestedPair_AtCapacity_NoGain()
+    {
+        // The user's own stated intent, directly: "routes at or very near
+        // capacity will see little gain." Tiny aircraft, heavy demand -
+        // the route is already fully sold out before any campaign, so
+        // there's zero spare capacity for the boost to add to.
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 100);
+        var b = MakeCity("b", 1, 1, 100); // close + heavy -> demand vastly exceeds any small fleet
+        var tinyAircraft = new AircraftType("t", "Test", Seats: 10);
+        var solo = new Airline("Solo", new[] { new Route(a, b, tinyAircraft, AircraftCount: 1) });
+        var marketing = new Dictionary<string, AirlineMarketingCampaign>
+        {
+            ["Solo"] = new(NetworkWide: false, RouteKeys: new HashSet<(string, string)> { QuarterEngine.NormalizedPairKey(a, b) }),
+        };
+
+        var withCampaign = CompetitiveMarket.Resolve(new[] { solo }, new[] { a, b }, demandModel, marketing);
+        var withoutCampaign = CompetitiveMarket.Resolve(new[] { solo }, new[] { a, b }, demandModel);
+
         Assert.Equal(withoutCampaign.TotalCarried(solo), withCampaign.TotalCarried(solo));
+    }
+
+    [Fact]
+    public void Resolve_MarketingCampaign_UncontestedPair_NetworkCampaign_SmallerAddedDemandThanRouteCampaign()
+    {
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 5);
+        var b = MakeCity("b", 5, 5, 5);
+        var aircraft = new AircraftType("t", "Test", Seats: 400);
+        var routeCampaigner = new Airline("RouteCampaigner", new[] { new Route(a, b, aircraft, 5) });
+        var networkCampaigner = new Airline("NetworkCampaigner", new[] { new Route(a, b, aircraft, 5) });
+        var marketing = new Dictionary<string, AirlineMarketingCampaign>
+        {
+            ["RouteCampaigner"] = new(NetworkWide: false, RouteKeys: new HashSet<(string, string)> { QuarterEngine.NormalizedPairKey(a, b) }),
+            ["NetworkCampaigner"] = new(NetworkWide: true, RouteKeys: new HashSet<(string, string)>()),
+        };
+
+        var routeResult = CompetitiveMarket.Resolve(new[] { routeCampaigner }, new[] { a, b }, demandModel, marketing);
+        var networkResult = CompetitiveMarket.Resolve(new[] { networkCampaigner }, new[] { a, b }, demandModel, marketing);
+
+        Assert.True(routeResult.TotalCarried(routeCampaigner) > networkResult.TotalCarried(networkCampaigner));
+    }
+
+    [Fact]
+    public void Resolve_MarketingCampaign_UncontestedPair_SharedHubLeg_NeverDoubleClaimsSpareCapacity()
+    {
+        // A network campaign covers two one-stop pairs sharing the same
+        // hub leg. Each pair's own boost is capped by that leg's real
+        // remaining spare capacity, decremented as the first pair's own
+        // boost consumes it - the two combined must never exceed the
+        // hub leg's own actual spare capacity.
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 20);
+        var hub = MakeCity("hub", 0, 5, 20);
+        var b = MakeCity("b", 0, 10, 20);
+        var c = MakeCity("c", 0, 15, 20);
+        var spokeAircraft = new AircraftType("t", "Test", Seats: 300);
+        var hubLegAircraft = new AircraftType("h", "HubLeg", Seats: 50); // tight bottleneck leg shared by both one-stop pairs
+        var airline = new Airline("A", new[]
+        {
+            new Route(a, hub, hubLegAircraft, AircraftCount: 1),
+            new Route(hub, b, spokeAircraft, AircraftCount: 1),
+            new Route(hub, c, spokeAircraft, AircraftCount: 1),
+        });
+        var marketing = new Dictionary<string, AirlineMarketingCampaign>
+        {
+            ["A"] = new(NetworkWide: true, RouteKeys: new HashSet<(string, string)>()),
+        };
+
+        var withoutCampaign = CompetitiveMarket.Resolve(new[] { airline }, new[] { a, hub, b, c }, demandModel);
+        var withCampaign = CompetitiveMarket.Resolve(new[] { airline }, new[] { a, hub, b, c }, demandModel, marketing);
+
+        var hubLegRoute = airline.Routes.Single(r => r.Origin.Id == "a" && r.Destination.Id == "hub");
+        var hubLegUsageWithout = withoutCampaign.RouteUsage.Single(u => u.Route == hubLegRoute).SeatsUsed;
+        var hubLegUsageWith = withCampaign.RouteUsage.Single(u => u.Route == hubLegRoute).SeatsUsed;
+        var hubLegSpareCapacity = hubLegRoute.SeatsPerQuarter - hubLegUsageWithout;
+
+        Assert.True(hubLegUsageWith - hubLegUsageWithout <= hubLegSpareCapacity);
+        Assert.True(hubLegUsageWith <= hubLegRoute.SeatsPerQuarter); // never oversold
     }
 
     [Fact]
