@@ -18,8 +18,8 @@ Compiled 2026-08-31, cross-referencing every `docs/*_ROADMAP.md`'s own
 writing: M0–M14 (`SIM_CORE_ROADMAP.md`), M15–M19 (`GAME_SETUP_ROADMAP.md`),
 M20–M22 (`HISTORICAL_DYNAMICS_ROADMAP.md`), M23–M24
 (`WIN_CONDITIONS_ROADMAP.md`), M25–M30/M34 (`FINANCIAL_MODEL_ROADMAP.md`,
-M31 retired), M31/M35–M44/M49–M51 (`BASELINE_AI_ROADMAP.md`), M32–M33/M45–M46
-(`ROUTE_CAPACITY_ROADMAP.md`), M47–M48 (`MARKETING_ROADMAP.md`). M51 is
+M31 retired), M31/M35–M44/M49–M52 (`BASELINE_AI_ROADMAP.md`), M32–M33/M45–M46
+(`ROUTE_CAPACITY_ROADMAP.md`), M47–M48 (`MARKETING_ROADMAP.md`). M52 is
 the current highest issued number. Update this line the moment a new
 milestone is opened anywhere.
 
@@ -133,6 +133,21 @@ enough for the elasticity gain to outweigh the revenue given up on
 passengers it would have carried at the old fare anyway. Removed from
 `AiToolkit.ApplyManagementToolkit`; `BaselineAi.DecideOrders`'s own
 frozen legacy branch is untouched, same precedent M50 held to.
+
+**M52 (`docs/BASELINE_AI_ROADMAP.md`, marketing campaigns finally usable
+by AI) closes M47's own long-standing gap.** Needed a real prerequisite
+first — a new `StrategyContext.RivalCountByServedRoute` field, since
+`CompetitiveMarket`'s own boost only applies to a genuinely contested
+pair and no strategy could previously tell which of its routes qualify.
+New `AiToolkit.ApplyMarketingCampaign`: one contested route gets a
+targeted `RouteMarketingOrder`, two or more get the broader
+`NetworkMarketingOrder`. Win rate **25.3% → 25.0%** (76/300 → 75/300) —
+a small but real, one-directional move, confirmed via the standard
+ablation. Not a regression to fix, so the small size is itself the
+finding: these two strategies rarely end up genuinely contesting the
+same pair as each other in the first place (`DomesticProfitOptimizerStrategy`
+stays home-region-only; `RapidExpansionStrategy` spreads thin rather
+than concentrating), so the new lever rarely finds a target.
 
 Three items found during these investigations, deliberately deferred
 rather than folded in — all filed under `BASELINE_AI_ROADMAP.md`'s own

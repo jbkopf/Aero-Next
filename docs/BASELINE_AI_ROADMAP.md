@@ -1465,6 +1465,51 @@ followed. `FareRaiseFraction`/`SaturatedLoadFactorCeiling`/
 `CloseRouteLoadFactorFloor` are untouched too — no evidence from this
 round that any of them need revisiting.
 
+## M52 — Marketing campaigns: strategies can finally use them ✅
+
+`docs/MARKETING_ROADMAP.md`'s M47 shipped `NetworkMarketingOrder`/
+`RouteMarketingOrder` with AI adoption explicitly out of scope ("a
+genuinely new lever with no existing precedent to extend"). Closing that
+gap needed a real prerequisite first: `CompetitiveMarket.Resolve`'s own
+boost only applies to a genuinely contested pair (M47's own design), and
+no `StrategyContext` field ever told a strategy which of its own routes
+that's true for — a missing input, not just missing order-submission
+logic.
+
+New `StrategyContext.RivalCountByServedRoute` (nullable/permissive-default,
+matching every prior field's own convention), scoped to only the
+airline's own currently-served routes, wired from `FullGameRunner.cs`
+the same way `IdleContestableSlotsByCity` already is — a public snapshot
+computed once per quarter, from state entering it, before any airline's
+turn (so every airline sees the same picture regardless of processing
+order within the quarter, not the progressively-mutating live state
+`CityWideSlotsRemaining` deliberately uses instead for its own different
+reasons).
+
+New `AiToolkit.ApplyMarketingCampaign`, called by both real strategies
+alongside the existing `NegotiateOrBorrow` step: no-ops with no
+visibility, no budget, or no contested served route; exactly one
+contested route gets a targeted `RouteMarketingOrder`; two or more get
+the broader `NetworkMarketingOrder` instead, since a route campaign can
+only ever help one contested pair the same quarter
+(`QuarterEngine`'s own mutual-exclusivity rule). A legible, cheap
+heuristic, not a modeled cost/benefit search — documented as such.
+
+**Measured: win rate 25.3% (M51) → 25.0%** (76/300 → 75/300, avg win
+quarter 30.1 → 30.4); NorthAmerica 76.3%→77.3%, SouthWestAsia
+23.7%→22.7%. A small but real, one-directional move — confirmed via the
+standard ablation (campaign submission disabled reproduces M51's own
+baseline exactly: 76/300, avg 30.1, identical region table). Unlike
+M50/M51, this wasn't a regression to fix, so no particular direction was
+expected going in; the small size is itself the finding, not a defect —
+plausibly because genuinely *contested* served routes are relatively
+rare for these two strategies in the first place (`DomesticProfitOptimizerStrategy`
+never leaves its home region; `RapidExpansionStrategy` spreads thin
+across the whole map rather than concentrating), so the new lever rarely
+finds a target to use. Flagged, not chased further, for whoever next
+works on route-overlap/contestation dynamics between the two real
+strategies.
+
 ---
 
 ## Kept in mind, not scheduled

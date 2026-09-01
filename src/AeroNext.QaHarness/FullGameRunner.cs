@@ -141,6 +141,28 @@ public static class FullGameRunner
             // snapshot regardless of processing order within this quarter.
             var idleContestableSlotsByCity = landingBoard.IdleContestableSlotsByCity(cities, routesAtQuarterStart);
 
+            // M52: how many distinct airlines serve each normalized pair,
+            // from state entering this quarter - same "public snapshot,
+            // computed once before any airline's turn this quarter"
+            // convention as idleContestableSlotsByCity just above, so
+            // every airline's strategy sees the same picture regardless
+            // of processing order within the quarter.
+            var servingAirlineNamesByPairKey = new Dictionary<(string, string), HashSet<string>>();
+            foreach (var n in names)
+            {
+                foreach (var route in routesAtQuarterStart[n])
+                {
+                    var key = QuarterEngine.NormalizedPairKey(route.Origin, route.Destination);
+                    if (!servingAirlineNamesByPairKey.TryGetValue(key, out var servingNames))
+                    {
+                        servingNames = new HashSet<string>(StringComparer.Ordinal);
+                        servingAirlineNamesByPairKey[key] = servingNames;
+                    }
+
+                    servingNames.Add(n);
+                }
+            }
+
             foreach (var name in names)
             {
                 var wasBankruptEnteringQuarter = finances[name].IsBankrupt;
@@ -193,13 +215,23 @@ public static class FullGameRunner
                         .Where(p => p.Airline.Name == name)
                         .Select(p => p.TargetCity.Id)
                         .ToHashSet(StringComparer.Ordinal);
+
+                    // M52: scoped to only this airline's own currently-
+                    // served routes - servingAirlineNamesByPairKey's own
+                    // count includes this airline itself wherever it
+                    // appears, so subtract 1 to get rivals, not total.
+                    var rivalCountByServedRoute = routesAtQuarterStart[name].ToDictionary(
+                        r => QuarterEngine.NormalizedPairKey(r.Origin, r.Destination),
+                        r => servingAirlineNamesByPairKey[QuarterEngine.NormalizedPairKey(r.Origin, r.Destination)].Count - 1);
+
                     var strategyContext = new StrategyContext(
                         routes[name], caps[name], cities, yearDemandModel, availableFleet, fleets[name], homeRegionByName[name],
                         HomeCity: seatByName[name].StartingCity,
                         AvailableSlotsByCity: availableSlotsByCity, AvailableCash: finances[name].CashBalance, CurrentDebtBalance: finances[name].DebtBalance,
                         PendingNegotiationCityIds: pendingNegotiationCityIds,
                         CityWideSlotsRemaining: cityWideSlotsRemaining,
-                        IdleContestableSlotsByCity: idleContestableSlotsByCity);
+                        IdleContestableSlotsByCity: idleContestableSlotsByCity,
+                        RivalCountByServedRoute: rivalCountByServedRoute);
                     var strategy = BaselineAi.SelectStrategy(currentStrategyByName[name], q, strategyContext);
                     currentStrategyByName[name] = strategy;
                     orders = strategy.DecideOrders(strategyContext);

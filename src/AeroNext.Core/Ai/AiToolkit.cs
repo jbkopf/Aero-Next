@@ -340,6 +340,62 @@ public static class AiToolkit
     }
 
     /// <summary>
+    /// M52: proposes a marketing campaign when at least one currently
+    /// served route is genuinely contested - CompetitiveMarket.Resolve's
+    /// own boost never applies to an uncontested pair (M47's own
+    /// design), so spending real cash on one there would buy nothing
+    /// visible. A no-op (same permissive-default convention as every
+    /// other nullable StrategyContext field) when RivalCountByServedRoute
+    /// is null, when the action budget is already spent, or when no
+    /// served route is contested. Exactly one contested route picks the
+    /// bigger, targeted RouteMarketingOrder there; two or more pick the
+    /// smaller but broader NetworkMarketingOrder instead, since
+    /// QuarterEngine's own mutual-exclusivity rule means a route campaign
+    /// can only ever help one contested pair the same quarter. A
+    /// legible, cheap heuristic - not a modeled cost/benefit optimization
+    /// weighing route-cost-per-pair against network-cost-per-route - kept
+    /// deliberately simple like every other "single best candidate, no
+    /// deeper search" method in this file.
+    /// </summary>
+    public static void ApplyMarketingCampaign(StrategyContext context, List<QuarterOrder> orders, ref int spent)
+    {
+        if (context.RivalCountByServedRoute is null || spent + 1 > context.ActionCap)
+        {
+            return;
+        }
+
+        var contestedRoutes = context.CurrentRoutes
+            .Where(r => context.RivalCountByServedRoute.GetValueOrDefault(QuarterEngine.NormalizedPairKey(r.Origin, r.Destination)) > 0)
+            .OrderByDescending(r => context.DemandModel.ForPair(r.Origin, r.Destination).PassengersPerQuarter)
+            .ThenBy(r => r.Origin.Id, StringComparer.Ordinal)
+            .ThenBy(r => r.Destination.Id, StringComparer.Ordinal)
+            .ToList();
+
+        if (contestedRoutes.Count == 1)
+        {
+            var target = contestedRoutes[0];
+            var demand = context.DemandModel.ForPair(target.Origin, target.Destination).PassengersPerQuarter;
+            var cost = MarketingCostCalculator.RouteCampaignCost(demand);
+
+            if (context.AvailableCash is null || FinancialState.CanAfford(context.AvailableCash.Value, cost))
+            {
+                orders.Add(new RouteMarketingOrder(target.Origin, target.Destination));
+                spent += 1;
+            }
+        }
+        else if (contestedRoutes.Count >= 2)
+        {
+            var cost = MarketingCostCalculator.NetworkCampaignCost(context.CurrentRoutes.Count);
+
+            if (context.AvailableCash is null || FinancialState.CanAfford(context.AvailableCash.Value, cost))
+            {
+                orders.Add(new NetworkMarketingOrder());
+                spent += 1;
+            }
+        }
+    }
+
+    /// <summary>
     /// M44: mirrors BaselineAi.FindBestUnservedPair's own shape (plain
     /// demand-ranked, no cross-region/domestic preference) but also
     /// respects network contiguity - used by ApplyManagementToolkit's own

@@ -47,6 +47,17 @@ namespace AeroNext.Core.Ai;
 /// IdleExpiryThreshold, so AI strategies can actually reach the new
 /// idle-then-recontestable mechanic (see AiToolkit.FindBestIdleContestableGateway)
 /// rather than it only being reachable by a human player bidding by hand.
+///
+/// M52: RivalCountByServedRoute, also nullable/permissive-default — null
+/// means "no visibility into rivals," the same convention every prior
+/// field here already follows. Keyed by QuarterEngine.NormalizedPairKey,
+/// scoped to only this airline's own CurrentRoutes (not every pair in
+/// the world) — the missing prerequisite for a strategy to know a
+/// marketing campaign would have any visible effect at all:
+/// CompetitiveMarket.Resolve's own boost only applies where a pair is
+/// genuinely contested (competitors.Count > 1, M47's own design), and no
+/// prior StrategyContext field told a strategy which of its own routes
+/// that's true for. See AiToolkit.ApplyMarketingCampaign.
 /// </summary>
 public sealed record StrategyContext(
     IReadOnlyList<Route> CurrentRoutes,
@@ -62,4 +73,5 @@ public sealed record StrategyContext(
     Money? CurrentDebtBalance = null,
     IReadOnlySet<string>? PendingNegotiationCityIds = null,
     IReadOnlyDictionary<string, int>? CityWideSlotsRemaining = null,
-    IReadOnlyDictionary<string, int>? IdleContestableSlotsByCity = null);
+    IReadOnlyDictionary<string, int>? IdleContestableSlotsByCity = null,
+    IReadOnlyDictionary<(string OriginId, string DestinationId), int>? RivalCountByServedRoute = null);

@@ -316,3 +316,12 @@ on `BaselineAi`/successor strategies to be aware of: fare reactivity and
 demand elasticity now feed back into each other in a loop neither
 `RaisedFare`/`CutFare` nor this milestone was designed with the other in
 mind.
+
+---
+
+**Addendum:** M47's own "no `IAiStrategy` ever touches marketing" gap
+noted above is closed by `docs/BASELINE_AI_ROADMAP.md`'s M52 —
+`AiToolkit.ApplyMarketingCampaign`, called by both real strategies. A
+small, real, one-directional move on the 300-game sweep (25.3%→25.0%
+win rate) — see M52's own write-up for the full numbers and the
+`StrategyContext.RivalCountByServedRoute` prerequisite it needed first.

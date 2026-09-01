@@ -307,4 +307,173 @@ public class AiToolkitTests
 
         Assert.Single(orders.OfType<HireExecutiveOrder>());
     }
+
+    // --- ApplyMarketingCampaign (M52) ---
+
+    private static StrategyContext MakeMarketingContext(
+        IReadOnlyList<Route> routes,
+        System.Collections.Generic.IReadOnlyDictionary<(string OriginId, string DestinationId), int>? rivalCountByServedRoute,
+        Money? availableCash = null, int actionCap = 3)
+    {
+        var home = routes.Count > 0 ? routes[0].Origin : MakeCity("home", Region.NorthAmerica, 0, 0, 50);
+        var cities = routes.SelectMany(r => new[] { r.Origin, r.Destination }).Distinct().DefaultIfEmpty(home).ToList();
+
+        return new(routes, actionCap, cities, DemandModel, new[] { Aircraft }, AirlineFleet.Empty, home.Region, home,
+            AvailableCash: availableCash, RivalCountByServedRoute: rivalCountByServedRoute);
+    }
+
+    [Fact]
+    public void ApplyMarketingCampaign_NullRivalCount_NoOp()
+    {
+        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
+        var route = new Route(a, b, Aircraft, AircraftCount: 1);
+        var context = MakeMarketingContext(new[] { route }, rivalCountByServedRoute: null, availableCash: Money.FromDollars(50_000_000));
+        var orders = new System.Collections.Generic.List<QuarterOrder>();
+        var spent = 0;
+
+        AiToolkit.ApplyMarketingCampaign(context, orders, ref spent);
+
+        Assert.Empty(orders);
+        Assert.Equal(0, spent);
+    }
+
+    [Fact]
+    public void ApplyMarketingCampaign_NoContestedRoutes_NoOp()
+    {
+        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
+        var route = new Route(a, b, Aircraft, AircraftCount: 1);
+        var key = QuarterEngine.NormalizedPairKey(a, b);
+        var rivalCount = new System.Collections.Generic.Dictionary<(string, string), int> { [key] = 0 };
+        var context = MakeMarketingContext(new[] { route }, rivalCount, availableCash: Money.FromDollars(50_000_000));
+        var orders = new System.Collections.Generic.List<QuarterOrder>();
+        var spent = 0;
+
+        AiToolkit.ApplyMarketingCampaign(context, orders, ref spent);
+
+        Assert.Empty(orders);
+        Assert.Equal(0, spent);
+    }
+
+    [Fact]
+    public void ApplyMarketingCampaign_OneContestedRoute_ProposesRouteMarketingOrder()
+    {
+        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
+        var route = new Route(a, b, Aircraft, AircraftCount: 1);
+        var key = QuarterEngine.NormalizedPairKey(a, b);
+        var rivalCount = new System.Collections.Generic.Dictionary<(string, string), int> { [key] = 1 };
+        var context = MakeMarketingContext(new[] { route }, rivalCount, availableCash: Money.FromDollars(50_000_000));
+        var orders = new System.Collections.Generic.List<QuarterOrder>();
+        var spent = 0;
+
+        AiToolkit.ApplyMarketingCampaign(context, orders, ref spent);
+
+        var order = Assert.Single(orders.OfType<RouteMarketingOrder>());
+        Assert.Equal(new HashSet<string> { "a", "b" }, new HashSet<string> { order.Origin.Id, order.Destination.Id });
+        Assert.Empty(orders.OfType<NetworkMarketingOrder>());
+        Assert.Equal(1, spent);
+    }
+
+    [Fact]
+    public void ApplyMarketingCampaign_TwoContestedRoutes_ProposesNetworkMarketingOrder()
+    {
+        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
+        var c = MakeCity("c", Region.NorthAmerica, 2, 2, 50);
+        var routeAb = new Route(a, b, Aircraft, AircraftCount: 1);
+        var routeAc = new Route(a, c, Aircraft, AircraftCount: 1);
+        var rivalCount = new System.Collections.Generic.Dictionary<(string, string), int>
+        {
+            [QuarterEngine.NormalizedPairKey(a, b)] = 1,
+            [QuarterEngine.NormalizedPairKey(a, c)] = 2,
+        };
+        var context = MakeMarketingContext(new[] { routeAb, routeAc }, rivalCount, availableCash: Money.FromDollars(50_000_000));
+        var orders = new System.Collections.Generic.List<QuarterOrder>();
+        var spent = 0;
+
+        AiToolkit.ApplyMarketingCampaign(context, orders, ref spent);
+
+        Assert.Single(orders.OfType<NetworkMarketingOrder>());
+        Assert.Empty(orders.OfType<RouteMarketingOrder>());
+        Assert.Equal(1, spent);
+    }
+
+    [Fact]
+    public void ApplyMarketingCampaign_TwoContestedRoutes_Unaffordable_NoOp()
+    {
+        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
+        var c = MakeCity("c", Region.NorthAmerica, 2, 2, 50);
+        var routeAb = new Route(a, b, Aircraft, AircraftCount: 1);
+        var routeAc = new Route(a, c, Aircraft, AircraftCount: 1);
+        var rivalCount = new System.Collections.Generic.Dictionary<(string, string), int>
+        {
+            [QuarterEngine.NormalizedPairKey(a, b)] = 1,
+            [QuarterEngine.NormalizedPairKey(a, c)] = 2,
+        };
+        var context = MakeMarketingContext(new[] { routeAb, routeAc }, rivalCount, availableCash: Money.FromDollars(1));
+        var orders = new System.Collections.Generic.List<QuarterOrder>();
+        var spent = 0;
+
+        AiToolkit.ApplyMarketingCampaign(context, orders, ref spent);
+
+        Assert.Empty(orders);
+        Assert.Equal(0, spent);
+    }
+
+    [Fact]
+    public void ApplyMarketingCampaign_Unaffordable_NoOp()
+    {
+        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
+        var route = new Route(a, b, Aircraft, AircraftCount: 1);
+        var key = QuarterEngine.NormalizedPairKey(a, b);
+        var rivalCount = new System.Collections.Generic.Dictionary<(string, string), int> { [key] = 1 };
+        var context = MakeMarketingContext(new[] { route }, rivalCount, availableCash: Money.FromDollars(1));
+        var orders = new System.Collections.Generic.List<QuarterOrder>();
+        var spent = 0;
+
+        AiToolkit.ApplyMarketingCampaign(context, orders, ref spent);
+
+        Assert.Empty(orders);
+        Assert.Equal(0, spent);
+    }
+
+    [Fact]
+    public void ApplyMarketingCampaign_BudgetExhausted_NoOp()
+    {
+        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
+        var route = new Route(a, b, Aircraft, AircraftCount: 1);
+        var key = QuarterEngine.NormalizedPairKey(a, b);
+        var rivalCount = new System.Collections.Generic.Dictionary<(string, string), int> { [key] = 1 };
+        var context = MakeMarketingContext(new[] { route }, rivalCount, availableCash: Money.FromDollars(50_000_000), actionCap: 3);
+        var orders = new System.Collections.Generic.List<QuarterOrder>();
+        var spent = 3; // already at cap
+
+        AiToolkit.ApplyMarketingCampaign(context, orders, ref spent);
+
+        Assert.Empty(orders);
+        Assert.Equal(3, spent);
+    }
+
+    [Fact]
+    public void ApplyMarketingCampaign_NullAvailableCash_TreatedAsAffordable_PermissiveDefault()
+    {
+        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
+        var route = new Route(a, b, Aircraft, AircraftCount: 1);
+        var key = QuarterEngine.NormalizedPairKey(a, b);
+        var rivalCount = new System.Collections.Generic.Dictionary<(string, string), int> { [key] = 1 };
+        var context = MakeMarketingContext(new[] { route }, rivalCount, availableCash: null);
+        var orders = new System.Collections.Generic.List<QuarterOrder>();
+        var spent = 0;
+
+        AiToolkit.ApplyMarketingCampaign(context, orders, ref spent);
+
+        Assert.Single(orders.OfType<RouteMarketingOrder>());
+        Assert.Equal(1, spent);
+    }
 }

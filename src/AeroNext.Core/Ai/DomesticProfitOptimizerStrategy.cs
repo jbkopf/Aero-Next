@@ -125,6 +125,11 @@ public sealed class DomesticProfitOptimizerStrategy : IAiStrategy
         var bestDomesticGateway = FindBestUnservedDomesticGateway(context) ?? FindBestIdleContestableDomesticGateway(context);
         AiToolkit.NegotiateOrBorrow(context, bestDomesticGateway, orders, ref spent);
 
+        // M52: a marketing campaign on whichever already-served route(s)
+        // are genuinely contested - never region-filtered, same reasoning
+        // as the shared toolkit below.
+        AiToolkit.ApplyMarketingCampaign(context, orders, ref spent);
+
         // Apply the shared toolkit to whatever's already held -
         // close/raise/cut, retire, pay down debt, hire. Never
         // region-filtered - managing what's already there is sound
