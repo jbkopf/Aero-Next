@@ -9,8 +9,8 @@ namespace AeroNext.Core.Tests;
 
 public class RapidExpansionStrategyTests
 {
-    private static City MakeCity(string id, Region region, double lat, double lon, int weight, bool isGateway = false) =>
-        new(id, id.ToUpperInvariant(), region, lat, lon, weight, isGateway, isGateway ? 3 : null);
+    private static City MakeCity(string id, Region region, double lat, double lon, int weight, bool isGateway = false, int? autoCapacity = null) =>
+        new(id, id.ToUpperInvariant(), region, lat, lon, weight, isGateway, isGateway ? 3 : null, isGateway ? null : autoCapacity);
 
     private static readonly GravityDemandModel DemandModel = new();
     private static readonly RapidExpansionStrategy Strategy = new();
@@ -504,5 +504,69 @@ public class RapidExpansionStrategyTests
         var routeOrder = Assert.Single(orders.OfType<RouteOrder>());
         Assert.Contains("bbb", new[] { routeOrder.Origin.Id, routeOrder.Destination.Id });
         Assert.DoesNotContain("aaa", new[] { routeOrder.Origin.Id, routeOrder.Destination.Id });
+    }
+
+    // --- M45: non-gateway automatic capacity ---
+
+    [Fact]
+    public void DecideOrders_NewPairTargetHasZeroCityWideCapacity_NeverProposed()
+    {
+        // "far" is the only reachable candidate (short range excludes
+        // everything else), but its own AutoCapacity balance is spent -
+        // the strategy must never propose what QuarterEngine would reject.
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
+        var far = MakeCity("far", Region.NorthAmerica, 1, 1, 90, autoCapacity: 5);
+        var cities = new[] { home, far };
+        var aircraft = new AircraftType("t", "Test", Seats: 140, RangeKm: 5_000);
+        var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, aircraft, quantity: 1, FleetOwnershipMode.Owned);
+
+        var context = new StrategyContext(
+            Array.Empty<Route>(), 3, cities, DemandModel, new[] { aircraft }, fleet, Region.NorthAmerica, HomeCity: home,
+            CityWideSlotsRemaining: new Dictionary<string, int> { ["far"] = 0 });
+
+        var orders = Strategy.DecideOrders(context);
+
+        Assert.DoesNotContain(orders.OfType<RouteOrder>(), o => new[] { o.Origin.Id, o.Destination.Id }.Contains("far"));
+    }
+
+    [Fact]
+    public void DecideOrders_NewPairTargetHasPositiveCityWideCapacity_StillProposed()
+    {
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
+        var far = MakeCity("far", Region.NorthAmerica, 1, 1, 90, autoCapacity: 5);
+        var cities = new[] { home, far };
+        var aircraft = new AircraftType("t", "Test", Seats: 140, RangeKm: 5_000);
+        var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, aircraft, quantity: 1, FleetOwnershipMode.Owned);
+
+        var context = new StrategyContext(
+            Array.Empty<Route>(), 3, cities, DemandModel, new[] { aircraft }, fleet, Region.NorthAmerica, HomeCity: home,
+            CityWideSlotsRemaining: new Dictionary<string, int> { ["far"] = 1 });
+
+        var orders = Strategy.DecideOrders(context);
+
+        Assert.Contains(orders.OfType<RouteOrder>(), o => new[] { o.Origin.Id, o.Destination.Id }.Contains("far"));
+    }
+
+    [Fact]
+    public void DecideOrders_NoFullyUnservedGateway_FallsBackToIdleContestableOne()
+    {
+        // The only gateway in the world is already touched by an existing
+        // route, so FindBestUnservedGatewayCrossRegionFirst returns null -
+        // but it carries idle-expired contestable inventory, which the
+        // fallback should still reach.
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
+        var gateway = MakeCity("gw", Region.NorthAmerica, 1, 1, 90, isGateway: true);
+        var cities = new[] { home, gateway };
+        var aircraft = new AircraftType("t", "Test", Seats: 140, RangeKm: 10_000);
+        var existing = new[] { new Route(home, gateway, aircraft, AircraftCount: 1) };
+
+        var context = new StrategyContext(
+            existing, 3, cities, DemandModel, new[] { aircraft }, AirlineFleet.Empty, Region.NorthAmerica, HomeCity: home,
+            AvailableCash: Money.FromDollars(10_000_000),
+            IdleContestableSlotsByCity: new Dictionary<string, int> { ["gw"] = 1 });
+
+        var orders = Strategy.DecideOrders(context);
+
+        Assert.Contains(orders.OfType<NegotiationOrder>(), o => o.TargetCity.Id == "gw");
     }
 }

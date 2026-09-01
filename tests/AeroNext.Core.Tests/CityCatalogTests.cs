@@ -369,4 +369,69 @@ public class CityCatalogTests
 
         Assert.Throws<InvalidDataException>(() => CityCatalog.Load(json));
     }
+
+    // --- M45: AutoCapacity ---
+
+    [Fact]
+    public void LoadFile_NonGatewayCities_AllHavePositiveAutoCapacity()
+    {
+        var cities = CityCatalog.LoadFile(DataPath);
+
+        foreach (var city in cities.Where(c => !c.IsGateway))
+        {
+            Assert.True(city.AutoCapacity is > 0, $"{city.Id} is not a gateway but has no positive AutoCapacity.");
+        }
+    }
+
+    [Fact]
+    public void LoadFile_GatewayCities_NeverHaveAutoCapacity()
+    {
+        var cities = CityCatalog.LoadFile(DataPath);
+
+        foreach (var city in cities.Where(c => c.IsGateway))
+        {
+            Assert.Null(city.AutoCapacity);
+        }
+    }
+
+    [Fact]
+    public void Load_MissingAutoCapacityField_DefaultsToNull_NotAThrow()
+    {
+        // Pre-M45 JSON literals (this file's own, and any older fixture)
+        // never include autoCapacity at all - City's own default parameter
+        // must keep deserializing them, not require the field.
+        const string json = """
+        [
+          { "id": "old", "name": "Old Fixture", "region": "EastAsia", "latitude": 0, "longitude": 0, "demandWeight": 10, "isGateway": false, "gateCapacity": null }
+        ]
+        """;
+
+        var cities = CityCatalog.Load(json);
+
+        Assert.Null(cities.Single().AutoCapacity);
+    }
+
+    [Fact]
+    public void Load_ThrowsWhenBothGateCapacityAndAutoCapacitySet()
+    {
+        const string json = """
+        [
+          { "id": "bad", "name": "Bad", "region": "EastAsia", "latitude": 0, "longitude": 0, "demandWeight": 10, "isGateway": true, "gateCapacity": 3, "autoCapacity": 2 }
+        ]
+        """;
+
+        Assert.Throws<InvalidDataException>(() => CityCatalog.Load(json));
+    }
+
+    [Fact]
+    public void Load_ThrowsOnNonPositiveAutoCapacity()
+    {
+        const string json = """
+        [
+          { "id": "bad", "name": "Bad", "region": "EastAsia", "latitude": 0, "longitude": 0, "demandWeight": 10, "isGateway": false, "gateCapacity": null, "autoCapacity": 0 }
+        ]
+        """;
+
+        Assert.Throws<InvalidDataException>(() => CityCatalog.Load(json));
+    }
 }

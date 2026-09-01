@@ -67,6 +67,21 @@ public static class CityCatalog
             {
                 throw new InvalidDataException($"Gateway city '{city.Id}' must have a positive gate capacity.");
             }
+
+            // M45: AutoCapacity and GateCapacity are two different
+            // mechanisms (ownerless shared ceiling vs. negotiated
+            // ownership) and never both apply to the same city - carrying
+            // both would leave it ambiguous which one QuarterEngine should
+            // enforce.
+            if (city.AutoCapacity is not null && city.GateCapacity is not null)
+            {
+                throw new InvalidDataException($"City '{city.Id}' has both AutoCapacity and GateCapacity set - these are mutually exclusive.");
+            }
+
+            if (city.AutoCapacity is <= 0)
+            {
+                throw new InvalidDataException($"City '{city.Id}' has a non-positive AutoCapacity.");
+            }
         }
     }
 }

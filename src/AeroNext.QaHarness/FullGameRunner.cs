@@ -123,6 +123,13 @@ public static class FullGameRunner
             var routesAtQuarterStart = names.ToDictionary(n => n, n => routes[n]);
             var capsAtQuarterStart = names.ToDictionary(n => n, n => caps[n]);
 
+            // M45: which gateways currently carry idle-expired, contestable
+            // inventory - computed once per quarter from state entering it
+            // (last quarter's own AdvanceIdleTracking call, below), so
+            // every airline's strategy sees the same public-information
+            // snapshot regardless of processing order within this quarter.
+            var idleContestableSlotsByCity = landingBoard.IdleContestableSlotsByCity(cities, routesAtQuarterStart);
+
             foreach (var name in names)
             {
                 var wasBankruptEnteringQuarter = finances[name].IsBankrupt;
@@ -138,6 +145,15 @@ public static class FullGameRunner
                 var capBefore = caps[name];
                 var airlineForSlots = new Airline(name, routes[name]);
                 var availableSlotsByCity = landingBoard.AvailableSlotsByCity(airlineForSlots, routes[name]);
+
+                // M45: recomputed fresh right before each airline's own
+                // turn, from routes as they stand at this point in the
+                // loop - already reflecting any earlier airline's updates
+                // this same quarter, so this ownerless shared balance can
+                // never be independently overshot by two airlines both
+                // seeing spare room (see QuarterEngine's own
+                // cityWideSlotsRemaining doc comment).
+                var cityWideSlotsRemaining = AiToolkit.ComputeCityWideSlotsRemaining(routes, cities);
 
                 IReadOnlyList<QuarterOrder> orders;
                 if (q == 1)
@@ -170,7 +186,9 @@ public static class FullGameRunner
                         routes[name], caps[name], cities, yearDemandModel, availableFleet, fleets[name], homeRegionByName[name],
                         HomeCity: seatByName[name].StartingCity,
                         AvailableSlotsByCity: availableSlotsByCity, AvailableCash: finances[name].CashBalance, CurrentDebtBalance: finances[name].DebtBalance,
-                        PendingNegotiationCityIds: pendingNegotiationCityIds);
+                        PendingNegotiationCityIds: pendingNegotiationCityIds,
+                        CityWideSlotsRemaining: cityWideSlotsRemaining,
+                        IdleContestableSlotsByCity: idleContestableSlotsByCity);
                     var strategy = BaselineAi.SelectStrategy(currentStrategyByName[name], q, strategyContext);
                     currentStrategyByName[name] = strategy;
                     orders = strategy.DecideOrders(strategyContext);
@@ -191,7 +209,8 @@ public static class FullGameRunner
                     availableCash: finances[name].CashBalance,
                     availableSlotsByCity: q == 1 ? null : availableSlotsByCity,
                     currentDebtBalance: finances[name].DebtBalance,
-                    homeCity: q == 1 ? null : seatByName[name].StartingCity);
+                    homeCity: q == 1 ? null : seatByName[name].StartingCity,
+                    cityWideSlotsRemaining: q == 1 ? null : cityWideSlotsRemaining);
 
                 if (q == 1 && result.RejectedOrders.Count > 0)
                 {
@@ -231,7 +250,12 @@ public static class FullGameRunner
                 }
             }
 
-            (landingBoard, _) = LandingRightsResolver.ResolveQuarter(landingBoard, q);
+            // M45: advance idle-slot tracking from this quarter's own
+            // final route state before resolving negotiations, so a
+            // challenger due to resolve this same quarter can already see
+            // inventory that just crossed IdleExpiryThreshold.
+            landingBoard = landingBoard.AdvanceIdleTracking(routes);
+            (landingBoard, _) = LandingRightsResolver.ResolveQuarter(landingBoard, q, routes);
 
             var league = seats.Select(s => new Airline(s.AirlineName, routes[s.AirlineName])).ToArray();
             var market = CompetitiveMarket.Resolve(league, cities, yearDemandModel);

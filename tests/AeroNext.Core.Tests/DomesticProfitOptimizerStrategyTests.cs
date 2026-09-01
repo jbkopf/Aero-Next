@@ -9,8 +9,8 @@ namespace AeroNext.Core.Tests;
 
 public class DomesticProfitOptimizerStrategyTests
 {
-    private static City MakeCity(string id, Region region, double lat, double lon, int weight, bool isGateway = false) =>
-        new(id, id.ToUpperInvariant(), region, lat, lon, weight, isGateway, isGateway ? 3 : null);
+    private static City MakeCity(string id, Region region, double lat, double lon, int weight, bool isGateway = false, int? autoCapacity = null) =>
+        new(id, id.ToUpperInvariant(), region, lat, lon, weight, isGateway, isGateway ? 3 : null, isGateway ? null : autoCapacity);
 
     private static readonly GravityDemandModel DemandModel = new();
     private static readonly DomesticProfitOptimizerStrategy Strategy = new();
@@ -501,5 +501,115 @@ public class DomesticProfitOptimizerStrategyTests
         var refinance = Assert.Single(orders.OfType<RefinanceOrder>());
         Assert.Equal(Money.FromDollars(1_500_000), refinance.AdditionalBorrowing);
         Assert.Empty(orders.OfType<NegotiationOrder>());
+    }
+
+    // --- M45: non-gateway automatic capacity ---
+
+    [Fact]
+    public void DecideOrders_DomesticPairTargetHasZeroCityWideCapacity_NeverProposed()
+    {
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
+        var far = MakeCity("far", Region.NorthAmerica, 1, 1, 90, autoCapacity: 5);
+        var cities = new[] { home, far };
+        var aircraft = new AircraftType("t", "Test", Seats: 140, RangeKm: 5_000);
+        var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, aircraft, quantity: 1, FleetOwnershipMode.Owned);
+
+        var context = new StrategyContext(
+            Array.Empty<Route>(), 3, cities, DemandModel, new[] { aircraft }, fleet, Region.NorthAmerica, HomeCity: home,
+            CityWideSlotsRemaining: new Dictionary<string, int> { ["far"] = 0 });
+
+        var orders = Strategy.DecideOrders(context);
+
+        Assert.DoesNotContain(orders.OfType<RouteOrder>(), o => new[] { o.Origin.Id, o.Destination.Id }.Contains("far"));
+    }
+
+    [Fact]
+    public void DecideOrders_NoFullyUnservedDomesticGateway_FallsBackToIdleContestableOne()
+    {
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
+        var domesticGateway = MakeCity("dgw", Region.NorthAmerica, 30, 30, 90, isGateway: true);
+        var cities = new[] { home, domesticGateway };
+        var aircraft = new AircraftType("t", "Test", Seats: 140, RangeKm: 10_000);
+        var existing = new[] { new Route(home, domesticGateway, aircraft, AircraftCount: 1) }; // already touched - excluded from FindBestUnservedDomesticGateway
+
+        var context = new StrategyContext(
+            existing, 3, cities, DemandModel, new[] { aircraft }, AirlineFleet.Empty, Region.NorthAmerica, HomeCity: home,
+            AvailableCash: Money.FromDollars(10_000_000),
+            IdleContestableSlotsByCity: new Dictionary<string, int> { ["dgw"] = 1 });
+
+        var orders = Strategy.DecideOrders(context);
+
+        var negotiation = Assert.Single(orders.OfType<NegotiationOrder>());
+        Assert.Equal("dgw", negotiation.TargetCity.Id);
+    }
+
+    [Fact]
+    public void DecideOrders_IdleContestableGateway_OutsideHomeRegion_NeverTargeted()
+    {
+        // "never cross-region" covers the idle-contest fallback too - a
+        // foreign gateway's idle-expired inventory isn't a domestic hub
+        // opportunity for this strategy.
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
+        var foreignGateway = MakeCity("fgw", Region.Europe, 30, 30, 90, isGateway: true);
+        var cities = new[] { home, foreignGateway };
+
+        var context = new StrategyContext(
+            Array.Empty<Route>(), 3, cities, DemandModel, Array.Empty<AircraftType>(), AirlineFleet.Empty, Region.NorthAmerica, HomeCity: home,
+            AvailableCash: Money.FromDollars(10_000_000),
+            IdleContestableSlotsByCity: new Dictionary<string, int> { ["fgw"] = 1 });
+
+        var orders = Strategy.DecideOrders(context);
+
+        Assert.Empty(orders.OfType<NegotiationOrder>());
+    }
+
+    [Fact]
+    public void DecideOrders_IdleContestableDomesticGateway_ZeroCount_NeverTargeted()
+    {
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
+        var domesticGateway = MakeCity("dgw", Region.NorthAmerica, 30, 30, 90, isGateway: true);
+        var cities = new[] { home, domesticGateway };
+        var aircraft = new AircraftType("t", "Test", Seats: 140, RangeKm: 10_000);
+        var existing = new[] { new Route(home, domesticGateway, aircraft, AircraftCount: 1) }; // already touched - excludes it from the primary "unserved" search too
+
+        var context = new StrategyContext(
+            existing, 3, cities, DemandModel, new[] { aircraft }, AirlineFleet.Empty, Region.NorthAmerica, HomeCity: home,
+            AvailableCash: Money.FromDollars(10_000_000),
+            IdleContestableSlotsByCity: new Dictionary<string, int> { ["dgw"] = 0 });
+
+        var orders = Strategy.DecideOrders(context);
+
+        Assert.Empty(orders.OfType<NegotiationOrder>());
+    }
+
+    [Fact]
+    public void DecideOrders_IdleContestableDomesticGateway_AlreadyPursued_TargetsNextInstead()
+    {
+        // Both real gateways are already touched, so the primary
+        // FindBestUnservedDomesticGateway search returns null and the
+        // idle-contestable fallback is what's actually exercised here -
+        // "dgw" carries idle-expired inventory but a bid is already in
+        // flight there, so the fallback must skip it in favor of "next".
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
+        var already = MakeCity("dgw", Region.NorthAmerica, 30, 30, 90, isGateway: true);
+        var next = MakeCity("next", Region.NorthAmerica, 31, 31, 50, isGateway: true);
+        var cities = new[] { home, already, next };
+        var aircraft = new AircraftType("t", "Test", Seats: 140, RangeKm: 10_000);
+        var existing = new[]
+        {
+            new Route(home, already, aircraft, AircraftCount: 1),
+            new Route(home, next, aircraft, AircraftCount: 1),
+        };
+
+        var context = new StrategyContext(
+            existing, 3, cities, DemandModel, new[] { aircraft }, AirlineFleet.Empty, Region.NorthAmerica, HomeCity: home,
+            AvailableCash: Money.FromDollars(10_000_000),
+            PendingNegotiationCityIds: new HashSet<string> { "dgw" },
+            IdleContestableSlotsByCity: new Dictionary<string, int> { ["dgw"] = 1, ["next"] = 1 });
+
+        var orders = Strategy.DecideOrders(context);
+
+        var negotiation = Assert.Single(orders.OfType<NegotiationOrder>());
+        Assert.Equal("next", negotiation.TargetCity.Id);
     }
 }

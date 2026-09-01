@@ -425,4 +425,302 @@ public class LandingRightsResolverTests
         Assert.Equal(0, result.SlotsHeldBy(a, city));
         Assert.Equal(2, result.SlotsHeldBy(b, city)); // untouched
     }
+
+    // --- M45: idle-slot tracking ---
+
+    private static IReadOnlyDictionary<string, IReadOnlyList<Route>> RoutesFor(string airlineName, params Route[] routes) =>
+        new Dictionary<string, IReadOnlyList<Route>> { [airlineName] = routes };
+
+    [Fact]
+    public void AdvanceIdleTracking_HeldSlotFullyUnused_IncrementsStreak()
+    {
+        var city = MakeCity("gate", gateCapacity: 5);
+        var board = LandingRightsBoard.Empty with
+        {
+            SlotsHeld = new Dictionary<(string, string), int> { [("A", "gate")] = 1 },
+        };
+
+        var advanced = board.AdvanceIdleTracking(RoutesFor("A"));
+
+        Assert.Equal(1, advanced.IdleStreak[("A", "gate")]);
+    }
+
+    [Fact]
+    public void AdvanceIdleTracking_RepeatedIdleQuarters_AccumulatesStreak()
+    {
+        var city = MakeCity("gate", gateCapacity: 5);
+        var board = LandingRightsBoard.Empty with
+        {
+            SlotsHeld = new Dictionary<(string, string), int> { [("A", "gate")] = 1 },
+        };
+
+        for (var i = 0; i < 3; i++)
+        {
+            board = board.AdvanceIdleTracking(RoutesFor("A"));
+        }
+
+        Assert.Equal(3, board.IdleStreak[("A", "gate")]);
+    }
+
+    [Fact]
+    public void AdvanceIdleTracking_SlotFullyUsed_NeverAccumulatesStreak()
+    {
+        var gate = MakeCity("gate", gateCapacity: 5);
+        var elsewhere = new City("else", "Else", Region.EastAsia, 10, 10, 50, false, null);
+        var aircraft = new AircraftType("t", "Test", Seats: 100);
+        var board = LandingRightsBoard.Empty with
+        {
+            SlotsHeld = new Dictionary<(string, string), int> { [("A", "gate")] = 1 },
+        };
+        var routes = RoutesFor("A", new Route(gate, elsewhere, aircraft, AircraftCount: 1));
+
+        var advanced = board.AdvanceIdleTracking(routes);
+
+        Assert.False(advanced.IdleStreak.ContainsKey(("A", "gate")));
+    }
+
+    [Fact]
+    public void AdvanceIdleTracking_UsageResumes_ResetsStreakToZero()
+    {
+        var gate = MakeCity("gate", gateCapacity: 5);
+        var elsewhere = new City("else", "Else", Region.EastAsia, 10, 10, 50, false, null);
+        var aircraft = new AircraftType("t", "Test", Seats: 100);
+        var board = LandingRightsBoard.Empty with
+        {
+            SlotsHeld = new Dictionary<(string, string), int> { [("A", "gate")] = 1 },
+        };
+
+        board = board.AdvanceIdleTracking(RoutesFor("A")); // idle
+        board = board.AdvanceIdleTracking(RoutesFor("A")); // still idle
+        Assert.Equal(2, board.IdleStreak[("A", "gate")]);
+
+        var routes = RoutesFor("A", new Route(gate, elsewhere, aircraft, AircraftCount: 1)); // now flying it
+        board = board.AdvanceIdleTracking(routes);
+
+        Assert.False(board.IdleStreak.ContainsKey(("A", "gate")));
+    }
+
+    [Fact]
+    public void IdleExpiredHolders_BelowThreshold_ReturnsEmpty()
+    {
+        var city = MakeCity("gate", gateCapacity: 5);
+        var board = LandingRightsBoard.Empty with
+        {
+            SlotsHeld = new Dictionary<(string, string), int> { [("A", "gate")] = 1 },
+            IdleStreak = new Dictionary<(string, string), int> { [("A", "gate")] = LandingRightsBoard.IdleExpiryThreshold - 1 },
+        };
+
+        Assert.Empty(board.IdleExpiredHolders(city, RoutesFor("A")));
+    }
+
+    [Fact]
+    public void IdleExpiredHolders_AtThreshold_ReturnsHolderOncePerUnusedSlot()
+    {
+        var city = MakeCity("gate", gateCapacity: 5);
+        var board = LandingRightsBoard.Empty with
+        {
+            SlotsHeld = new Dictionary<(string, string), int> { [("A", "gate")] = 2 },
+            IdleStreak = new Dictionary<(string, string), int> { [("A", "gate")] = LandingRightsBoard.IdleExpiryThreshold },
+        };
+
+        var holders = board.IdleExpiredHolders(city, RoutesFor("A"));
+
+        Assert.Equal(new[] { "A", "A" }, holders);
+    }
+
+    [Fact]
+    public void IdleExpiredHolders_HeldSlotAtADifferentCity_NeverIncluded()
+    {
+        // Board holds idle-expired inventory at "other", not "gate" - the
+        // CityId filter must actually exclude it, not just pass through
+        // because IdleStreak alone crossed the threshold.
+        var gate = MakeCity("gate", gateCapacity: 5);
+        var other = MakeCity("other", gateCapacity: 5);
+        var board = LandingRightsBoard.Empty with
+        {
+            SlotsHeld = new Dictionary<(string, string), int> { [("A", "other")] = 1 },
+            IdleStreak = new Dictionary<(string, string), int> { [("A", "other")] = LandingRightsBoard.IdleExpiryThreshold },
+        };
+
+        Assert.Empty(board.IdleExpiredHolders(gate, RoutesFor("A")));
+        Assert.Equal(new[] { "A" }, board.IdleExpiredHolders(other, RoutesFor("A")));
+    }
+
+    [Fact]
+    public void IdleExpiredHolders_DeterministicOrder_SortedByHolderName()
+    {
+        var city = MakeCity("gate", gateCapacity: 5);
+        var board = LandingRightsBoard.Empty with
+        {
+            SlotsHeld = new Dictionary<(string, string), int> { [("Zulu", "gate")] = 1, [("Alpha", "gate")] = 1 },
+            IdleStreak = new Dictionary<(string, string), int>
+            {
+                [("Zulu", "gate")] = LandingRightsBoard.IdleExpiryThreshold,
+                [("Alpha", "gate")] = LandingRightsBoard.IdleExpiryThreshold,
+            },
+        };
+        var routes = new Dictionary<string, IReadOnlyList<Route>> { ["Zulu"] = Array.Empty<Route>(), ["Alpha"] = Array.Empty<Route>() };
+
+        Assert.Equal(new[] { "Alpha", "Zulu" }, board.IdleExpiredHolders(city, routes));
+    }
+
+    [Fact]
+    public void IdleContestableSlotsByCity_CountsOnlyGateways_WithIdleExpiredInventory()
+    {
+        var gateway = MakeCity("gate", gateCapacity: 5);
+        var nonGateway = new City("plain", "Plain", Region.EastAsia, 0, 0, 50, false, null, AutoCapacity: 3);
+        var cities = new[] { gateway, nonGateway };
+        var board = LandingRightsBoard.Empty with
+        {
+            SlotsHeld = new Dictionary<(string, string), int> { [("A", "gate")] = 1 },
+            IdleStreak = new Dictionary<(string, string), int> { [("A", "gate")] = LandingRightsBoard.IdleExpiryThreshold },
+        };
+
+        var result = board.IdleContestableSlotsByCity(cities, RoutesFor("A"));
+
+        Assert.Equal(1, result["gate"]);
+        Assert.False(result.ContainsKey("plain"));
+    }
+
+    [Fact]
+    public void IdleContestableSlotsByCity_NoIdleExpiredInventoryAnywhere_ReturnsEmpty()
+    {
+        var gateway = MakeCity("gate", gateCapacity: 5);
+        var board = LandingRightsBoard.Empty;
+
+        var result = board.IdleContestableSlotsByCity(new[] { gateway }, RoutesFor("A"));
+
+        Assert.Empty(result);
+    }
+
+    // --- M45: idle-expired slots become contestable via the normal auction ---
+
+    [Fact]
+    public void ResolveQuarter_NoRoutesByAirlinePassed_NeverConsidersIdleExpiredInventory()
+    {
+        var city = MakeCity("gate", gateCapacity: 1); // fully granted, no fresh slot left
+        var challenger = MakeAirline("Challenger");
+        var board = LandingRightsBoard.Empty with
+        {
+            SlotsGranted = new Dictionary<string, int> { ["gate"] = 1 },
+            SlotsHeld = new Dictionary<(string, string), int> { [("Incumbent", "gate")] = 1 },
+            IdleStreak = new Dictionary<(string, string), int> { [("Incumbent", "gate")] = LandingRightsBoard.IdleExpiryThreshold },
+            Pending = new[] { new PendingNegotiation(challenger, city, Money.FromDollars(1_000_000), 1, 3) },
+        };
+
+        var (resolvedBoard, outcomes) = LandingRightsResolver.ResolveQuarter(board, currentQuarter: 3);
+
+        Assert.False(outcomes.Single().Won);
+        Assert.Equal(1, resolvedBoard.SlotsHeldBy(new Airline("Incumbent", Array.Empty<Route>()), city));
+    }
+
+    [Fact]
+    public void ResolveQuarter_IdleExpiredSlot_ChallengerWinsATransfer_NotAFreshGrant()
+    {
+        var city = MakeCity("gate", gateCapacity: 1); // fully granted already
+        var incumbent = MakeAirline("Incumbent");
+        var challenger = MakeAirline("Challenger");
+        var board = LandingRightsBoard.Empty with
+        {
+            SlotsGranted = new Dictionary<string, int> { ["gate"] = 1 },
+            SlotsHeld = new Dictionary<(string, string), int> { [("Incumbent", "gate")] = 1 },
+            IdleStreak = new Dictionary<(string, string), int> { [("Incumbent", "gate")] = LandingRightsBoard.IdleExpiryThreshold },
+            Pending = new[] { new PendingNegotiation(challenger, city, Money.FromDollars(1_000_000), 1, 3) },
+        };
+        var routesByAirline = RoutesFor("Incumbent"); // Incumbent's real routes: none touch "gate" - fully idle
+
+        var (resolvedBoard, outcomes) = LandingRightsResolver.ResolveQuarter(board, currentQuarter: 3, routesByAirline);
+
+        Assert.True(outcomes.Single().Won);
+        Assert.Equal(1, resolvedBoard.SlotsHeldBy(challenger, city));
+        Assert.Equal(0, resolvedBoard.SlotsHeldBy(incumbent, city));
+        Assert.Equal(1, resolvedBoard.SlotsGranted["gate"]); // ownership moved, city-wide total unchanged
+    }
+
+    [Fact]
+    public void ResolveQuarter_IdleExpiredSlot_IncumbentNeverAutoEnteredAsABidder()
+    {
+        // No PendingNegotiation from Incumbent at all - a passive owner
+        // never competes for their own slot, per the design.
+        var city = MakeCity("gate", gateCapacity: 1);
+        var board = LandingRightsBoard.Empty with
+        {
+            SlotsGranted = new Dictionary<string, int> { ["gate"] = 1 },
+            SlotsHeld = new Dictionary<(string, string), int> { [("Incumbent", "gate")] = 1 },
+            IdleStreak = new Dictionary<(string, string), int> { [("Incumbent", "gate")] = LandingRightsBoard.IdleExpiryThreshold },
+            Pending = Array.Empty<PendingNegotiation>(),
+        };
+
+        var (resolvedBoard, outcomes) = LandingRightsResolver.ResolveQuarter(board, currentQuarter: 3, RoutesFor("Incumbent"));
+
+        Assert.Empty(outcomes);
+        Assert.Equal(1, resolvedBoard.SlotsHeldBy(new Airline("Incumbent", Array.Empty<Route>()), city));
+    }
+
+    [Fact]
+    public void ResolveQuarter_IdleExpiredSlot_NoBidsThisQuarter_OwnerKeepsUsingItUninterrupted()
+    {
+        // Idle-expired but simply nobody bid - the owner's holding is
+        // completely untouched (they can keep flying it).
+        var city = MakeCity("gate", gateCapacity: 1);
+        var board = LandingRightsBoard.Empty with
+        {
+            SlotsGranted = new Dictionary<string, int> { ["gate"] = 1 },
+            SlotsHeld = new Dictionary<(string, string), int> { [("Incumbent", "gate")] = 1 },
+            IdleStreak = new Dictionary<(string, string), int> { [("Incumbent", "gate")] = LandingRightsBoard.IdleExpiryThreshold },
+        };
+
+        var (resolvedBoard, _) = LandingRightsResolver.ResolveQuarter(board, currentQuarter: 99, RoutesFor("Incumbent"));
+
+        Assert.Equal(1, resolvedBoard.SlotsHeldBy(new Airline("Incumbent", Array.Empty<Route>()), city));
+    }
+
+    [Fact]
+    public void ResolveQuarter_IncumbentBidsOnOwnIdleExpiredSlot_NetsToNoChange()
+    {
+        // The incumbent actively defends by submitting their own
+        // NegotiationOrder. If the auction draws their own idle-expired
+        // unit to satisfy their own winning bid, that's a self-transfer -
+        // must net to zero change, not a bug.
+        var city = MakeCity("gate", gateCapacity: 1);
+        var incumbent = MakeAirline("Incumbent");
+        var board = LandingRightsBoard.Empty with
+        {
+            SlotsGranted = new Dictionary<string, int> { ["gate"] = 1 },
+            SlotsHeld = new Dictionary<(string, string), int> { [("Incumbent", "gate")] = 1 },
+            IdleStreak = new Dictionary<(string, string), int> { [("Incumbent", "gate")] = LandingRightsBoard.IdleExpiryThreshold },
+            Pending = new[] { new PendingNegotiation(incumbent, city, Money.FromDollars(1_000_000), 1, 3) },
+        };
+
+        var (resolvedBoard, outcomes) = LandingRightsResolver.ResolveQuarter(board, currentQuarter: 3, RoutesFor("Incumbent"));
+
+        Assert.True(outcomes.Single().Won);
+        Assert.Equal(1, resolvedBoard.SlotsHeldBy(incumbent, city));
+        Assert.Equal(1, resolvedBoard.SlotsGranted["gate"]);
+    }
+
+    [Fact]
+    public void ResolveQuarter_MoreChallengersThanIdleExpiredInventory_ExcessStillLose()
+    {
+        var city = MakeCity("gate", gateCapacity: 1);
+        var winner = MakeAirline("Winner");
+        var loser = MakeAirline("Loser");
+        var board = LandingRightsBoard.Empty with
+        {
+            SlotsGranted = new Dictionary<string, int> { ["gate"] = 1 },
+            SlotsHeld = new Dictionary<(string, string), int> { [("Incumbent", "gate")] = 1 },
+            IdleStreak = new Dictionary<(string, string), int> { [("Incumbent", "gate")] = LandingRightsBoard.IdleExpiryThreshold },
+            Pending = new[]
+            {
+                new PendingNegotiation(winner, city, Money.FromDollars(1_000_000), 1, 3),
+                new PendingNegotiation(loser, city, Money.FromDollars(500_000), 1, 3),
+            },
+        };
+
+        var (resolvedBoard, outcomes) = LandingRightsResolver.ResolveQuarter(board, currentQuarter: 3, RoutesFor("Incumbent"));
+
+        Assert.True(outcomes.Single(o => o.Airline.Name == "Winner").Won);
+        Assert.False(outcomes.Single(o => o.Airline.Name == "Loser").Won);
+        Assert.Equal(1, resolvedBoard.SlotsHeldBy(winner, city));
+    }
 }

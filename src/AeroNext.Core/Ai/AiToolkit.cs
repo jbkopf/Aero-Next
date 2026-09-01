@@ -14,8 +14,14 @@ namespace AeroNext.Core.Ai;
 /// the ~490 tests and both real loops that already call
 /// BaselineAi.DecideOrders directly completely unaffected by this
 /// milestone.
+///
+/// M45: bumped from internal to public — ComputeCityWideSlotsRemaining is
+/// needed directly by the orchestration layer (AeroNext.QaHarness/
+/// FullGameRunner.cs, AeroNext.Sim's own M13 loop), not just by
+/// IAiStrategy implementations within this assembly, the same reason
+/// LandingRightsBoard's own analogous methods are public.
 /// </summary>
-internal static class AiToolkit
+public static class AiToolkit
 {
     /// <summary>
     /// M36's negotiate-or-borrow logic, extracted so every strategy can
@@ -200,6 +206,102 @@ internal static class AiToolkit
             .FirstOrDefault();
 
         return best.Pair is null ? null : (best.Pair, best.Aircraft);
+    }
+
+    /// <summary>
+    /// M45: the shared, ownerless capacity balance for every non-gateway
+    /// city with a modeled AutoCapacity - each such city's AutoCapacity
+    /// minus the AircraftCount every airline's current routes commit
+    /// there, combined. Unlike LandingRightsBoard.AvailableSlotsByCity,
+    /// this has no per-airline owner; it's the same number for whichever
+    /// airline asks. The caller must recompute this fresh immediately
+    /// before each airline's own QuarterEngine.RunQuarter call within a
+    /// quarter (from routesByAirline as it stands at that point), or
+    /// multiple airlines could each independently see spare room and
+    /// collectively overshoot a hard cap - see QuarterEngine's own
+    /// cityWideSlotsRemaining doc comment.
+    /// </summary>
+    public static IReadOnlyDictionary<string, int> ComputeCityWideSlotsRemaining(
+        IReadOnlyDictionary<string, IReadOnlyList<Route>> routesByAirline, IReadOnlyList<City> cities)
+    {
+        var used = new Dictionary<string, int>(StringComparer.Ordinal);
+
+        foreach (var routes in routesByAirline.Values)
+        {
+            foreach (var route in routes)
+            {
+                used[route.Origin.Id] = used.GetValueOrDefault(route.Origin.Id) + route.AircraftCount;
+                used[route.Destination.Id] = used.GetValueOrDefault(route.Destination.Id) + route.AircraftCount;
+            }
+        }
+
+        return cities
+            .Where(c => c.AutoCapacity is not null)
+            .ToDictionary(c => c.Id, c => Math.Max(0, c.AutoCapacity!.Value - used.GetValueOrDefault(c.Id)), StringComparer.Ordinal);
+    }
+
+    /// <summary>
+    /// M45: true when cityWideSlotsRemaining is null (permissive), or
+    /// there's still room left at every AutoCapacity-modeled endpoint of
+    /// origin/destination, net of what this same planning pass has
+    /// already reserved. Mirrors BaselineAi.HasSlotAtEveryGateway's own
+    /// shape exactly, for the ownerless non-gateway mechanic instead of
+    /// the negotiated gateway one.
+    /// </summary>
+    public static bool HasRoomAtEveryCity(City origin, City destination, IReadOnlyDictionary<string, int>? cityWideSlotsRemaining, Dictionary<string, int> citySpendReservedThisPass)
+    {
+        if (cityWideSlotsRemaining is null)
+        {
+            return true;
+        }
+
+        return new[] { origin, destination }
+            .Where(c => c.AutoCapacity is not null)
+            .All(c => cityWideSlotsRemaining.GetValueOrDefault(c.Id) - citySpendReservedThisPass.GetValueOrDefault(c.Id) > 0);
+    }
+
+    /// <summary>M45: the AutoCapacity-modeled sibling of BaselineAi.ReserveSlots.</summary>
+    public static void ReserveCityWideSlots(City origin, City destination, Dictionary<string, int> citySpendReservedThisPass)
+    {
+        foreach (var city in new[] { origin, destination }.Where(c => c.AutoCapacity is not null))
+        {
+            citySpendReservedThisPass[city.Id] = citySpendReservedThisPass.GetValueOrDefault(city.Id) + 1;
+        }
+    }
+
+    /// <summary>
+    /// M45: the best gateway with idle-expired, contestable inventory this
+    /// airline hasn't already spent real money pursuing (same
+    /// CitiesAlreadyPursuedForNegotiation exclusion every other
+    /// negotiation-target search already applies) - lets AI-vs-AI play
+    /// actually reach the idle-then-recontestable mechanic instead of it
+    /// only ever being reachable by a human player submitting a
+    /// NegotiationOrder by hand (CLAUDE.md: the sim never runs with fewer
+    /// than 4 competing networks, so a mechanic invisible to AI is a real
+    /// gap). Deliberately the same "single best candidate, no fallback
+    /// search" shape as FindBestUnservedGateway - deeper tuning (weighing
+    /// an idle-contest bid against a fresh-expansion bid) is a follow-on.
+    /// Returns null when IdleContestableSlotsByCity itself is null - a
+    /// caller that doesn't populate it has nothing to target, same
+    /// permissive-default convention as every other nullable
+    /// StrategyContext field.
+    /// </summary>
+    public static City? FindBestIdleContestableGateway(StrategyContext context)
+    {
+        if (context.IdleContestableSlotsByCity is null)
+        {
+            return null;
+        }
+
+        var alreadyPursued = CitiesAlreadyPursuedForNegotiation(context);
+        var cityById = context.AllCities.ToDictionary(c => c.Id, StringComparer.Ordinal);
+
+        return context.IdleContestableSlotsByCity
+            .Where(kv => kv.Value > 0 && !alreadyPursued.Contains(kv.Key))
+            .Select(kv => cityById[kv.Key])
+            .OrderByDescending(c => c.DemandWeight)
+            .ThenBy(c => c.Id, StringComparer.Ordinal)
+            .FirstOrDefault();
     }
 
     public static void NegotiateOrBorrow(StrategyContext context, City? bestGateway, List<QuarterOrder> orders, ref int spent)

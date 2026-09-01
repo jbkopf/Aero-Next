@@ -49,6 +49,7 @@ public sealed class RapidExpansionStrategy : IAiStrategy
         var orders = new List<QuarterOrder>();
         var reservedUnitIds = new HashSet<int>();
         var slotsReservedByCity = new Dictionary<string, int>();
+        var citySpendReservedByCity = new Dictionary<string, int>();
         var spent = 0;
         var validOriginCityIds = AiToolkit.ValidOriginCityIds(context);
 
@@ -68,13 +69,15 @@ public sealed class RapidExpansionStrategy : IAiStrategy
                 ?? FindBestUnservedPairCrossRegionFirstUsingIdleFleet(context, reservedUnitIds, validOriginCityIds);
 
             if (idleBest is not null && AiToolkit.TryOrientFromValidOrigin(idleBest.Value.Pair, validOriginCityIds, out var origin, out var destination)
-                && BaselineAi.HasSlotAtEveryGateway(origin, destination, context.AvailableSlotsByCity, slotsReservedByCity))
+                && BaselineAi.HasSlotAtEveryGateway(origin, destination, context.AvailableSlotsByCity, slotsReservedByCity)
+                && AiToolkit.HasRoomAtEveryCity(origin, destination, context.CityWideSlotsRemaining, citySpendReservedByCity))
             {
                 var aircraft = idleBest.Value.Aircraft;
                 var idleUnit = context.OwnFleet.Idle.Where(u => u.Type.Id == aircraft.Id && !reservedUnitIds.Contains(u.Id)).OrderBy(u => u.Id).First();
                 orders.Add(new RouteOrder(origin, destination, aircraft));
                 reservedUnitIds.Add(idleUnit.Id);
                 BaselineAi.ReserveSlots(origin, destination, slotsReservedByCity);
+                AiToolkit.ReserveCityWideSlots(origin, destination, citySpendReservedByCity);
                 spent += 1;
             }
             else if (idleBest is null && spent + 1 <= context.ActionCap)
@@ -96,11 +99,13 @@ public sealed class RapidExpansionStrategy : IAiStrategy
                     spent += 1;
                 }
                 else if (bestAircraft is not null && oriented is not null && spent + 2 <= context.ActionCap
-                    && BaselineAi.HasSlotAtEveryGateway(oriented.Value.Origin, oriented.Value.Destination, context.AvailableSlotsByCity, slotsReservedByCity))
+                    && BaselineAi.HasSlotAtEveryGateway(oriented.Value.Origin, oriented.Value.Destination, context.AvailableSlotsByCity, slotsReservedByCity)
+                    && AiToolkit.HasRoomAtEveryCity(oriented.Value.Origin, oriented.Value.Destination, context.CityWideSlotsRemaining, citySpendReservedByCity))
                 {
                     orders.Add(new LeaseAircraftOrder(bestAircraft, Quantity: 1));
                     orders.Add(new RouteOrder(oriented.Value.Origin, oriented.Value.Destination, bestAircraft));
                     BaselineAi.ReserveSlots(oriented.Value.Origin, oriented.Value.Destination, slotsReservedByCity);
+                    AiToolkit.ReserveCityWideSlots(oriented.Value.Origin, oriented.Value.Destination, citySpendReservedByCity);
                     spent += 2;
                 }
             }
@@ -110,7 +115,8 @@ public sealed class RapidExpansionStrategy : IAiStrategy
         // so it must exclude whatever step 1 already reserved.
         var bestExisting = BaselineAi.FindBestPerformingRoute(context.CurrentRoutes, context.DemandModel);
         if (bestExisting is not null && spent + 1 <= context.ActionCap
-            && BaselineAi.HasSlotAtEveryGateway(bestExisting.Origin, bestExisting.Destination, context.AvailableSlotsByCity, slotsReservedByCity))
+            && BaselineAi.HasSlotAtEveryGateway(bestExisting.Origin, bestExisting.Destination, context.AvailableSlotsByCity, slotsReservedByCity)
+            && AiToolkit.HasRoomAtEveryCity(bestExisting.Origin, bestExisting.Destination, context.CityWideSlotsRemaining, citySpendReservedByCity))
         {
             var idleUnit = context.OwnFleet.Idle
                 .Where(u => u.Type.Id == bestExisting.Aircraft.Id && !reservedUnitIds.Contains(u.Id))
@@ -122,6 +128,7 @@ public sealed class RapidExpansionStrategy : IAiStrategy
                 orders.Add(new RouteOrder(bestExisting.Origin, bestExisting.Destination, bestExisting.Aircraft));
                 reservedUnitIds.Add(idleUnit.Id);
                 BaselineAi.ReserveSlots(bestExisting.Origin, bestExisting.Destination, slotsReservedByCity);
+                AiToolkit.ReserveCityWideSlots(bestExisting.Origin, bestExisting.Destination, citySpendReservedByCity);
                 spent += 1;
             }
             else if (context.AvailableCash is not null && FinancialState.CanAfford(context.AvailableCash.Value, ComfortableOrderCost(bestExisting.Aircraft)))
@@ -134,13 +141,17 @@ public sealed class RapidExpansionStrategy : IAiStrategy
                 orders.Add(new LeaseAircraftOrder(bestExisting.Aircraft, Quantity: 1));
                 orders.Add(new RouteOrder(bestExisting.Origin, bestExisting.Destination, bestExisting.Aircraft));
                 BaselineAi.ReserveSlots(bestExisting.Origin, bestExisting.Destination, slotsReservedByCity);
+                AiToolkit.ReserveCityWideSlots(bestExisting.Origin, bestExisting.Destination, citySpendReservedByCity);
                 spent += 2;
             }
         }
 
         // 3. Negotiate for the best gateway, cross-region-reachable ones
-        // weighted first - CLAUDE.md's own chokepoint pillar.
-        var bestGateway = FindBestUnservedGatewayCrossRegionFirst(context);
+        // weighted first - CLAUDE.md's own chokepoint pillar. M45: falls
+        // back to a gateway with idle-expired contestable inventory when
+        // no fully-unserved one remains, so this strategy can actually
+        // reach that mechanic rather than only a human bidding by hand.
+        var bestGateway = FindBestUnservedGatewayCrossRegionFirst(context) ?? AiToolkit.FindBestIdleContestableGateway(context);
         AiToolkit.NegotiateOrBorrow(context, bestGateway, orders, ref spent);
 
         // 4. Shared toolkit - unchanged from DomesticProfitOptimizerStrategy's own use of it.

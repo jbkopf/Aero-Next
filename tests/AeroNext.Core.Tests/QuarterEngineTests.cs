@@ -688,6 +688,108 @@ public class QuarterEngineTests
         Assert.Single(result.RejectedOrders);
     }
 
+    // --- M45: non-gateway city-wide automatic capacity gating ---
+
+    private static City MakeAutoCapacityCity(string id, double lat, double lon, int weight, int autoCapacity) =>
+        new(id, id.ToUpperInvariant(), Region.EastAsia, lat, lon, weight, false, null, autoCapacity);
+
+    [Fact]
+    public void RunQuarter_NoCityWideSlotsPassed_NeverGatesOnAutoCapacity()
+    {
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 50);
+        var busy = MakeAutoCapacityCity("bz", 1, 1, 50, autoCapacity: 1);
+        var order = new RouteOrder(a, busy, Aircraft);
+
+        var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, new[] { a, busy }, demandModel);
+
+        Assert.Single(result.AppliedOrders);
+        Assert.Empty(result.RejectedOrders);
+    }
+
+    [Fact]
+    public void RunQuarter_AutoCapacityCityWithZeroRemaining_Rejected()
+    {
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 50);
+        var busy = MakeAutoCapacityCity("bz", 1, 1, 50, autoCapacity: 1);
+        var order = new RouteOrder(a, busy, Aircraft);
+        var cityWideSlotsRemaining = new Dictionary<string, int> { ["bz"] = 0 };
+
+        var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, new[] { a, busy }, demandModel, cityWideSlotsRemaining: cityWideSlotsRemaining);
+
+        Assert.Empty(result.AppliedOrders);
+        Assert.Single(result.RejectedOrders);
+    }
+
+    [Fact]
+    public void RunQuarter_AutoCapacityCityWithOneRemaining_FirstOrderSucceeds_SecondInSameBatchRejected()
+    {
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 50);
+        var b = MakeCity("b", 2, 2, 50);
+        var busy = MakeAutoCapacityCity("bz", 1, 1, 50, autoCapacity: 5);
+        var orders = new[] { new RouteOrder(a, busy, Aircraft), new RouteOrder(b, busy, Aircraft) };
+        var cityWideSlotsRemaining = new Dictionary<string, int> { ["bz"] = 1 };
+
+        var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, orders, new[] { a, b, busy }, demandModel, cityWideSlotsRemaining: cityWideSlotsRemaining);
+
+        Assert.Single(result.AppliedOrders);
+        Assert.Single(result.RejectedOrders);
+    }
+
+    [Fact]
+    public void RunQuarter_PlainCity_NeverGatedByAutoCapacity_RegardlessOfCityWideSlotsRemainingContents()
+    {
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 50);
+        var b = MakeCity("b", 1, 1, 50); // AutoCapacity: null - unmodeled
+        var order = new RouteOrder(a, b, Aircraft);
+        var cityWideSlotsRemaining = new Dictionary<string, int>(); // empty - "b" never appears, would read as 0 if it were checked
+
+        var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, new[] { a, b }, demandModel, cityWideSlotsRemaining: cityWideSlotsRemaining);
+
+        Assert.Single(result.AppliedOrders);
+        Assert.Empty(result.RejectedOrders);
+    }
+
+    [Fact]
+    public void RunQuarter_BothEndpointsAreAutoCapacityCities_EachIndependentlyGates()
+    {
+        var demandModel = new GravityDemandModel();
+        var busyA = MakeAutoCapacityCity("ba", 0, 0, 50, autoCapacity: 5);
+        var busyB = MakeAutoCapacityCity("bb", 1, 1, 50, autoCapacity: 5);
+        var order = new RouteOrder(busyA, busyB, Aircraft);
+        // Slot available at ba but not at bb - order must still be rejected.
+        var cityWideSlotsRemaining = new Dictionary<string, int> { ["ba"] = 1, ["bb"] = 0 };
+
+        var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, new[] { busyA, busyB }, demandModel, cityWideSlotsRemaining: cityWideSlotsRemaining);
+
+        Assert.Empty(result.AppliedOrders);
+        Assert.Single(result.RejectedOrders);
+    }
+
+    [Fact]
+    public void RunQuarter_GatewaySlotsAndAutoCapacitySlots_BothEnforcedIndependently()
+    {
+        // A route between a gateway and an AutoCapacity city is gated by
+        // both mechanisms at once - each endpoint's own rule applies,
+        // never one overriding the other.
+        var demandModel = new GravityDemandModel();
+        var gateway = MakeGateway("gw", 0, 0, 50, gateCapacity: 5);
+        var busy = MakeAutoCapacityCity("bz", 1, 1, 50, autoCapacity: 5);
+        var order = new RouteOrder(gateway, busy, Aircraft);
+        var availableSlotsByCity = new Dictionary<string, int> { ["gw"] = 1 };
+        var cityWideSlotsRemaining = new Dictionary<string, int> { ["bz"] = 0 };
+
+        var result = QuarterEngine.RunQuarter(
+            1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, new[] { gateway, busy }, demandModel,
+            availableSlotsByCity: availableSlotsByCity, cityWideSlotsRemaining: cityWideSlotsRemaining);
+
+        Assert.Empty(result.AppliedOrders);
+        Assert.Single(result.RejectedOrders);
+    }
+
     // --- M27: closing a route (detaching one aircraft at a time) ---
 
     [Fact]

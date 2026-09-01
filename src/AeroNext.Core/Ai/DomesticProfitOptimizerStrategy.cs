@@ -61,6 +61,7 @@ public sealed class DomesticProfitOptimizerStrategy : IAiStrategy
         var orders = new List<QuarterOrder>();
         var reservedUnitIds = new HashSet<int>();
         var slotsReservedByCity = new Dictionary<string, int>();
+        var citySpendReservedByCity = new Dictionary<string, int>();
         var spent = 0;
         var validOriginCityIds = AiToolkit.ValidOriginCityIds(context);
 
@@ -72,10 +73,12 @@ public sealed class DomesticProfitOptimizerStrategy : IAiStrategy
             var idleBest = FindMostProfitableDomesticPairUsingIdleFleet(context, reservedUnitIds, validOriginCityIds);
 
             if (idleBest is not null && AiToolkit.TryOrientFromValidOrigin(idleBest.Value.Pair, validOriginCityIds, out var origin, out var destination)
-                && BaselineAi.HasSlotAtEveryGateway(origin, destination, context.AvailableSlotsByCity, slotsReservedByCity))
+                && BaselineAi.HasSlotAtEveryGateway(origin, destination, context.AvailableSlotsByCity, slotsReservedByCity)
+                && AiToolkit.HasRoomAtEveryCity(origin, destination, context.CityWideSlotsRemaining, citySpendReservedByCity))
             {
                 orders.Add(new RouteOrder(origin, destination, idleBest.Value.Aircraft));
                 BaselineAi.ReserveSlots(origin, destination, slotsReservedByCity);
+                AiToolkit.ReserveCityWideSlots(origin, destination, citySpendReservedByCity);
                 spent += 1;
             }
             else if (idleBest is null)
@@ -101,11 +104,13 @@ public sealed class DomesticProfitOptimizerStrategy : IAiStrategy
                     spent += 1;
                 }
                 else if (bestOrdered is not null && oriented is not null && spent + 2 <= context.ActionCap
-                    && BaselineAi.HasSlotAtEveryGateway(oriented.Value.Origin, oriented.Value.Destination, context.AvailableSlotsByCity, slotsReservedByCity))
+                    && BaselineAi.HasSlotAtEveryGateway(oriented.Value.Origin, oriented.Value.Destination, context.AvailableSlotsByCity, slotsReservedByCity)
+                    && AiToolkit.HasRoomAtEveryCity(oriented.Value.Origin, oriented.Value.Destination, context.CityWideSlotsRemaining, citySpendReservedByCity))
                 {
                     orders.Add(new LeaseAircraftOrder(bestOrdered.Value.Aircraft, Quantity: 1));
                     orders.Add(new RouteOrder(oriented.Value.Origin, oriented.Value.Destination, bestOrdered.Value.Aircraft));
                     BaselineAi.ReserveSlots(oriented.Value.Origin, oriented.Value.Destination, slotsReservedByCity);
+                    AiToolkit.ReserveCityWideSlots(oriented.Value.Origin, oriented.Value.Destination, citySpendReservedByCity);
                     spent += 2;
                 }
             }
@@ -114,8 +119,10 @@ public sealed class DomesticProfitOptimizerStrategy : IAiStrategy
         // Negotiates for a gateway strictly within its own home region -
         // "never cross-region" (the class doc comment) covers routes and
         // negotiation alike, but a domestic hub is still real and worth
-        // securing.
-        var bestDomesticGateway = FindBestUnservedDomesticGateway(context);
+        // securing. M45: falls back to a domestic gateway with
+        // idle-expired contestable inventory when no fully-unserved one
+        // remains in the home region.
+        var bestDomesticGateway = FindBestUnservedDomesticGateway(context) ?? FindBestIdleContestableDomesticGateway(context);
         AiToolkit.NegotiateOrBorrow(context, bestDomesticGateway, orders, ref spent);
 
         // Apply the shared toolkit to whatever's already held -
@@ -136,6 +143,26 @@ public sealed class DomesticProfitOptimizerStrategy : IAiStrategy
 
         return context.AllCities
             .Where(c => c.Region == context.HomeRegion && c.IsGateway && !touchedCityIds.Contains(c.Id) && !alreadyPursued.Contains(c.Id))
+            .OrderByDescending(c => c.DemandWeight)
+            .ThenBy(c => c.Id, StringComparer.Ordinal)
+            .FirstOrDefault();
+    }
+
+    /// <summary>M45: the region-restricted sibling of AiToolkit.FindBestIdleContestableGateway - "never cross-region" (the class doc comment) covers this too.</summary>
+    private static City? FindBestIdleContestableDomesticGateway(StrategyContext context)
+    {
+        if (context.IdleContestableSlotsByCity is null)
+        {
+            return null;
+        }
+
+        var alreadyPursued = AiToolkit.CitiesAlreadyPursuedForNegotiation(context);
+        var cityById = context.AllCities.ToDictionary(c => c.Id, StringComparer.Ordinal);
+
+        return context.IdleContestableSlotsByCity
+            .Where(kv => kv.Value > 0 && !alreadyPursued.Contains(kv.Key))
+            .Select(kv => cityById[kv.Key])
+            .Where(c => c.Region == context.HomeRegion)
             .OrderByDescending(c => c.DemandWeight)
             .ThenBy(c => c.Id, StringComparer.Ordinal)
             .FirstOrDefault();

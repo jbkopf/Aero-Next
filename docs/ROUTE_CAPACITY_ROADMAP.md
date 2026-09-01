@@ -288,3 +288,158 @@ particular un-tuned heuristic AI's campaign trajectory worse. `BaselineAi`
 needs a real rework before M26/M32/M33's mechanics can be fairly judged
 on campaign feel or win-condition reachability — no longer a "maybe
 later," a clear prerequisite for the next piece of work on this game.
+
+---
+
+## M45 — Universal slot capacity + idle-slot recontestability ✅
+
+**Origin:** the user asked directly for four connected changes, requested
+in one message: (1) every city, not just the 15 tagged gateways, should
+require a landing slot for a route to operate there; (2) slot consumption
+must correlate with flight volume — adding another aircraft can't add
+capacity if the city has none left; (3) the same rule stated as its
+failure mode — a `RouteOrder` that would push a city over capacity is
+rejected; (4) **new** — a slot an airline holds but leaves unused for 4
+consecutive quarters becomes contestable by other airlines, though the
+owner keeps using it freely as long as nobody else has bid on it.
+
+Investigation found (2) and (3) were **already fully built**, but scoped
+only to the 15 `IsGateway` cities — M33's own `LandingRightsBoard.AvailableSlotsByCity`
+already summed `Route.AircraftCount` per city for a live "held minus
+in-use" balance, and `QuarterEngine.RunQuarter`'s `availableSlotsByCity`
+parameter already rejected a `RouteOrder` that would exceed it. The user
+confirmed (via a clarifying question) real scope should extend to **all
+99 cities**, capacity derived from each city's own `demandWeight`. This
+also directly closes a real, already-flagged gap in
+`docs/FINANCIAL_MODEL_ROADMAP.md`: "no ongoing gate-holding cost — a won
+slot is free to hold forever" — item (4) is exactly that fix, scoped to
+the gateway/negotiated mechanic where hoarding is actually possible.
+
+**Two different mechanisms for two different kinds of city, not one
+mechanism stretched over both.** CLAUDE.md's own action-economy taxonomy
+already separates "Enter a new city-pair" (**Market** — no shared object)
+from "Negotiate landing rights" (**Contested** — a scarce object multiple
+airlines bid on). Making all 99 cities require a silent, 2-4-quarter
+blind negotiation before a single route can open there would convert
+nearly every Market action into a gated Contested prerequisite, wrecking
+the 90-second-turn pacing constraint for routine expansion. The user's own
+idle-then-contestable rule also only makes sense where *ownership*
+exists — "owned, but unused... can be bid on" — and ordinary demand-driven
+capacity has no owner to hoard it; it already frees the instant a route
+shrinks (`AvailableSlotsByCity` is live-derived from current routes, not a
+stale ledger), a strictly faster release than any 4-quarter clock.
+
+**A: non-gateway cities (84) — automatic, ownerless, city-wide capacity.**
+New `City.AutoCapacity` field, mutually exclusive with `GateCapacity`
+(`CityCatalog` now throws if a city ever carries both). Derived once and
+written into `data/cities.json`: `Max(1, Round(DemandWeight / 25.0))` —
+weight 15→1, 50→2, 95→4, a deliberately tighter range than the curated
+gateway range (2-3) so ordinary cities never read as *more* generous than
+real chokepoints. No ownership, no negotiation — the constraint is a
+shared ceiling on total `AircraftCount` from **every** airline's routes
+touching the city, checked independently at Origin and Destination, same
+per-endpoint shape the gateway check already has. `QuarterEngine.RunQuarter`
+gained `cityWideSlotsRemaining` (null-permissive, same convention as
+every other optional enforcement parameter here) mirroring
+`availableSlotsByCity`'s own rejection/spend-tracking shape exactly.
+Because this balance has no per-airline owner, the caller must recompute
+it fresh immediately before *each* airline's own `RunQuarter` call within
+a quarter (`AiToolkit.ComputeCityWideSlotsRemaining`, from routes as they
+stand at that point in the loop) — otherwise two airlines could each
+independently see spare room and collectively overshoot a hard cap; a
+small, honest first-come-by-processing-order property this introduces,
+called out rather than hidden. `StrategyContext` gained the matching
+`CityWideSlotsRemaining` field and a new `AiToolkit.HasRoomAtEveryCity` /
+`ReserveCityWideSlots` pair, wired into `RapidExpansionStrategy` and
+`DomesticProfitOptimizerStrategy` alongside their existing
+`HasSlotAtEveryGateway` checks — the AI never proposes what the engine
+would reject, same principle M33 established.
+
+**B: gateway cities (unchanged 15) — idle-then-contestable ownership.**
+`LandingRightsBoard` gained `IdleStreak` (consecutive quarters a held
+slot's "held minus in-use" balance has been positive) and
+`AdvanceIdleTracking`, run once per quarter from live route state — the
+same "never a separately persisted ledger" philosophy `AvailableSlotsByCity`
+already established. `IdleExpiryThreshold = 4`. `LandingRightsResolver.ResolveQuarter`
+gained an optional `routesByAirline` parameter (null-permissive): when a
+city's fresh `SlotsRemaining` is spent but idle-expired unused inventory
+exists, a ranked challenger can win a **transfer** instead of a fresh
+grant — the idle owner's `SlotsHeld` decrements, the winner's increments,
+`SlotsGranted`'s city-wide total is untouched (ownership moved, it never
+vacated). The idle owner is never auto-entered as a bidder for their own
+slot — passive retention only, exactly "used by the owner if there is no
+current bids"; a self-transfer (the owner actively re-bids and the
+auction draws from their own idle-expired unit) nets to zero change by
+construction, not a special case. `AiToolkit.FindBestIdleContestableGateway`
+(plus a region-restricted sibling in `DomesticProfitOptimizerStrategy`)
+gives AI strategies a way to actually reach this inventory — otherwise it
+would only ever be reachable by a human bidding by hand, a real gap per
+CLAUDE.md's "the sim never runs with fewer than 4 competing networks."
+`FullGameRunner.cs` is the only real loop wired end to end, matching
+M33's own precedent of leaving `AeroNext.Sim`'s M13 loop permissive for
+gateway-slot enforcement.
+
+**Done when:** every pre-existing call site compiles and passes
+unmodified (`availableSlotsByCity`/`homeCity`/`ResolveQuarter`'s existing
+signatures all kept null-permissive defaults); dedicated tests cover the
+`AutoCapacity` formula and data completeness, `QuarterEngine` rejecting at
+a zero city-wide balance (both endpoints independently, cross-order
+same-batch spending, a gateway and an AutoCapacity endpoint gating
+independently on the same route), `LandingRightsBoard.AdvanceIdleTracking`'s
+increment/reset arithmetic, `LandingRightsResolver`'s idle-expired
+transfer (winner gains, owner loses, `SlotsGranted` unchanged, owner never
+auto-bids, self-transfer nets to zero), and both real strategies never
+proposing what the engine would reject for either new mechanism.
+
+Done. 653 tests total (50 new — 6 `QuarterEngine`, 5 `CityCatalog`, 16
+`LandingRightsBoard`/`Resolver`, 15 `AiToolkit` (new file), 8
+`RapidExpansionStrategy`/`DomesticProfitOptimizerStrategy`). 100%
+line/branch coverage on every touched/new class; the only remaining gaps
+project-wide are pre-existing ones already documented (`QuarterOrder`,
+`BriefingGenerator`, `NetworkPlanner`) or confirmed untouched by this
+milestone via `git diff` (`AiToolkit.TryOrientFromValidOrigin`'s own
+already-documented M44 gap, `BaselineAi`, neither modified here). Overall
+project coverage 99.76%/99.43%. 300-game QA harness sweep at 244 quarters:
+300/300 clean, 0 invariant violations, 0 crashes.
+
+**A large campaign-pacing effect, measured and isolated, not just
+observed.** Overall win rate **83.3% (M44) → 36.3%** (109/300, avg
+quarter 20.9 vs. 23.0). Region-by-region (bankrupt / win share,
+M44 → M45): NorthAmerica 8.4%/87.6% → 8.4%/83.5% (essentially unchanged —
+its dense 22-city local network absorbs the new capacity ceiling without
+strain); Europe 86.3%/1.0% → 85.8%/0.0%; EastAsia **14.1%/5.5% →
+59.7%/0.0%** (the single largest regional swing); SouthWestAsia
+21.0%/24.8% → 22.9%/16.5%; AustralAsia 56.7%/6.2% → **33.0%**/0.0%
+(bankruptcy actually improved here); SouthAmerica 88.2%/4.2% →
+**66.7%**/0.0% (also improved). Not a uniform "thin regions get hurt more"
+story — bankruptcy moved in *both* directions by region, but win share
+collapsed almost everywhere, meaning the win condition (3+ regions led 4
+consecutive quarters) got harder to satisfy for anyone, not that any one
+region's collapse mechanically handed NorthAmerica more wins.
+
+**Isolated by ablation** (temporarily disabling each new mechanism in
+turn, `FullGameRunner.cs` only, reverted before shipping — same
+instrument-then-revert discipline as M43's own investigations), same 300
+seeds: both mechanisms off reproduces M44's own recorded numbers
+*exactly* (83.3%, 250/300, avg quarter 23.0 — confirms the ablation
+methodology itself is sound, not a coincidence). AutoCapacity alone
+(idle-recontest off): **56.7%** (170/300). Idle-recontest alone
+(AutoCapacity off): **74.7%** (224/300). Both together (real M45):
+**36.3%**. The combined drop (47.0 points) is larger than the sum of
+each mechanism's own isolated drop (26.6 + 8.6 = 35.2 points) — a real
+compounding interaction between the two, not two independent effects
+added together: AutoCapacity caps how far any single airline's organic,
+M44-contiguous growth can run through shared local cities, while
+idle-recontest adds a new way an airline can *lose* ground it already
+built, and together they make it markedly harder for any one airline to
+build and hold the kind of multi-region lead the win condition requires.
+
+**Flagged plainly, not smoothed over, matching M32/M33's own precedent**
+(both of *those* milestones also made this same un-tuned heuristic AI's
+campaign trajectory measurably worse) — this is CLAUDE.md's own "landing
+slots are finite; taking one denies a rival" pillar finally applying
+everywhere, not just the 15 curated gateways, and it visibly costs the
+AI's own reachability of the win condition. `BaselineAi`/successor
+strategies needing a real rework before the *cumulative* effect of
+M26/M32/M33/M45's mechanics can be fairly judged on campaign feel remains
+the standing conclusion, now with one more compounding data point.

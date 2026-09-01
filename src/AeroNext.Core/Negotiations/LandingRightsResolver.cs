@@ -37,7 +37,24 @@ public static class LandingRightsResolver
         return board with { Pending = board.Pending.Append(pending).ToList() };
     }
 
-    public static (LandingRightsBoard Board, IReadOnlyList<NegotiationOutcome> Outcomes) ResolveQuarter(LandingRightsBoard board, int currentQuarter)
+    /// <param name="routesByAirline">
+    /// M45: null (the default) preserves fully permissive behavior for
+    /// every pre-existing call site — a fully-granted city's idle-expired
+    /// inventory (see LandingRightsBoard.IdleExpiredHolders) is never
+    /// treated as contestable, exactly as before this parameter existed.
+    /// Passing every airline's current routes (keyed by name) turns on
+    /// idle-slot recontestability (M45): once a fresh city's remaining
+    /// capacity runs out, a ranked bidder can still win by taking a
+    /// transfer from an idle-expired holding instead of a brand-new grant
+    /// — SlotsGranted's city-wide total is unchanged (ownership moved, it
+    /// never vacated), only SlotsHeld moves from the idle owner to the
+    /// winner. The idle owner is never entered as a bidder for their own
+    /// slot — passive retention only; they keep using it until someone
+    /// else actually wins it away, per CLAUDE.md's own contested-action
+    /// rules applied to this new inventory too.
+    /// </param>
+    public static (LandingRightsBoard Board, IReadOnlyList<NegotiationOutcome> Outcomes) ResolveQuarter(
+        LandingRightsBoard board, int currentQuarter, IReadOnlyDictionary<string, IReadOnlyList<Route>>? routesByAirline = null)
     {
         var due = board.Pending.Where(p => p.ResolvesQuarter == currentQuarter).ToList();
         var stillPending = board.Pending.Where(p => p.ResolvesQuarter != currentQuarter).ToList();
@@ -51,6 +68,9 @@ public static class LandingRightsResolver
         {
             var city = group.First().TargetCity;
             var remainingSlots = board.SlotsRemaining(city);
+            var idleExpiredHolders = routesByAirline is null
+                ? Array.Empty<string>()
+                : board.IdleExpiredHolders(city, routesByAirline);
 
             var ranked = group
                 .Select(p => (Pending: p, Score: p.Bid.Cents * board.GetStanding(p.Airline, city)))
@@ -61,12 +81,21 @@ public static class LandingRightsResolver
             for (var i = 0; i < ranked.Count; i++)
             {
                 var pending = ranked[i].Pending;
-                var won = i < remainingSlots;
+                var wonFreshGrant = i < remainingSlots;
+                var wonTransfer = !wonFreshGrant && i < remainingSlots + idleExpiredHolders.Count;
+                var won = wonFreshGrant || wonTransfer;
                 var key = (pending.Airline.Name, city.Id);
 
-                if (won)
+                if (wonFreshGrant)
                 {
                     slots[city.Id] = slots.GetValueOrDefault(city.Id) + 1;
+                    slotsHeld[key] = slotsHeld.GetValueOrDefault(key) + 1;
+                }
+                else if (wonTransfer)
+                {
+                    var fromHolder = idleExpiredHolders[i - remainingSlots];
+                    var fromKey = (fromHolder, city.Id);
+                    slotsHeld[fromKey] = slotsHeld.GetValueOrDefault(fromKey) - 1;
                     slotsHeld[key] = slotsHeld.GetValueOrDefault(key) + 1;
                 }
                 else

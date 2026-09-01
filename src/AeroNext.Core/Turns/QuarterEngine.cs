@@ -125,6 +125,25 @@ public static class QuarterEngine
     /// receive today, the same reason those other rejections aren't
     /// broken out either.
     /// </param>
+    /// <param name="cityWideSlotsRemaining">
+    /// Null (the default) preserves fully permissive behavior — a
+    /// RouteOrder is never rejected for a non-gateway city's own capacity,
+    /// exactly as before this parameter existed (and City.AutoCapacity has
+    /// never had any mechanical effect until now). Passing a real
+    /// per-city balance (each capacity-modeled non-gateway city's
+    /// AutoCapacity minus every airline's current AircraftCount there
+    /// combined — see AiToolkit.ComputeCityWideSlotsRemaining) turns on
+    /// M45's automatic capacity enforcement: a RouteOrder touching a city
+    /// with a non-null AutoCapacity is rejected if this balance is spent,
+    /// checked independently at both Origin and Destination, same shape
+    /// as the existing gateway check. Unlike availableSlotsByCity, this
+    /// balance is shared across every airline (no per-airline ownership
+    /// exists for AutoCapacity), so the caller is responsible for
+    /// recomputing it fresh before each airline's own call within a
+    /// quarter, from that airline's actually-updated route state —
+    /// otherwise multiple airlines could each independently see spare
+    /// room and collectively overshoot a hard cap.
+    /// </param>
     public static QuarterResult RunQuarter(
         int quarterNumber,
         IReadOnlyList<Route> currentRoutes,
@@ -136,7 +155,8 @@ public static class QuarterEngine
         Money? availableCash = null,
         IReadOnlyDictionary<string, int>? availableSlotsByCity = null,
         Money? currentDebtBalance = null,
-        City? homeCity = null)
+        City? homeCity = null,
+        IReadOnlyDictionary<string, int>? cityWideSlotsRemaining = null)
     {
         var validOriginCityIds = homeCity is null
             ? null
@@ -151,6 +171,7 @@ public static class QuarterEngine
         var spent = 0;
         var cashSpent = Money.Zero;
         var slotsSpentByCity = new Dictionary<string, int>();
+        var autoSlotsSpentByCity = new Dictionary<string, int>();
         var debtPaidDownSoFar = Money.Zero;
         var year = Timeline.YearForQuarter(quarterNumber);
         var workingFleet = fleet;
@@ -213,6 +234,18 @@ public static class QuarterEngine
                     availableSlotsByCity.GetValueOrDefault(city.Id) - slotsSpentByCity.GetValueOrDefault(city.Id) <= 0);
 
                 if (blockedAtAGateway)
+                {
+                    rejected.Add(order);
+                    continue;
+                }
+            }
+
+            if (order is RouteOrder autoSlotOrder && cityWideSlotsRemaining is not null)
+            {
+                var blockedAtCapacity = AutoCapacityEndpoints(autoSlotOrder).Any(city =>
+                    cityWideSlotsRemaining.GetValueOrDefault(city.Id) - autoSlotsSpentByCity.GetValueOrDefault(city.Id) <= 0);
+
+                if (blockedAtCapacity)
                 {
                     rejected.Add(order);
                     continue;
@@ -374,6 +407,14 @@ public static class QuarterEngine
                 }
             }
 
+            if (order is RouteOrder appliedAutoSlotOrder && cityWideSlotsRemaining is not null)
+            {
+                foreach (var city in AutoCapacityEndpoints(appliedAutoSlotOrder))
+                {
+                    autoSlotsSpentByCity[city.Id] = autoSlotsSpentByCity.GetValueOrDefault(city.Id) + 1;
+                }
+            }
+
             if (order is RelinquishSlotOrder appliedRelinquishOrder && availableSlotsByCity is not null)
             {
                 slotsSpentByCity[appliedRelinquishOrder.TargetCity.Id] = slotsSpentByCity.GetValueOrDefault(appliedRelinquishOrder.TargetCity.Id) + 1;
@@ -506,6 +547,10 @@ public static class QuarterEngine
     /// <summary>Which of a RouteOrder's two endpoints actually have gate scarcity modeled (M33) — a route occupies a slot at each one it touches.</summary>
     private static IEnumerable<City> GatewayEndpoints(RouteOrder order) =>
         new[] { order.Origin, order.Destination }.Where(c => c.GateCapacity is not null);
+
+    /// <summary>M45: the AutoCapacity-modeled sibling of GatewayEndpoints — mutually exclusive per-city, never both non-null.</summary>
+    private static IEnumerable<City> AutoCapacityEndpoints(RouteOrder order) =>
+        new[] { order.Origin, order.Destination }.Where(c => c.AutoCapacity is not null);
 
     private static bool IsAircraftAvailable(QuarterOrder order, int year) => order switch
     {

@@ -36,6 +36,17 @@ namespace AeroNext.Core.Ai;
 /// order that would predictably be rejected, the same "never attempt
 /// what will fail" principle every other StrategyContext field already
 /// serves.
+///
+/// M45: two more nullable/permissive-default fields, mirroring
+/// AvailableSlotsByCity's own convention. CityWideSlotsRemaining is the
+/// ownerless, shared capacity balance for non-gateway AutoCapacity
+/// cities (see AiToolkit.ComputeCityWideSlotsRemaining) — the same value
+/// for every airline asking, unlike AvailableSlotsByCity's per-airline
+/// balance. IdleContestableSlotsByCity surfaces gateways with idle,
+/// unused slots another airline has held past LandingRightsBoard's
+/// IdleExpiryThreshold, so AI strategies can actually reach the new
+/// idle-then-recontestable mechanic (see AiToolkit.FindBestIdleContestableGateway)
+/// rather than it only being reachable by a human player bidding by hand.
 /// </summary>
 public sealed record StrategyContext(
     IReadOnlyList<Route> CurrentRoutes,
@@ -49,4 +60,6 @@ public sealed record StrategyContext(
     IReadOnlyDictionary<string, int>? AvailableSlotsByCity = null,
     Money? AvailableCash = null,
     Money? CurrentDebtBalance = null,
-    IReadOnlySet<string>? PendingNegotiationCityIds = null);
+    IReadOnlySet<string>? PendingNegotiationCityIds = null,
+    IReadOnlyDictionary<string, int>? CityWideSlotsRemaining = null,
+    IReadOnlyDictionary<string, int>? IdleContestableSlotsByCity = null);

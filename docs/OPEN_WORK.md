@@ -18,8 +18,8 @@ Compiled 2026-08-31, cross-referencing every `docs/*_ROADMAP.md`'s own
 writing: M0–M14 (`SIM_CORE_ROADMAP.md`), M15–M19 (`GAME_SETUP_ROADMAP.md`),
 M20–M22 (`HISTORICAL_DYNAMICS_ROADMAP.md`), M23–M24
 (`WIN_CONDITIONS_ROADMAP.md`), M25–M30/M34 (`FINANCIAL_MODEL_ROADMAP.md`,
-M31 retired), M31/M35–M44 (`BASELINE_AI_ROADMAP.md`), M32–M33
-(`ROUTE_CAPACITY_ROADMAP.md`). M44 is the current highest issued number.
+M31 retired), M31/M35–M44 (`BASELINE_AI_ROADMAP.md`), M32–M33/M45
+(`ROUTE_CAPACITY_ROADMAP.md`). M45 is the current highest issued number.
 Update this line the moment a new milestone is opened anywhere.
 
 ---
@@ -41,6 +41,23 @@ in the other direction (45.6%→4.2% win share, 17.3%→88.2% bankrupt).
 Flagged plainly as a strikingly lopsided result, not smoothed over —
 whether it's an acceptable consequence of today's real, uneven city
 density per region, or the next thing to investigate, is open.
+
+**A fourth round shipped since, directly relevant here.**
+`docs/ROUTE_CAPACITY_ROADMAP.md`'s M45 (universal slot capacity + idle
+recontestability, requested directly by the user) measured a large
+further move on the *same* 300-seed sweep: overall win rate **83.3%
+(M44) → 36.3%**. Isolated by ablation (both mechanisms toggled off one
+at a time, then together): AutoCapacity alone drops it to 56.7%,
+idle-recontest alone to 74.7%, both together to 36.3% — a real
+compounding interaction, not two additive effects. Bankruptcy moved in
+*both* directions by region (EastAsia sharply worse, AustralAsia and
+SouthAmerica both improved), but win share collapsed almost everywhere —
+the win condition got harder to satisfy for anyone, not a mechanical
+transfer to NorthAmerica. Full region-by-region table and the ablation
+methodology are in M45's own write-up. Reinforces, rather than
+supersedes, the standing conclusion below: `BaselineAi`/successor
+strategies need a real rework before the cumulative effect of these
+individually-correct scarcity mechanics can be fairly judged.
 
 Three items found during these investigations, deliberately deferred
 rather than folded in — all filed under `BASELINE_AI_ROADMAP.md`'s own
@@ -69,13 +86,15 @@ AI strategy/network-topology behavior, not starting conditions.
 - **AI differentiation** — the 4 airlines have differentiated starting
   conditions since M15–M19, but nothing beyond M39–M41's region-aware
   strategies makes them play differently by home region's own character.
-- **Route-entry slot requirement** — still open. `QuarterEngine` still
-  never checks landing-rights ownership against a plain `RouteOrder`
-  itself (only `NegotiationOrder` touches `LandingRightsBoard`; M33's
-  `HasSlotAtEveryGateway` is only ever a self-check each AI strategy
-  opts into, not an enforced rejection every caller is bound by). The
-  network-contiguity half of this same original item is done —
-  `docs/BASELINE_AI_ROADMAP.md`'s M44.
+- **Route-entry slot requirement** — done. Both halves closed:
+  network-contiguity via `docs/BASELINE_AI_ROADMAP.md`'s M44, and
+  universal slot capacity (every city, not just the 15 gateways, plus
+  idle-slot recontestability) via `docs/ROUTE_CAPACITY_ROADMAP.md`'s
+  M45. (This bullet previously claimed `QuarterEngine` never enforced
+  gateway slot ownership against a plain `RouteOrder` — that was already
+  stale/incorrect even before M45: M33 wired real engine-level rejection,
+  not just an AI self-check, confirmed directly in `QuarterEngine.RunQuarter`'s
+  own `availableSlotsByCity` parameter.)
 - **Gateway home-city exception** — every region's gateway sits inside
   the ordinary M9 contested mechanic, including for the local airline.
   Revisit only with real evidence this makes early gateway negotiation
@@ -93,7 +112,12 @@ AI strategy/network-topology behavior, not starting conditions.
   (M34).
 - **Interest rate doesn't scale with leverage** — fixed 2% regardless of
   debt carried.
-- **No ongoing gate-holding cost** — a won slot is free to hold forever.
+- ~~**No ongoing gate-holding cost**~~ — closed by
+  `docs/ROUTE_CAPACITY_ROADMAP.md`'s M45: a gateway slot left unused 4
+  consecutive quarters becomes contestable by another airline (the
+  original owner keeps using it freely until someone else actually wins
+  it away). Non-gateway `AutoCapacity` cities were never owned in the
+  first place, so this never applied there.
 - **Age-based aircraft depreciation** — flat resale fraction regardless
   of age, deliberately simple until fleet age is tracked for other
   reasons.
