@@ -723,4 +723,78 @@ public class LandingRightsResolverTests
         Assert.False(outcomes.Single(o => o.Airline.Name == "Loser").Won);
         Assert.Equal(1, resolvedBoard.SlotsHeldBy(winner, city));
     }
+
+    // --- M46: SlotsRemaining/ResolveQuarter's capacity-bonus parameter ---
+
+    [Fact]
+    public void SlotsRemaining_NoBonusPassed_UnchangedFromBaseGateCapacity()
+    {
+        var city = MakeCity("gate", gateCapacity: 2);
+        var board = LandingRightsBoard.Empty;
+
+        Assert.Equal(2, board.SlotsRemaining(city));
+    }
+
+    [Fact]
+    public void SlotsRemaining_WithCapacityBonus_AddsOnTopOfGateCapacity()
+    {
+        var city = MakeCity("gate", gateCapacity: 2);
+        var board = LandingRightsBoard.Empty;
+
+        Assert.Equal(5, board.SlotsRemaining(city, capacityBonus: 3));
+    }
+
+    [Fact]
+    public void SlotsRemaining_CapacityBonus_SubtractsAlreadyGrantedTheSameAsBase()
+    {
+        var city = MakeCity("gate", gateCapacity: 2);
+        var board = LandingRightsBoard.Empty with { SlotsGranted = new Dictionary<string, int> { ["gate"] = 2 } };
+
+        Assert.Equal(3, board.SlotsRemaining(city, capacityBonus: 3));
+    }
+
+    [Fact]
+    public void SlotsRemaining_NonGatewayCity_BonusNeverGivesItArtificialCapacity()
+    {
+        var city = new City("plain", "Plain", Region.EastAsia, 0, 0, 50, IsGateway: false, GateCapacity: null);
+        var board = LandingRightsBoard.Empty;
+
+        Assert.Equal(int.MaxValue, board.SlotsRemaining(city, capacityBonus: 3));
+    }
+
+    [Fact]
+    public void ResolveQuarter_NullCapacityBonusByCity_PreservesPreExistingBehavior()
+    {
+        var city = MakeCity("gate", gateCapacity: 1);
+        var a = MakeAirline("A");
+        var board = LandingRightsBoard.Empty with
+        {
+            Pending = new[] { new PendingNegotiation(a, city, Money.FromDollars(1_000_000), 1, 3) },
+        };
+
+        var (_, outcomes) = LandingRightsResolver.ResolveQuarter(board, currentQuarter: 3, capacityBonusByCity: null);
+
+        Assert.True(outcomes.Single().Won);
+    }
+
+    [Fact]
+    public void ResolveQuarter_CapacityBonus_LetsASecondSuitorWin_WhereBaseCapacityWouldHaveRejected()
+    {
+        var city = MakeCity("gate", gateCapacity: 1); // base capacity 1 - only one bidder could normally win
+        var a = MakeAirline("A");
+        var b = MakeAirline("B");
+        var board = LandingRightsBoard.Empty with
+        {
+            Pending = new[]
+            {
+                new PendingNegotiation(a, city, Money.FromDollars(1_000_000), 1, 3),
+                new PendingNegotiation(b, city, Money.FromDollars(900_000), 1, 3),
+            },
+        };
+        var capacityBonusByCity = new Dictionary<string, int> { ["gate"] = 1 }; // +1 earned via expansion
+
+        var (_, outcomes) = LandingRightsResolver.ResolveQuarter(board, currentQuarter: 3, capacityBonusByCity: capacityBonusByCity);
+
+        Assert.Equal(2, outcomes.Count(o => o.Won));
+    }
 }

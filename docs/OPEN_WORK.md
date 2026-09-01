@@ -18,8 +18,8 @@ Compiled 2026-08-31, cross-referencing every `docs/*_ROADMAP.md`'s own
 writing: M0–M14 (`SIM_CORE_ROADMAP.md`), M15–M19 (`GAME_SETUP_ROADMAP.md`),
 M20–M22 (`HISTORICAL_DYNAMICS_ROADMAP.md`), M23–M24
 (`WIN_CONDITIONS_ROADMAP.md`), M25–M30/M34 (`FINANCIAL_MODEL_ROADMAP.md`,
-M31 retired), M31/M35–M44 (`BASELINE_AI_ROADMAP.md`), M32–M33/M45
-(`ROUTE_CAPACITY_ROADMAP.md`). M45 is the current highest issued number.
+M31 retired), M31/M35–M44 (`BASELINE_AI_ROADMAP.md`), M32–M33/M45–M46
+(`ROUTE_CAPACITY_ROADMAP.md`). M46 is the current highest issued number.
 Update this line the moment a new milestone is opened anywhere.
 
 ---
@@ -58,6 +58,22 @@ methodology are in M45's own write-up. Reinforces, rather than
 supersedes, the standing conclusion below: `BaselineAi`/successor
 strategies need a real rework before the cumulative effect of these
 individually-correct scarcity mechanics can be fairly judged.
+
+**A fifth round since, testing the opposite direction.** M46 (periodic,
+demand-driven slot-capacity expansion, requested directly by the user) let
+capacity *grow* over the campaign instead of staying fixed — the
+hypothesis going in was that this might recover some of M45's own
+win-rate drop. It didn't: overall win rate barely moved (36.3%→38.7%),
+and bankruptcy rose in *every* region (NorthAmerica 8.4%→27.0% the
+sharpest). Same mechanism-grounded read as the standing conclusion, from
+the opposite direction this time: more room to grow reads to
+`BaselineAi`/successor strategies as more legal room to keep piling on
+leased aircraft and debt, since none of them judge profitability, only
+legality. Full numbers and the ablation confirming the effect (M46
+disabled reproduces M45's exact recorded baseline) are in M46's own
+write-up. `ExpansionPeriodQuarters`/`GrowthIncrementFraction` are both
+marked tunable in code if the growth rate itself turns out to be the
+lever worth pulling, rather than the AI.
 
 Three items found during these investigations, deliberately deferred
 rather than folded in — all filed under `BASELINE_AI_ROADMAP.md`'s own
@@ -153,12 +169,12 @@ AI strategy/network-topology behavior, not starting conditions.
   re-tuning check (both constants were reaffirmed, not revised).
 
 ### `HISTORICAL_DYNAMICS_ROADMAP.md`
-- **Gate capacity / gateway status changing over time** — an airport's
-  physical capacity growing via terminal expansions, or a city that
-  wasn't a gateway in 1955 becoming one later. Structurally bigger than a
-  demand schedule: a new M9 contested asset appearing mid-campaign,
-  touching `LandingRightsBoard` and M15's eligible-city logic. A natural
-  follow-on, not part of that roadmap.
+- **Gate capacity growing over time** — done, via
+  `docs/ROUTE_CAPACITY_ROADMAP.md`'s M46. **A city that wasn't a gateway
+  in 1955 becoming one later** remains open — a different, harder
+  problem M46 explicitly didn't attempt: a new M9 contested asset
+  appearing mid-campaign, touching `LandingRightsBoard` and M15's
+  eligible-city logic.
 - **AI awareness of historical trends** — `BaselineAi`/successor
   strategies already react to current-quarter demand, so a city with a
   real growth trajectory naturally looks more attractive once its weight

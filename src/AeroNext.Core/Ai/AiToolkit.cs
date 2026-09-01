@@ -221,8 +221,14 @@ public static class AiToolkit
     /// collectively overshoot a hard cap - see QuarterEngine's own
     /// cityWideSlotsRemaining doc comment.
     /// </summary>
+    /// <param name="capacityBonusByCity">
+    /// M46: extra slots each city has earned via periodic, demand-driven
+    /// expansion (see CityCapacityBoard) — null (the default) preserves
+    /// every pre-existing caller's exact behavior.
+    /// </param>
     public static IReadOnlyDictionary<string, int> ComputeCityWideSlotsRemaining(
-        IReadOnlyDictionary<string, IReadOnlyList<Route>> routesByAirline, IReadOnlyList<City> cities)
+        IReadOnlyDictionary<string, IReadOnlyList<Route>> routesByAirline, IReadOnlyList<City> cities,
+        IReadOnlyDictionary<string, int>? capacityBonusByCity = null)
     {
         var used = new Dictionary<string, int>(StringComparer.Ordinal);
 
@@ -237,7 +243,10 @@ public static class AiToolkit
 
         return cities
             .Where(c => c.AutoCapacity is not null)
-            .ToDictionary(c => c.Id, c => Math.Max(0, c.AutoCapacity!.Value - used.GetValueOrDefault(c.Id)), StringComparer.Ordinal);
+            .ToDictionary(
+                c => c.Id,
+                c => Math.Max(0, c.AutoCapacity!.Value + (capacityBonusByCity?.GetValueOrDefault(c.Id) ?? 0) - used.GetValueOrDefault(c.Id)),
+                StringComparer.Ordinal);
     }
 
     /// <summary>

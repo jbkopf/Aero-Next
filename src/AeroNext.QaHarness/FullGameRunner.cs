@@ -90,6 +90,10 @@ public static class FullGameRunner
         var aircraftOrderBoard = AircraftOrderBoard.Empty; // shared across all 4 airlines - the production line is genuinely contested
 
         var landingBoard = LandingRightsBoard.Empty;
+        // M46: each city's own 1955 total demand becomes the fixed
+        // reference point periodic expansion measures growth against -
+        // computed once, here, before any quarter runs.
+        var capacityBoard = CityCapacityBoard.Initialize(cities, new GravityDemandModel(schedule: growthSchedule, year: Timeline.StartYear));
         var dominanceState = RegionalDominanceState.Empty;
         string? winner = null;
         int? winQuarter = null;
@@ -123,6 +127,13 @@ public static class FullGameRunner
             var routesAtQuarterStart = names.ToDictionary(n => n, n => routes[n]);
             var capsAtQuarterStart = names.ToDictionary(n => n, n => caps[n]);
 
+            // M46: re-evaluated on its own fixed periodic cadence
+            // (a no-op most quarters) - depends only on demand, not on
+            // any order placed this quarter, so it's resolved before the
+            // per-airline loop and is visible to every airline's own
+            // decisions the same quarter it lands.
+            capacityBoard = capacityBoard.AdvanceQuarter(q, cities, yearDemandModel);
+
             // M45: which gateways currently carry idle-expired, contestable
             // inventory - computed once per quarter from state entering it
             // (last quarter's own AdvanceIdleTracking call, below), so
@@ -153,7 +164,7 @@ public static class FullGameRunner
                 // never be independently overshot by two airlines both
                 // seeing spare room (see QuarterEngine's own
                 // cityWideSlotsRemaining doc comment).
-                var cityWideSlotsRemaining = AiToolkit.ComputeCityWideSlotsRemaining(routes, cities);
+                var cityWideSlotsRemaining = AiToolkit.ComputeCityWideSlotsRemaining(routes, cities, capacityBoard.CapacityBonusByCity);
 
                 IReadOnlyList<QuarterOrder> orders;
                 if (q == 1)
@@ -255,7 +266,7 @@ public static class FullGameRunner
             // challenger due to resolve this same quarter can already see
             // inventory that just crossed IdleExpiryThreshold.
             landingBoard = landingBoard.AdvanceIdleTracking(routes);
-            (landingBoard, _) = LandingRightsResolver.ResolveQuarter(landingBoard, q, routes);
+            (landingBoard, _) = LandingRightsResolver.ResolveQuarter(landingBoard, q, routes, capacityBoard.CapacityBonusByCity);
 
             var league = seats.Select(s => new Airline(s.AirlineName, routes[s.AirlineName])).ToArray();
             var market = CompetitiveMarket.Resolve(league, cities, yearDemandModel);

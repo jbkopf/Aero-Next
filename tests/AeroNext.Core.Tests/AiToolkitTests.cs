@@ -77,6 +77,29 @@ public class AiToolkitTests
         Assert.False(result.ContainsKey("pl"));
     }
 
+    [Fact]
+    public void ComputeCityWideSlotsRemaining_NullCapacityBonus_PreservesPreExistingBehavior()
+    {
+        var busy = MakeCity("bz", Region.NorthAmerica, 0, 0, 50, autoCapacity: 3);
+        var routesByAirline = new System.Collections.Generic.Dictionary<string, IReadOnlyList<Route>> { ["A"] = Array.Empty<Route>() };
+
+        var result = AiToolkit.ComputeCityWideSlotsRemaining(routesByAirline, new[] { busy }, capacityBonusByCity: null);
+
+        Assert.Equal(3, result["bz"]);
+    }
+
+    [Fact]
+    public void ComputeCityWideSlotsRemaining_CapacityBonus_AddsOnTopOfAutoCapacity()
+    {
+        var busy = MakeCity("bz", Region.NorthAmerica, 0, 0, 50, autoCapacity: 3);
+        var routesByAirline = new System.Collections.Generic.Dictionary<string, IReadOnlyList<Route>> { ["A"] = Array.Empty<Route>() };
+        var bonus = new System.Collections.Generic.Dictionary<string, int> { ["bz"] = 2 };
+
+        var result = AiToolkit.ComputeCityWideSlotsRemaining(routesByAirline, new[] { busy }, capacityBonusByCity: bonus);
+
+        Assert.Equal(5, result["bz"]);
+    }
+
     // --- HasRoomAtEveryCity ---
 
     [Fact]

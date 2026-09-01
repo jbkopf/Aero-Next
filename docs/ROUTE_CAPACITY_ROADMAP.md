@@ -443,3 +443,121 @@ AI's own reachability of the win condition. `BaselineAi`/successor
 strategies needing a real rework before the *cumulative* effect of
 M26/M32/M33/M45's mechanics can be fairly judged on campaign feel remains
 the standing conclusion, now with one more compounding data point.
+
+---
+
+## M46 — Periodic, demand-driven slot-capacity expansion ✅
+
+**Origin:** the user asked directly for cities to gain slots over the
+campaign as demand grows, on a fixed periodic cadence — modeling real
+airport terminal/runway expansion (discrete, infrequent projects, not a
+continuous dial). This is the exact gap `docs/HISTORICAL_DYNAMICS_ROADMAP.md`'s
+own "Kept in mind" section already named: "Gate capacity... growing via
+terminal expansions... structurally bigger than a demand-weight
+schedule... touches `LandingRightsBoard`." That same bullet also names a
+*different*, harder problem — "a city that wasn't a gateway becoming one
+later" — which this milestone deliberately does not attempt; M46 is only
+about each city's own *existing* capacity field (`GateCapacity` or M45's
+`AutoCapacity`) growing in place.
+
+**Both mechanisms grow, gateway and `AutoCapacity` alike** — one shared
+formula, not two, since growth is a passive, ownerless fact about the
+city itself, upstream of however its capacity then gets allocated (unlike
+M45's own gating mechanisms, there's no Market-vs-Contested distinction
+to preserve here).
+
+**New `CityCapacityBoard`** (`src/AeroNext.Core/Negotiations/CityCapacityBoard.cs`) —
+a separate board from `LandingRightsBoard` rather than a field folded
+into it, since it applies to every city, not just the 15 negotiated
+gateways. `Initialize(cities, campaignStartDemandModel)` computes each
+city's total demand (every `PairDemand.PassengersPerQuarter` touching it,
+via `GravityDemandModel.AllPairs`) once, at quarter 1/year 1955 — the
+fixed reference point every later check measures growth against.
+`AdvanceQuarter(quarterNumber, cities, demandModel)` is a no-op unless
+`quarterNumber % ExpansionPeriodQuarters == 0` (20 quarters = 5 years,
+`(Proposed, tunable)`); on a check quarter, each city's bonus becomes
+`Max(existingBonus, floor(max(0, currentDemand - baseline) / (baseline * GrowthIncrementFraction)))`
+— `GrowthIncrementFraction = 0.5` (`(Proposed, tunable)`: every +50% of
+cumulative growth over the 1955 baseline earns one more slot). Pure
+function of (fixed baseline, current demand, previous bonus) — no
+"demand at last check" to drift if a check is ever skipped — and a
+ratchet (`Max` with the existing bonus): a later demand dip from a
+reverting shock event never un-builds a terminal already earned. No cap
+on total bonus, matching CLAUDE.md's own "chokepoints obsolete as range
+improves" precedent for scarcity fading late-campaign.
+
+**Consumed via two small optional parameters on paths that already read
+capacity:** `LandingRightsBoard.SlotsRemaining(city, capacityBonus = 0)`
+adds the bonus onto `GateCapacity` before subtracting what's granted;
+`LandingRightsResolver.ResolveQuarter` and `AiToolkit.ComputeCityWideSlotsRemaining`
+each gained a matching optional `capacityBonusByCity` dictionary
+parameter, null-permissive by default, threaded straight through.
+`FullGameRunner.cs` initializes the board once before its quarter loop
+and calls `AdvanceQuarter` at the *start* of each quarter (unlike M45's
+`AdvanceIdleTracking`, which must run at quarter-*end* to see that
+quarter's own route changes first, expansion depends only on demand, so
+resolving it early makes a check quarter's new capacity visible to every
+airline's own decisions that same quarter) — the only real loop wired
+end to end, matching M33/M45's own precedent of leaving `AeroNext.Sim`'s
+M13 loop permissive.
+
+**Deliberately out of scope:** briefing/exception-queue surfacing of a
+capacity-expansion event — `BriefingGenerator.Generate` operates on one
+airline's own `QuarterResult`, with no natural home for a world-level
+event, the same kind of gap `docs/WIN_CONDITIONS_ROADMAP.md`'s own "Kept
+in mind" already accepts for win-streak progress.
+
+**Done when:** every pre-existing call site's default/null behavior is
+unchanged (confirmed: the full pre-existing suite passed unmodified);
+dedicated tests cover `Initialize`'s baseline computation, `AdvanceQuarter`'s
+no-op off-cadence, the earned-bonus formula at/below/above the growth
+threshold, the ratchet, a zero-baseline city never dividing by zero, and
+cities evaluated independently of each other; `SlotsRemaining`/`ResolveQuarter`/
+`ComputeCityWideSlotsRemaining` each tested with and without a bonus.
+
+Done. 672 tests total (19 new — 11 `CityCapacityBoard` (new file), 6
+`LandingRightsBoard`/`Resolver`, 2 `AiToolkit`). 100% line/branch coverage
+on every touched/new class (`CityCapacityBoard`, `LandingRightsBoard`,
+`LandingRightsResolver`); `AiToolkit`'s own gaps are pre-existing and
+already documented (M44's `TryOrientFromValidOrigin`), confirmed
+untouched by this milestone via `git diff`. Overall project coverage
+99.77%/99.44%. 300-game QA harness sweep at 244 quarters: 300/300 clean,
+0 invariant violations, 0 crashes.
+
+**Measured, ablation-isolated — capacity growth did not recover M45's
+own win-rate drop, and made bankruptcy worse almost everywhere.** Overall
+win rate **36.3% (M45) → 38.7%** (116/300, avg quarter 20.9 → 23.0) — a
+small move, not the meaningful recovery the plan's own verification step
+floated as a hypothesis to test, not assume (and it didn't hold).
+Region-by-region (bankrupt, M45 → M46): NorthAmerica **8.4% → 27.0%**,
+Europe 85.8% → 99.0%, EastAsia 59.7% → 61.4%, SouthWestAsia 22.9% →
+36.2%, AustralAsia 33.0% → 68.0%, SouthAmerica 66.7% → 92.0% — every
+single region's bankruptcy rate rose. Win share barely moved (NorthAmerica
+83.5% → 84.5%, SouthWestAsia 16.5% → 15.5%, everyone else still 0%).
+Isolated by ablation (`AdvanceQuarter`'s own call temporarily commented
+out in `FullGameRunner.cs`, reverted before shipping, same
+instrument-then-revert discipline as every prior milestone here): with
+M46 disabled, the sweep reproduces M45's exact recorded numbers, byte for
+byte (109/300, avg 20.9, identical region table) — confirms the effect is
+real and correctly isolated, not sampling noise.
+
+**A plausible, mechanism-grounded read, not asserted as certain:**
+by 2015 the global demand trend alone reaches 4.5x its 1955 level
+(`data/demand_growth.json`), which under `GrowthIncrementFraction = 0.5`
+earns roughly +7 bonus slots almost everywhere from the global curve
+alone, before any city/region-specific event on top — a large loosening
+against gateways that start at 2-3 slots and `AutoCapacity` cities that
+start at 1-4. The room this opens up doesn't sit idle: `BaselineAi`
+successor strategies have no real profitability judgment (the standing
+conclusion from M32/M33/M45 alike) — they grow whenever legally
+possible, so a growing ceiling reads as more legal room to keep piling on
+leased aircraft and debt into cities whose *demand* growth doesn't
+actually translate into *profit* growth at the same rate. The same
+"legitimate, individually-correct mechanic makes this un-tuned heuristic
+AI's trajectory worse" pattern as M26/M32/M33/M45, from the opposite
+direction this time — less scarcity, not more, still hurts it. Whether
+`ExpansionPeriodQuarters`/`GrowthIncrementFraction` should be tuned
+slower, or whether this is squarely `BaselineAi`'s own reachability
+problem regardless of the specific numbers, is a call for the user, not
+decided here — both constants are marked `(Proposed, tunable)` in code
+precisely so this can be revisited without a structural change.

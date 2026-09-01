@@ -1537,17 +1537,16 @@ plainly there rather than silently worked around.
 
 ## Kept in mind, not scheduled
 
-- **Gate capacity / gateway status changing over time** — a real,
-  richer extension of the same idea (an airport's physical capacity
-  growing via terminal expansions, or a city that wasn't a gateway at all
-  in 1955 becoming one later) that this roadmap deliberately doesn't
-  attempt. It's structurally bigger than a demand-weight schedule: a city
-  gaining gateway status mid-campaign means a brand-new M9 contested asset
-  appearing out of nowhere, which touches `LandingRightsBoard`,
-  `RegionalFleet`'s eligible-starting-city logic (M15), and probably the
-  "route entry requires a held slot" design note already recorded in
-  `docs/GAME_SETUP_ROADMAP.md`'s "Kept in mind" section — a natural
-  follow-on to this roadmap, not a part of it.
+- **Gate capacity growing over time** — done, via
+  `docs/ROUTE_CAPACITY_ROADMAP.md`'s M46 (periodic, demand-driven slot
+  expansion), a natural follow-on to this roadmap rather than a part of
+  it. **A city that wasn't a gateway at all in 1955 becoming one later**
+  is a real, *different*, harder problem M46 explicitly didn't attempt —
+  still open: a brand-new M9 contested asset appearing out of nowhere
+  mid-campaign, which would touch `LandingRightsBoard`, `RegionalFleet`'s
+  eligible-starting-city logic (M15), and the same "route entry requires
+  a held slot" design note `docs/GAME_SETUP_ROADMAP.md`'s own "Kept in
+  mind" section already recorded (also since closed, by M45).
 - **`RegionalEconomics.Factor` staying time-independent — deliberately,
   not an oversight.** It's only ever evaluated once, at campaign setup
   (year 1955, via `StartingConditionsResolver`), to derive starting cash.

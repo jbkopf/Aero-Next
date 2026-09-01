@@ -53,8 +53,15 @@ public static class LandingRightsResolver
     /// else actually wins it away, per CLAUDE.md's own contested-action
     /// rules applied to this new inventory too.
     /// </param>
+    /// <param name="capacityBonusByCity">
+    /// M46: extra slots each city has earned via periodic, demand-driven
+    /// expansion (see <see cref="CityCapacityBoard"/>) — null (the
+    /// default) preserves every pre-existing call site's exact behavior.
+    /// Threaded straight into <see cref="LandingRightsBoard.SlotsRemaining"/>.
+    /// </param>
     public static (LandingRightsBoard Board, IReadOnlyList<NegotiationOutcome> Outcomes) ResolveQuarter(
-        LandingRightsBoard board, int currentQuarter, IReadOnlyDictionary<string, IReadOnlyList<Route>>? routesByAirline = null)
+        LandingRightsBoard board, int currentQuarter, IReadOnlyDictionary<string, IReadOnlyList<Route>>? routesByAirline = null,
+        IReadOnlyDictionary<string, int>? capacityBonusByCity = null)
     {
         var due = board.Pending.Where(p => p.ResolvesQuarter == currentQuarter).ToList();
         var stillPending = board.Pending.Where(p => p.ResolvesQuarter != currentQuarter).ToList();
@@ -67,7 +74,7 @@ public static class LandingRightsResolver
         foreach (var group in due.GroupBy(p => p.TargetCity.Id).OrderBy(g => g.Key, StringComparer.Ordinal))
         {
             var city = group.First().TargetCity;
-            var remainingSlots = board.SlotsRemaining(city);
+            var remainingSlots = board.SlotsRemaining(city, capacityBonusByCity?.GetValueOrDefault(city.Id) ?? 0);
             var idleExpiredHolders = routesByAirline is null
                 ? Array.Empty<string>()
                 : board.IdleExpiredHolders(city, routesByAirline);

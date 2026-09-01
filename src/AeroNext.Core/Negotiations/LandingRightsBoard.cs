@@ -34,7 +34,15 @@ public sealed record LandingRightsBoard(
 
     public double GetStanding(Airline airline, City city) => Standing.GetValueOrDefault((airline.Name, city.Id), BaselineStanding);
 
-    public int SlotsRemaining(City city) => Math.Max(0, (city.GateCapacity ?? int.MaxValue) - SlotsGranted.GetValueOrDefault(city.Id));
+    /// <param name="capacityBonus">
+    /// M46: extra slots this city has earned via periodic, demand-driven
+    /// expansion (see <see cref="CityCapacityBoard"/>) — 0 (the default)
+    /// preserves every pre-existing caller's exact behavior. Added
+    /// directly on top of GateCapacity before subtracting what's already
+    /// granted; a city with a null GateCapacity (never modeled as scarce)
+    /// stays at int.MaxValue regardless — a bonus has nothing to add to.
+    /// </param>
+    public int SlotsRemaining(City city, int capacityBonus = 0) => Math.Max(0, (city.GateCapacity is null ? int.MaxValue : city.GateCapacity.Value + capacityBonus) - SlotsGranted.GetValueOrDefault(city.Id));
 
     /// <summary>How many gate slots this specific airline has won at this city, across every negotiation it's ever won there.</summary>
     public int SlotsHeldBy(Airline airline, City city) => SlotsHeld.GetValueOrDefault((airline.Name, city.Id));
