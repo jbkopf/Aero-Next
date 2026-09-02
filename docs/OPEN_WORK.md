@@ -18,11 +18,12 @@ Compiled 2026-08-31, cross-referencing every `docs/*_ROADMAP.md`'s own
 writing: M0–M14 (`SIM_CORE_ROADMAP.md`), M15–M19 (`GAME_SETUP_ROADMAP.md`),
 M20–M22 (`HISTORICAL_DYNAMICS_ROADMAP.md`), M23–M24
 (`WIN_CONDITIONS_ROADMAP.md`), M25–M30/M34 (`FINANCIAL_MODEL_ROADMAP.md`,
-M31 retired), M31/M35–M44/M49–M56 (`BASELINE_AI_ROADMAP.md`), M32–M33/M45–M46
-(`ROUTE_CAPACITY_ROADMAP.md`), M47–M48 (`MARKETING_ROADMAP.md`). M56 is
-the current highest issued number, and shipped no code change — four
-route-opening-quality designs were tried and all reverted; see its own
-writeup. Update this line the moment a new milestone is opened anywhere.
+M31 retired), M31/M35–M44/M49–M57 (`BASELINE_AI_ROADMAP.md`), M32–M33/M45–M46
+(`ROUTE_CAPACITY_ROADMAP.md`), M47–M48 (`MARKETING_ROADMAP.md`). M57 is
+the current highest issued number. M56 shipped no code change (four
+route-opening-quality designs tried and reverted); M57 followed with a
+real, contained fix — see both writeups. Update this line the moment a
+new milestone is opened anywhere.
 
 ---
 
@@ -327,12 +328,21 @@ AI strategy/network-topology behavior, not starting conditions.
   as rewarding ever-smaller aircraft without bound — and this game's
   economy (action budget as the scarce resource, not capacity) punishes
   that hard. See `BASELINE_AI_ROADMAP.md`'s M56 for the full math and
-  all four measured regressions. Still filed for whoever attempts a
-  genuinely non-monotonic size-match objective next; `AiToolkit`'s own
+  all four measured regressions. **M57 built the non-monotonic
+  size-match objective M56 called for, scoped strictly to aircraft-type
+  selection for an already-chosen pair (never letting it influence which
+  pair wins)** — real, measured, no regression: SouthAmerica's own
+  bankruptcy rate improved 70.5%→58.6% with zero change elsewhere, but
+  the overall win rate stayed flat at 41.3%, so this is progress, not a
+  close. `DomesticProfitOptimizerStrategy`'s own pair *selection* is
+  still revenue-only and untouched; switching it to raw-demand ranking
+  (matching `RapidExpansionStrategy`'s own proven-safe metric) is the
+  real remaining candidate for whoever picks this up next, with its own
+  check-in first — see `BASELINE_AI_ROADMAP.md`'s M57. `AiToolkit`'s own
   removed `ClosureWouldSeverContiguity` and
   `AiRouteHistory.ConsecutiveUnprofitableQuarters` itself (still
   tracked, unconsumed) remain real starting points for reintroducing
-  closure once that prerequisite exists.
+  closure once route-opening quality is judged good enough.
 - **Europe's own idle-fleet stall under `DomesticProfitOptimizerStrategy`**
   — Europe remains the worst-performing region (86.3% bankrupt after
   M43+M44 both) throughout; root cause not yet isolated.

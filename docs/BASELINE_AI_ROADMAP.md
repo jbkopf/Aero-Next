@@ -1783,6 +1783,70 @@ rewarding minimal size on its own, likely non-monotonic (peaking near a
 target load factor rather than decreasing all the way down), which no
 design this round attempted.
 
+## M57 — DomesticProfitOptimizerStrategy: fix aircraft choice without touching which pair wins ✅
+
+**Origin:** the user's own direct follow-up right after M56's postmortem
+— "let's do another planning pass" on the same route-opening-quality
+problem, informed by what M56 established.
+
+**The real insight, re-derived rather than assumed:** for a *fixed* pair
+(fixed demand, fixed distance), `FareCalculator.EstimatedProfit` is
+genuinely single-peaked in aircraft capacity — strictly increasing while
+capacity ≤ demand (a bigger cabin dilutes the aircraft's own flat
+quarterly salary over more seats), then strictly decreasing once
+capacity exceeds it (unused capacity still costs full price), confirmed
+against a real throwaway calculation (12,194/quarter demand; profit
+peaks at $543k around a 40-seat aircraft, then collapses to -$15.6M by
+400 seats). The formula was never the problem. What doomed all four M56
+designs: every one compared that number **across different pairs**, and
+this game's era-available fleet is coarse and discrete (28 to 525 seats
+across ~30 types), so which pair happens to have an available type near
+its own peak is partly an accident of the catalog — a signal with no
+relationship to real market size, leaking straight into which pair got
+picked.
+
+**Shipped:** a strict two-phase split inside
+`FindMostProfitableDomesticPairAcrossTypes`. Phase 1 (which pair wins)
+is completely untouched — still today's `EstimatedRevenue` (renamed from
+its old, misleading name `EstimatedProfit`; it never subtracted cost),
+same ranking as M40. Phase 2, added on top, re-selects only the
+*aircraft type* for that one already-decided pair — maximizing real,
+cost-subtracted profit among the same candidate pool the pair search
+already had, filtered to what can reach that pair. That comparison never
+crosses pairs, so the catalog-accident risk can't reach pair selection
+at all; and unlike M56's floor design, it substitutes a better fit
+rather than rejecting outright, so there's no "opens nothing" failure
+mode — the substitute type is always guaranteed to exist, since Phase
+1's own winning aircraft is by construction a member of the filtered
+set. `RapidExpansionStrategy` stayed untouched (M55's trace: 13.1%
+bad-opens, not the dominant driver) — one isolated variable, unlike
+several M56 attempts that changed both strategies at once.
+
+**Measured: no regression, and a real, contained improvement — but the
+overall win-rate needle didn't move.** 300-game sweep: 41.3% (124/300,
+avg quarter 60.8), NorthAmerica 85.5% — bit-for-bit identical to M55's
+own baseline in every column except one: SouthAmerica's bankruptcy rate
+dropped from 70.5% (167/237, the exact number M56's own floor-ablation
+run reproduced against this same baseline) to **58.6%** (139/237), with
+zero new wins there and zero change anywhere else. Read plainly: Phase 2
+is genuinely firing and doing real, positive work — reducing wasted
+capacity on individual mis-sized SouthAmerica routes converts some
+bankruptcies into survivals — but it doesn't yet redirect overall
+strategy enough to produce new wins or move the aggregate win rate. A
+real win, honestly a modest one; M56's original 51.7%-bad-open figure
+was not independently re-measured this round (the 300-game sweep, not
+the `AiRouteHistory` trace, was this round's own real test per the
+plan).
+
+**What this doesn't close:** the "Kept in mind" item below (a
+non-monotonic size-match objective) is only partially addressed —
+within-pair aircraft fit, yes; the deferred Phase-1 raw-demand-ranking
+fallback from this round's own plan (matching `RapidExpansionStrategy`'s
+proven-safe metric) was never attempted, since Phase 2 alone didn't
+regress and there was no fresh evidence it was needed. Worth revisiting
+if a future round wants to chase the win-rate needle itself, with its
+own check-in first, per the plan's own scoping.
+
 ---
 
 ## Kept in mind, not scheduled
@@ -1840,6 +1904,19 @@ design this round attempted.
   poor size *match* in both directions, never rewarding minimal size for
   its own sake - which nothing tried in M56 attempted. See M56's own
   writeup above for the full math and all four measured regressions.
+  **M57 built exactly that non-monotonic objective and shipped it, but
+  scoped strictly to aircraft-*type* selection for an already-chosen
+  pair** - never letting it influence which pair wins, the mechanism
+  M56 found responsible for every regression. Real, measured, no
+  regression: SouthAmerica's own bankruptcy rate improved (70.5%→58.6%)
+  with zero change anywhere else in a real 300-game sweep - but the
+  overall win rate stayed flat at 41.3%, so this is progress, not a
+  close of the item. `DomesticProfitOptimizerStrategy`'s own pair
+  *selection* (Phase 1, still revenue-only) was deliberately left
+  untouched this round; switching it to raw-demand ranking (matching
+  `RapidExpansionStrategy`'s own proven-safe metric) is the real
+  remaining candidate, filed for a future round with its own check-in
+  first - see M57's own writeup above.
 - **Europe's own idle-fleet stall under `DomesticProfitOptimizerStrategy`**
   — flagged in M43, not yet root-caused. A natural next round in the
   regional-balance effort, alongside the thrash-cycle item above.

@@ -37,6 +37,36 @@ namespace AeroNext.Core.Ai;
 /// re-bidding the same top-ranked gateway every quarter — the same
 /// latent bug RapidExpansionStrategy was measurably losing real cash to;
 /// see AiToolkit.CitiesAlreadyPursuedForNegotiation.
+///
+/// M57 (docs/BASELINE_AI_ROADMAP.md): a real trace (M55) found this
+/// strategy alone sent 51.7% of its own opens into sustained real
+/// unprofitability — by far the dominant driver, well ahead of
+/// RapidExpansionStrategy's 13.1%. The mechanism: EstimatedRevenue
+/// (renamed this round from its old, misleading name EstimatedProfit —
+/// it never subtracted cost) has no capacity term, so a bigger aircraft
+/// than a pair's own demand needs never lowers the score, since carried
+/// is capped at demand either way. Four fixes were tried and reverted
+/// (ranking by real profit directly, by real captured demand, a minimal
+/// profitability floor, a load-factor-derated ranking — see M56) —
+/// every one let aircraft-fit quality influence *which pair* wins, and
+/// every one collapsed a real 300-game sweep, because this game's
+/// era-available fleet is coarse and discrete, so which pair happens to
+/// have an available type near its own best fit is partly an accident
+/// of the catalog, not a signal of real market size — comparing a
+/// fit-sensitive number *across pairs* leaks that accident into pair
+/// selection.
+///
+/// What ships now instead is two strictly separated phases: Phase 1
+/// (which pair wins) is completely unchanged — still EstimatedRevenue,
+/// still the same ranking as M40. Phase 2, added on top, re-selects only
+/// the *aircraft type* for that one already-decided pair, maximizing
+/// real, cost-subtracted profit (FareCalculator.EstimatedProfit) among
+/// the same candidate pool the pair search already had access to. That
+/// comparison only ever happens within one fixed pair, never across
+/// pairs, so the catalog-accident risk above can't reach pair selection
+/// at all — and unlike the floor design, it substitutes a better fit
+/// rather than rejecting, so there's no "opens nothing" failure mode.
+/// See FindMostProfitableDomesticPairAcrossTypes for the exact mechanism.
 /// </summary>
 public sealed class DomesticProfitOptimizerStrategy : IAiStrategy
 {
@@ -217,17 +247,42 @@ public sealed class DomesticProfitOptimizerStrategy : IAiStrategy
             .Select(p => (Pair: p, HubBonus: EstimatedHubBonusDemand(context.DemandModel, neighborsByCity, p)))
             .ToList();
 
+        // Phase 1: which pair wins - unchanged since M40. Still ranked by
+        // EstimatedRevenue, not real profit; see the class doc comment for
+        // why this stays untouched while Phase 2 below is new.
         var best = candidateTypes
             .SelectMany(type => pairsWithHubBonus
                 .Where(pb => pb.Pair.DistanceKm <= type.RangeKm)
-                .Select(pb => (Pair: pb.Pair, Aircraft: type, Profit: EstimatedProfit(pb.Pair, type, pb.HubBonus))))
-            .OrderByDescending(c => c.Profit.Cents)
+                .Select(pb => (Pair: pb.Pair, Aircraft: type, HubBonus: pb.HubBonus, Revenue: EstimatedRevenue(pb.Pair, type, pb.HubBonus))))
+            .OrderByDescending(c => c.Revenue.Cents)
             .ThenBy(c => c.Pair.Origin.Id, StringComparer.Ordinal)
             .ThenBy(c => c.Pair.Destination.Id, StringComparer.Ordinal)
             .ThenBy(c => c.Aircraft.Id, StringComparer.Ordinal)
             .FirstOrDefault();
 
-        return best.Pair is null ? null : (best.Pair, best.Aircraft);
+        if (best.Pair is null)
+        {
+            return null;
+        }
+
+        // Phase 2 (M57): the pair is already decided - now re-select only
+        // the aircraft *type* for it, maximizing real, cost-subtracted
+        // profit among the same candidateTypes pool (never a type that
+        // wasn't already a real option), filtered to whatever can reach
+        // this one pair. This comparison never crosses pairs, so it can't
+        // leak the catalog-accident risk the class doc comment describes
+        // into pair selection - it only ever refines which aircraft flies
+        // the pair Phase 1 already chose. best.Aircraft itself always
+        // satisfies the range filter below (it won Phase 1's own filtered
+        // ranking), so this is guaranteed non-empty.
+        var bestType = candidateTypes
+            .Where(type => best.Pair.DistanceKm <= type.RangeKm)
+            .Select(type => (Aircraft: type, Profit: EstimatedProfitForAircraft(best.Pair, type, best.HubBonus)))
+            .OrderByDescending(c => c.Profit.Cents)
+            .ThenBy(c => c.Aircraft.Id, StringComparer.Ordinal)
+            .First();
+
+        return (best.Pair, bestType.Aircraft);
     }
 
     /// <summary>Every city directly reachable from a given city via an existing route, keyed by city id - the "who already connects to whom" map EstimatedHubBonusDemand needs.</summary>
@@ -270,7 +325,7 @@ public sealed class DomesticProfitOptimizerStrategy : IAiStrategy
     /// the other connector to avoid double-counting when both endpoints
     /// happen to already be served. Legitimately returns 0 when neither
     /// endpoint is served yet (e.g. quarter 1) - no special-cased
-    /// fallback needed, EstimatedProfit already reduces to today's
+    /// fallback needed, EstimatedRevenue already reduces to today's
     /// pure-nonstop ranking in that case.
     /// </summary>
     private static long EstimatedHubBonusDemand(GravityDemandModel demandModel, IReadOnlyDictionary<string, List<City>> neighborsByCity, PairDemand candidate)
@@ -309,12 +364,40 @@ public sealed class DomesticProfitOptimizerStrategy : IAiStrategy
         return bonus;
     }
 
-    /// <summary>fare-per-passenger x carried (nonstop demand plus M40's real hub bonus) - the actual dollar figure ranked by; see the class doc comment for why this is a real profit proxy, not a loose one, under today's uniform-margin fare model.</summary>
-    private static Money EstimatedProfit(PairDemand pair, AircraftType aircraft, long hubBonusDemand)
+    /// <summary>
+    /// M57: renamed from its old, misleading name EstimatedProfit - it
+    /// never subtracted cost. fare-per-passenger x carried (nonstop
+    /// demand plus M40's real hub bonus) - Phase 1's own ranking figure;
+    /// see the class doc comment for why this stays the pair-selection
+    /// signal while Phase 2 (EstimatedProfitForAircraft, below) handles
+    /// aircraft-type fit separately.
+    /// </summary>
+    private static Money EstimatedRevenue(PairDemand pair, AircraftType aircraft, long hubBonusDemand)
     {
         var hypotheticalRoute = new Route(pair.Origin, pair.Destination, aircraft, AircraftCount: 1);
         var cappedCarried = Math.Min(pair.PassengersPerQuarter + hubBonusDemand, hypotheticalRoute.SeatsPerQuarter);
 
         return FareCalculator.SuggestedFarePerPassenger(hypotheticalRoute) * cappedCarried;
+    }
+
+    /// <summary>
+    /// M57: Phase 2's own real, cost-subtracted profit for one specific
+    /// (pair, aircraft) combination - FareCalculator.EstimatedProfit,
+    /// the same formula every other real profitability decision in this
+    /// codebase already uses (route management, marketing targeting).
+    /// Provably single-peaked in aircraft capacity for a *fixed* pair
+    /// (strictly increasing while capacity ≤ demand, since a bigger
+    /// cabin dilutes the aircraft's own flat quarterly salary over more
+    /// seats; strictly decreasing once capacity exceeds demand, since
+    /// unused capacity still costs full price) - see the class doc
+    /// comment for why that shape is only safe to rely on *within* one
+    /// already-chosen pair, never across different pairs.
+    /// </summary>
+    private static Money EstimatedProfitForAircraft(PairDemand pair, AircraftType aircraft, long hubBonusDemand)
+    {
+        var hypotheticalRoute = new Route(pair.Origin, pair.Destination, aircraft, AircraftCount: 1);
+        var cappedCarried = Math.Min(pair.PassengersPerQuarter + hubBonusDemand, hypotheticalRoute.SeatsPerQuarter);
+
+        return FareCalculator.EstimatedProfit(hypotheticalRoute, cappedCarried);
     }
 }

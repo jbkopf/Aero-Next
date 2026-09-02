@@ -55,6 +55,38 @@ public class DomesticProfitOptimizerStrategyTests
     }
 
     [Fact]
+    public void DecideOrders_Phase1PicksOversizedType_Phase2SubstitutesTheRealProfitWinner()
+    {
+        // M57: verified numerically before writing this test (not
+        // guessed - via a throwaway calc against these exact fixtures).
+        // "near" has real demand of 12,194/quarter at this distance.
+        // "big" (200 seats) fully captures it and so wins Phase 1's own
+        // unchanged EstimatedRevenue ranking ($2,301,251.68 vs "fit"'s
+        // $1,470,144.00, since "fit" - 20 seats - only captures 6,240 of
+        // the 12,194) - exactly today's real bug, oversizing invisible
+        // to a revenue-only ranking. But "fit" is the real, cost-subtracted
+        // profit winner by a huge margin ($339,268.80 vs "big"'s
+        // -$6,757,356.32 - 200 seats on this pair is a severe loss).
+        // Phase 2 must substitute "fit" into the actual RouteOrder even
+        // though Phase 1 picked "big".
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
+        var near = MakeCity("near", Region.NorthAmerica, 10, 10, 40);
+        var cities = new[] { home, near };
+        var fit = new AircraftType("fit", "Fit", Seats: 20, RangeKm: 10_000);
+        var big = new AircraftType("big", "Big", Seats: 200, RangeKm: 10_000);
+        var withFit = FleetLedger.ApplyDelivery(AirlineFleet.Empty, fit, quantity: 1, FleetOwnershipMode.Owned);
+        var fleet = FleetLedger.ApplyDelivery(withFit, big, quantity: 1, FleetOwnershipMode.Owned); // both idle - genuinely compete for the same pair
+
+        var context = MakeContext(Array.Empty<Route>(), cities, new[] { fit, big }, Region.NorthAmerica, fleet);
+
+        var orders = Strategy.DecideOrders(context);
+
+        var routeOrder = Assert.Single(orders.OfType<RouteOrder>());
+        Assert.Equal(new HashSet<string> { "home", "near" }, new HashSet<string> { routeOrder.Origin.Id, routeOrder.Destination.Id });
+        Assert.Equal("fit", routeOrder.Aircraft.Id);
+    }
+
+    [Fact]
     public void DecideOrders_RecentlyClosedPair_NeverReopened()
     {
         // M55: the same cooldown rule RapidExpansionStrategy's own
