@@ -1563,6 +1563,70 @@ it isn't effectively dead code in practice), or whether contested-and-struggling
 should be a lower bar entirely, is flagged for whoever next works on
 this lever.
 
+## M54 — Real profitability, not load factor — and where full closure had to stop ✅
+
+**Origin:** the user's own direct request: teach the AI to recognize an
+unprofitable route using real demand/fare/capacity data, and
+algorithmically choose among marketing, fare, capacity, or closing the
+route — with contested and uncontested routes handled differently. Two
+real gaps stood in the way: every M35–M53 reactive check used
+`RouteEvaluator`'s solo-carrier load factor, wrong for a contested route
+(no field ever surfaced real competitively-resolved carried passengers);
+and nothing computed real profit at all, only load factor.
+
+**Shipped:** `FareCalculator.EstimatedProfit(route, carried)` — revenue
+from what's actually carried against the full cost of capacity offered,
+mirroring `FinancialResolver`'s own real formula. New
+`StrategyContext.LastQuarterSeatsCarriedByRoute`, a one-quarter-lagged
+feed of real `CompetitiveRouteUsage.SeatsUsed` from `FullGameRunner`,
+consumed via a shared `BestAvailableCarried` helper (real figure when one
+exists, else the solo estimate — already accurate for an uncontested
+route). `ApplyMarketingCampaign` retargeted from worst-load-factor to
+worst-*real-profit*-first among contested routes.
+`ApplyManagementToolkit`'s own fare-cut and shrink loops (M35/M37/M51/M53)
+consolidated into one per-route pass, triggered by `EstimatedProfit < 0`
+instead of load factor.
+
+**Measured, this part: win rate 23.7% (M53) → 39.0%** (117/300, avg
+quarter 24.7 → 51.1), NorthAmerica back to 84.6% win share — a clean,
+large win, reproduced identically across two independent runs. Real
+profitability is a substantially better signal than load factor for
+these two levers.
+
+**Full route closure — designed, built, measured, and deliberately not
+shipped.** The plan added closing a route entirely
+(`AircraftCount == 1`, uncontested, still unprofitable) as the new
+fourth tool, gated conservatively against M35's own original thrash
+concern. Enabling it collapsed the win rate to **6.0%** (18/300) and
+handed *100%* of wins to SouthWestAsia, NorthAmerica included. Ablation
+first tested the obvious hypothesis — closing a route that's load-bearing
+infrastructure for reaching other cities, severing this airline's own
+`ValidOriginCityIds` — and a same-quarter graph-reachability safety check
+(`ClosureWouldSeverContiguity`, no cross-quarter memory needed: BFS the
+route graph with and without the candidate edge, block the close if any
+city *beyond* the candidate's own endpoint would be stranded) was built
+and measured. It moved nothing (18/300, identical). Direct
+instrumentation of the real driver instead: **19,679 full closures
+against 25,722 route opens** across one sweep — closure was firing on
+nearly as many routes as were ever opened, churning the network almost
+as fast as it grew rather than pruning genuinely dead pairs. Not a
+contiguity problem; a same-quarter profit read is simply too noisy a
+signal to justify a permanent, irreversible action — exactly the "route
+open/shrink/regrow thrash cycle" this roadmap's own "Kept in mind"
+section already named, now confirmed to apply to closure even harder
+than to the growth-side thrash it was first diagnosed from. The real fix
+needs cross-quarter memory (has this route stayed unprofitable for more
+than one quarter, not just this one) — explicitly out of scope for this
+round in the plan itself, and still is. Closure was removed rather than
+shipped broken; `ClosureWouldSeverContiguity`'s own graph-reachability
+helper was removed too (genuinely dead code with no caller left, per
+CLAUDE.md's own coverage-gate discipline — real, working infrastructure,
+worth resurrecting once real hysteresis exists, but not worth carrying
+unreachable in the meantime).
+
+`RaisedFare` (saturated routes) is untouched — a separate, already-correct
+mechanic for the opposite case, never in scope here.
+
 ---
 
 ## Kept in mind, not scheduled
@@ -1582,16 +1646,30 @@ this lever.
   this surfaced instead: the recovery (9.7%→23.7%) doesn't fully close
   M49's own drop from M48's 40.7% — see M50's own "not chased further"
   note.
-- **The route open/shrink/regrow thrash cycle** — real, diagnosed
-  directly (M43 above), not yet fixed. `BaselineAi.FindBestPerformingRoute`
-  can pick a route that was *just* shrunk the previous quarter, since
-  shrinking mechanically raises its own load factor; a static load-factor
-  floor was tried and measurably made things worse (M43's own writeup has
-  the full investigation). The real fix needs cross-quarter state —
-  remembering which route was shrunk how recently, not just evaluating
-  each route in isolation each quarter — filed here for the AI strategy
-  expansion work this roadmap's own M39 already anticipated, not solved
-  as a quick patch.
+- **The route open/shrink/regrow (now also open/close/reopen) thrash
+  cycle** — real, diagnosed directly (M43 above), not yet fixed, and
+  confirmed to hit even harder on the close side: M54's own full-closure
+  attempt measured 19,679 closures against 25,722 opens in one sweep
+  before being pulled entirely. `BaselineAi.FindBestPerformingRoute` can
+  pick a route that was *just* shrunk the previous quarter, since
+  shrinking mechanically raises its own load factor; a static
+  load-factor floor was tried and measurably made things worse (M43's
+  own writeup has the full investigation). The real fix needs
+  cross-quarter state — remembering which route was shrunk/closed how
+  recently, not just evaluating each route in isolation each quarter —
+  filed here for the AI strategy expansion work this roadmap's own M39
+  already anticipated, not solved as a quick patch. M54's own removed
+  `AiToolkit.ClosureWouldSeverContiguity` (a same-quarter graph-reachability
+  safety check, real and tested but not the actual bottleneck) is a
+  reasonable starting point for whoever builds the real cross-quarter fix
+  and wants to reintroduce closure alongside it.
 - **Europe's own idle-fleet stall under `DomesticProfitOptimizerStrategy`**
   — flagged in M43, not yet root-caused. A natural next round in the
   regional-balance effort, alongside the thrash-cycle item above.
+- **Changing an existing route's aircraft *type*** — no atomic order
+  exists for this (M54): growing a route requires the exact type already
+  flying it, `QuarterEngine` rejects a mismatch. A genuine "swap type"
+  capability needs either a new order type or deliberate close-then-reopen
+  sequencing with cross-quarter intent tracking — real, separate
+  engine/AI work, and doubly blocked on the same cross-quarter-state gap
+  as the thrash-cycle item above, since a swap is a close plus a reopen.

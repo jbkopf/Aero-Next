@@ -340,26 +340,45 @@ public static class AiToolkit
     }
 
     /// <summary>
-    /// M52, retargeted by M53: proposes a marketing campaign to help a
-    /// genuinely struggling contested route recover, not to squeeze more
-    /// out of one already doing fine — the user's own explicit framing
-    /// ("fare adjustments and marketing should be tools the AI uses to
-    /// try to help routes with lower load factors"). Restricted to
-    /// contested routes (CompetitiveMarket.Resolve's own boost never
-    /// applies to an uncontested pair, M47's own design, so spending real
-    /// cash on one there would buy nothing visible) below
-    /// BaselineAi.CloseRouteLoadFactorFloor — the same threshold
-    /// CloseRouteOrder and the fare cut below both already use for "this
-    /// route is struggling," one consistent definition across the whole
-    /// toolkit. Ranked worst-load-factor-first among the survivors
-    /// (M52's own original demand-descending ranking picked whichever
-    /// contested route was biggest, healthy or not — this replaces that).
-    /// A no-op (same permissive-default convention as every other
-    /// nullable StrategyContext field) when RivalCountByServedRoute is
-    /// null, when the action budget is already spent, or when no served
-    /// route is both contested and struggling. Exactly one such route
-    /// picks the bigger, targeted RouteMarketingOrder there; two or more
-    /// pick the smaller but broader NetworkMarketingOrder instead, since
+    /// M54: the best-available real-world carried figure for a route —
+    /// LastQuarterSeatsCarriedByRoute's own real, competitively-resolved
+    /// number when one exists (a contested route, where the solo
+    /// estimate below is wrong), otherwise soloCarried (RouteEvaluator's
+    /// own solo-carrier estimate, already accurate for an uncontested
+    /// route since there's no rival to split demand with). Shared by
+    /// every profitability check in this file so they never disagree on
+    /// which number is "real."
+    /// </summary>
+    private static long BestAvailableCarried(Route route, long soloCarried, StrategyContext context)
+    {
+        if (context.LastQuarterSeatsCarriedByRoute is null)
+        {
+            return soloCarried;
+        }
+
+        var key = QuarterEngine.NormalizedPairKey(route.Origin, route.Destination);
+        return context.LastQuarterSeatsCarriedByRoute.TryGetValue(key, out var real) ? real : soloCarried;
+    }
+
+    /// <summary>
+    /// M52, retargeted by M53 (load factor) then M54 (real profit):
+    /// proposes a marketing campaign to help a genuinely unprofitable
+    /// contested route recover, not to squeeze more out of one already
+    /// doing fine. Restricted to contested routes (CompetitiveMarket.Resolve's
+    /// own boost never applies to an uncontested pair, M47's own design,
+    /// so spending real cash on one there would buy nothing visible)
+    /// with FareCalculator.EstimatedProfit below zero — a real profit
+    /// estimate, using LastQuarterSeatsCarriedByRoute's own real carried
+    /// figure when available (see BestAvailableCarried) rather than the
+    /// load-factor proxy M52/M53 used, since a contested route's real
+    /// carried volume can genuinely differ from the solo-carrier
+    /// estimate. Ranked worst-profit-first among the survivors. A no-op
+    /// (same permissive-default convention as every other nullable
+    /// StrategyContext field) when RivalCountByServedRoute is null, when
+    /// the action budget is already spent, or when no served route is
+    /// both contested and unprofitable. Exactly one such route picks the
+    /// bigger, targeted RouteMarketingOrder there; two or more pick the
+    /// smaller but broader NetworkMarketingOrder instead, since
     /// QuarterEngine's own mutual-exclusivity rule means a route campaign
     /// can only ever help one contested pair the same quarter. A
     /// legible, cheap heuristic - not a modeled cost/benefit optimization
@@ -376,18 +395,19 @@ public static class AiToolkit
 
         var routeLoads = RouteEvaluator.EvaluateNetwork(context.CurrentRoutes, context.DemandModel);
 
-        var strugglingContestedRoutes = routeLoads
-            .Where(load => load.LoadFactor < BaselineAi.CloseRouteLoadFactorFloor)
-            .Where(load => context.RivalCountByServedRoute.GetValueOrDefault(QuarterEngine.NormalizedPairKey(load.Route.Origin, load.Route.Destination)) > 0)
-            .OrderBy(load => load.LoadFactor)
-            .ThenBy(load => load.Route.Origin.Id, StringComparer.Ordinal)
-            .ThenBy(load => load.Route.Destination.Id, StringComparer.Ordinal)
-            .Select(load => load.Route)
+        var unprofitableContestedRoutes = routeLoads
+            .Select(load => (load.Route, Profit: FareCalculator.EstimatedProfit(load.Route, BestAvailableCarried(load.Route, load.PassengersCarried, context))))
+            .Where(x => x.Profit < Money.Zero)
+            .Where(x => context.RivalCountByServedRoute.GetValueOrDefault(QuarterEngine.NormalizedPairKey(x.Route.Origin, x.Route.Destination)) > 0)
+            .OrderBy(x => x.Profit.Cents)
+            .ThenBy(x => x.Route.Origin.Id, StringComparer.Ordinal)
+            .ThenBy(x => x.Route.Destination.Id, StringComparer.Ordinal)
+            .Select(x => x.Route)
             .ToList();
 
-        if (strugglingContestedRoutes.Count == 1)
+        if (unprofitableContestedRoutes.Count == 1)
         {
-            var target = strugglingContestedRoutes[0];
+            var target = unprofitableContestedRoutes[0];
             var demand = context.DemandModel.ForPair(target.Origin, target.Destination).PassengersPerQuarter;
             var cost = MarketingCostCalculator.RouteCampaignCost(demand);
 
@@ -397,7 +417,7 @@ public static class AiToolkit
                 spent += 1;
             }
         }
-        else if (strugglingContestedRoutes.Count >= 2)
+        else if (unprofitableContestedRoutes.Count >= 2)
         {
             var cost = MarketingCostCalculator.NetworkCampaignCost(context.CurrentRoutes.Count);
 
@@ -463,13 +483,6 @@ public static class AiToolkit
     {
         var routeLoads = RouteEvaluator.EvaluateNetwork(context.CurrentRoutes, context.DemandModel);
 
-        foreach (var overBuilt in routeLoads
-            .Where(load => load.Route.AircraftCount > 1 && load.LoadFactor < BaselineAi.CloseRouteLoadFactorFloor)
-            .Select(load => load.Route))
-        {
-            orders.Add(new CloseRouteOrder(overBuilt.Origin, overBuilt.Destination));
-        }
-
         foreach (var saturated in routeLoads
             .Where(load => load.LoadFactor >= BaselineAi.SaturatedLoadFactorCeiling)
             .Select(load => load.Route))
@@ -482,34 +495,59 @@ public static class AiToolkit
             }
         }
 
-        // M51 removed this, then M53 reinstated it under a different
-        // question. M51 measured cutting fare on an underperforming
-        // route (LoadFactor < CloseRouteLoadFactorFloor) as net
-        // *revenue*-negative under M48's real elasticity, at every
-        // fraction tested (0.20/0.10/0.05, all below the 25.3% win rate
-        // measured with the branch removed entirely) — that finding is
-        // real and still true, see docs/BASELINE_AI_ROADMAP.md's M51.
-        // But the user's own direct framing for M53 is different: fare
-        // adjustments are a tool to help a struggling route's load
-        // factor recover, not a revenue-positivity bet — and a cut
-        // genuinely does raise demand here (M48's elasticity), which is
-        // exactly what load-factor recovery means, independent of
-        // whether it pays for itself the same quarter. Free action
-        // (Private, per CLAUDE.md), so — like RaisedFare/CloseRouteOrder
-        // above — every qualifying route gets one each quarter, and this
-        // can coexist with a same-quarter CloseRouteOrder shrink or
-        // ApplyMarketingCampaign's own RouteMarketingOrder on the same
-        // route (complementary levers, not exclusive).
-        foreach (var underperforming in routeLoads
-            .Where(load => load.LoadFactor < BaselineAi.CloseRouteLoadFactorFloor)
-            .Select(load => load.Route))
+        // M54: real profitability drives this now, not load factor -
+        // replaces M35's own shrink-only loop and M51/M53's own cut loop
+        // with one consolidated per-route decision. See
+        // docs/BASELINE_AI_ROADMAP.md's M54 for the full reasoning.
+        // FareCalculator.EstimatedProfit uses the best available carried
+        // figure (real, from LastQuarterSeatsCarriedByRoute, when a
+        // contested route has one - see BestAvailableCarried - otherwise
+        // RouteEvaluator's own solo estimate, already accurate for an
+        // uncontested route). Free action (Private, per CLAUDE.md), so
+        // every qualifying route gets a response each quarter.
+        foreach (var load in routeLoads)
         {
-            var target = BaselineAi.CutFare(underperforming);
+            var carried = BestAvailableCarried(load.Route, load.PassengersCarried, context);
+            var profit = FareCalculator.EstimatedProfit(load.Route, carried);
 
-            if (underperforming.FarePerPassenger > target)
+            if (profit >= Money.Zero)
             {
-                orders.Add(new SetFareOrder(underperforming.Origin, underperforming.Destination, target));
+                continue;
             }
+
+            // Cut the fare - universal, works whether or not the route
+            // is contested, same target BaselineAi.CutFare has always
+            // used. Can coexist with a same-quarter shrink below, or with
+            // ApplyMarketingCampaign's own RouteMarketingOrder on the same
+            // route (complementary levers, not exclusive).
+            var cutTarget = BaselineAi.CutFare(load.Route);
+
+            if (load.Route.FarePerPassenger > cutTarget)
+            {
+                orders.Add(new SetFareOrder(load.Route.Origin, load.Route.Destination, cutTarget));
+            }
+
+            if (load.Route.AircraftCount > 1)
+            {
+                // Right-size capacity toward real demand - same shrink
+                // mechanism as M35, now triggered by real unprofitability.
+                orders.Add(new CloseRouteOrder(load.Route.Origin, load.Route.Destination));
+            }
+
+            // A single-aircraft route just gets the cut above - full
+            // closure was tried here and measured, not shipped. See
+            // docs/BASELINE_AI_ROADMAP.md's M54 for the full numbers: a
+            // same-quarter profit read alone (even gated to uncontested
+            // routes, and even with a same-quarter contiguity-bridge
+            // safety check) fires on far too many routes to be a stable
+            // signal - measured at nearly one full closure for every
+            // route opened (19,679 closures against 25,722 opens across
+            // one 300-game sweep), churning the network almost as fast
+            // as it grows rather than pruning genuinely dead pairs. The
+            // real fix needs cross-quarter memory (has this route stayed
+            // unprofitable for more than one quarter, not just this
+            // one) - already flagged as future work in this roadmap's
+            // own "Kept in mind" section, not built here.
         }
 
         var validOriginCityIds = ValidOriginCityIds(context);

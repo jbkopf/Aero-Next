@@ -64,6 +64,27 @@ public static class FareCalculator
     }
 
     /// <summary>
+    /// M54: a real per-route profit estimate — revenue from what's
+    /// actually carried (route.FarePerPassenger x carriedPassengers)
+    /// against the full cost of the capacity offered
+    /// (CostPerSeatCarried x route.SeatsPerQuarter, not just the seats
+    /// carried), mirroring FinancialResolver's own real formula: operating
+    /// cost is charged on capacity offered, not seats filled, so a route
+    /// with a bad load factor is a real cash drain even before it earns
+    /// anything. carriedPassengers is the caller's choice of "best
+    /// available" figure — a real, competitively-resolved carried count
+    /// when one exists (a contested route), or RouteEvaluator's own
+    /// solo-carrier estimate otherwise (an uncontested route, where that
+    /// estimate is already accurate). Doesn't account for a route's
+    /// prorated lease fee (no per-route lease-fee model exists yet — see
+    /// CostPerSeatCarried's own doc comment on this same, already-flagged
+    /// gap), so this is an estimate, not a guaranteed match to
+    /// FinancialResolver's own final number.
+    /// </summary>
+    public static Money EstimatedProfit(Route route, long carriedPassengers) =>
+        route.FarePerPassenger * carriedPassengers - CostPerSeatCarried(route) * route.SeatsPerQuarter;
+
+    /// <summary>
     /// M48: how much this route's own actual fare (FarePerPassenger —
     /// a player override, or SuggestedFarePerPassenger itself when none
     /// is set) should move demand, as a signed fraction of baseline

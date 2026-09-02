@@ -18,8 +18,8 @@ Compiled 2026-08-31, cross-referencing every `docs/*_ROADMAP.md`'s own
 writing: M0–M14 (`SIM_CORE_ROADMAP.md`), M15–M19 (`GAME_SETUP_ROADMAP.md`),
 M20–M22 (`HISTORICAL_DYNAMICS_ROADMAP.md`), M23–M24
 (`WIN_CONDITIONS_ROADMAP.md`), M25–M30/M34 (`FINANCIAL_MODEL_ROADMAP.md`,
-M31 retired), M31/M35–M44/M49–M53 (`BASELINE_AI_ROADMAP.md`), M32–M33/M45–M46
-(`ROUTE_CAPACITY_ROADMAP.md`), M47–M48 (`MARKETING_ROADMAP.md`). M53 is
+M31 retired), M31/M35–M44/M49–M54 (`BASELINE_AI_ROADMAP.md`), M32–M33/M45–M46
+(`ROUTE_CAPACITY_ROADMAP.md`), M47–M48 (`MARKETING_ROADMAP.md`). M54 is
 the current highest issued number. Update this line the moment a new
 milestone is opened anywhere.
 
@@ -171,6 +171,33 @@ accepted because the tool's purpose changed. Whether marketing's
 targeting needs a looser fallback to actually fire in practice is
 flagged, not chased, for whoever next works on this lever.
 
+**M54 (`docs/BASELINE_AI_ROADMAP.md`, real profitability drives
+unprofitable-route management) is the user's own direct follow-up
+request: recognize an unprofitable route with real data, algorithmically
+choose among marketing/fare/capacity/closing, contested vs uncontested
+handled differently.** New `FareCalculator.EstimatedProfit` and
+`StrategyContext.LastQuarterSeatsCarriedByRoute` (a real,
+one-quarter-lagged carried figure, replacing the solo-carrier estimate
+that was never accurate for a contested route) retarget both the fare
+cut/shrink loop and `ApplyMarketingCampaign` from load factor to real
+profit. **Win rate 23.7% → 39.0%** (117/300, avg 51.1), NorthAmerica back
+to 84.6% — a clean, large win, reproduced identically twice. **Full route
+closure — the fourth tool the request asked for — was designed, built,
+measured, and deliberately not shipped**: it collapsed win rate to 6.0%
+and handed every win to SouthWestAsia. A same-quarter contiguity-bridge
+safety check (built and measured first, on the reasonable hypothesis
+that closure was severing an airline's own network reach) changed
+nothing; direct instrumentation found the real cause instead — 19,679
+full closures against 25,722 route opens in one sweep, essentially
+churning the network as fast as it grows. This is the already-flagged
+thrash-cycle problem (`BASELINE_AI_ROADMAP.md`'s own "Kept in mind"
+section), confirmed to hit closure even harder than the growth-side
+thrash it was first diagnosed from, and it needs the same real fix
+(cross-quarter memory) that item has always needed — not built here.
+Closure was pulled entirely rather than shipped broken; its own
+graph-reachability safety-check code was removed too as genuinely dead
+code, with a note for whoever builds the real fix to reuse it.
+
 Three items found during these investigations, deliberately deferred
 rather than folded in — all filed under `BASELINE_AI_ROADMAP.md`'s own
 "Kept in mind" now:
@@ -250,10 +277,16 @@ AI strategy/network-topology behavior, not starting conditions.
   Recovers most, not all, of M49's own win-rate drop (9.7%→23.7%,
   against M48's pre-M49 40.7%) — see the active-priority note below for
   the still-open gap between 23.7% and 40.7%.
-- **The route open/shrink/regrow thrash cycle** — real (M43), a tried
-  static load-factor floor measurably made things worse. Needs real
-  cross-quarter state (which route was shrunk how recently), filed for
-  a future AI-strategy-expansion round, not a quick patch.
+- **The route open/shrink/regrow (now also open/close/reopen) thrash
+  cycle** — real (M43), a tried static load-factor floor measurably made
+  things worse. M54 confirmed it hits closure even harder: a full-closure
+  attempt measured 19,679 closures against 25,722 opens in one sweep
+  before being pulled entirely. Needs real cross-quarter state (which
+  route was shrunk/closed how recently), filed for a future
+  AI-strategy-expansion round, not a quick patch — `AiToolkit`'s own
+  removed `ClosureWouldSeverContiguity` (a real, tested, same-quarter
+  graph-reachability safety check — just not the actual bottleneck) is a
+  reasonable starting point for whoever builds it.
 - **Europe's own idle-fleet stall under `DomesticProfitOptimizerStrategy`**
   — Europe remains the worst-performing region (86.3% bankrupt after
   M43+M44 both) throughout; root cause not yet isolated.
@@ -261,6 +294,11 @@ AI strategy/network-topology behavior, not starting conditions.
   causally understood (its dense 22-city local network is now a
   compounding advantage under network-contiguity), but a strikingly
   lopsided result flagged for a decision on whether it's acceptable.
+- **Changing an existing route's aircraft *type*** — no atomic order
+  exists (M54); growing a route requires the exact type already flying
+  it. A genuine "swap type" capability needs a new order type or
+  deliberate close-then-reopen sequencing, and is doubly blocked on the
+  same cross-quarter-state gap as the thrash-cycle item above.
 
 ### `WIN_CONDITIONS_ROADMAP.md`
 - **Difficulty tiers** — explicitly deferred, no `Difficulty` concept

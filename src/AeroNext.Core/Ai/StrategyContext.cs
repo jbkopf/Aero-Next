@@ -58,6 +58,18 @@ namespace AeroNext.Core.Ai;
 /// genuinely contested (competitors.Count > 1, M47's own design), and no
 /// prior StrategyContext field told a strategy which of its own routes
 /// that's true for. See AiToolkit.ApplyMarketingCampaign.
+///
+/// M54: LastQuarterSeatsCarriedByRoute, the first field here that's
+/// *not* a same-quarter snapshot — real, competitively-resolved carried
+/// seats from the *previous* quarter's own CompetitiveMarket.Resolve
+/// (CompetitiveRouteUsage.SeatsUsed, the same real figure
+/// FinancialResolver.ComputeRevenue itself uses), one quarter lagged.
+/// Nullable/permissive-default like everything else here — null (or a
+/// pair missing from it) means "no real data available," and every
+/// consumer falls back to RouteEvaluator's own solo-carrier estimate,
+/// which is already accurate for an uncontested route (no rival to split
+/// demand with) and only genuinely needed for a contested one. See
+/// FareCalculator.EstimatedProfit and AiToolkit.ApplyMarketingCampaign.
 /// </summary>
 public sealed record StrategyContext(
     IReadOnlyList<Route> CurrentRoutes,
@@ -74,4 +86,5 @@ public sealed record StrategyContext(
     IReadOnlySet<string>? PendingNegotiationCityIds = null,
     IReadOnlyDictionary<string, int>? CityWideSlotsRemaining = null,
     IReadOnlyDictionary<string, int>? IdleContestableSlotsByCity = null,
-    IReadOnlyDictionary<(string OriginId, string DestinationId), int>? RivalCountByServedRoute = null);
+    IReadOnlyDictionary<(string OriginId, string DestinationId), int>? RivalCountByServedRoute = null,
+    IReadOnlyDictionary<(string OriginId, string DestinationId), long>? LastQuarterSeatsCarriedByRoute = null);

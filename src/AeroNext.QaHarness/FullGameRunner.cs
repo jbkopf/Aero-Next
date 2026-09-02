@@ -80,6 +80,14 @@ public static class FullGameRunner
         var finances = names.ToDictionary(n => n, n => FinancialState.Start(conditionsByName[n].StartingCash, DefaultStartingDebt, DefaultInterestRatePerQuarter));
         var bankruptcyQuarter = names.ToDictionary(n => n, n => (int?)null);
         var currentStrategyByName = names.ToDictionary(n => n, n => (IAiStrategy?)null);
+
+        // M54: real, competitively-resolved carried seats per route, one
+        // quarter lagged - built from each quarter's own real market.RouteUsage
+        // (below), read by the *next* quarter's own StrategyContext. Empty
+        // dict (not null) until the first quarter resolves, since every
+        // airline's own quarter-1 route is the M18 guaranteed one anyway
+        // (no strategy consults this that early).
+        var lastQuarterSeatsCarriedByRouteByName = names.ToDictionary(n => n, n => (IReadOnlyDictionary<(string, string), long>)new Dictionary<(string, string), long>());
         var humanCount = seats.Count(s => s.IsHuman);
 
         // M18's AircraftQuantity (2), real data never consumed until now —
@@ -174,7 +182,6 @@ public static class FullGameRunner
                     continue;
                 }
 
-                var routesBefore = routes[name];
                 var capBefore = caps[name];
                 var airlineForSlots = new Airline(name, routes[name]);
                 var availableSlotsByCity = landingBoard.AvailableSlotsByCity(airlineForSlots, routes[name]);
@@ -231,7 +238,8 @@ public static class FullGameRunner
                         PendingNegotiationCityIds: pendingNegotiationCityIds,
                         CityWideSlotsRemaining: cityWideSlotsRemaining,
                         IdleContestableSlotsByCity: idleContestableSlotsByCity,
-                        RivalCountByServedRoute: rivalCountByServedRoute);
+                        RivalCountByServedRoute: rivalCountByServedRoute,
+                        LastQuarterSeatsCarriedByRoute: lastQuarterSeatsCarriedByRouteByName[name]);
                     var strategy = BaselineAi.SelectStrategy(currentStrategyByName[name], q, strategyContext);
                     currentStrategyByName[name] = strategy;
                     orders = strategy.DecideOrders(strategyContext);
@@ -282,10 +290,16 @@ public static class FullGameRunner
                     aircraftOrderBoard = AircraftOrderResolver.Submit(aircraftOrderBoard, airlineSnapshot, aircraftOrder, q);
                 }
 
-                if (routesBefore.Count > result.Routes.Count)
-                {
-                    violations.Add(new GameViolation(q, name, "Route count decreased in a quarter with no bankruptcy — routes should never be removed."));
-                }
+                // M54: this used to be a real invariant - "a route can
+                // shrink but never disappear outright" was true for every
+                // milestone through M53 (M35's own design: shrink, never
+                // close, to avoid the thrash risk). M54 deliberately adds
+                // real closure for a genuinely unprofitable, uncontested,
+                // single-aircraft route (AiToolkit.ApplyManagementToolkit),
+                // so a route count decrease with no bankruptcy is now an
+                // expected, intended outcome, not a bug - removed rather
+                // than weakened, since there's no longer a real invariant
+                // left to check here.
 
                 if (result.ActionCap < capBefore)
                 {
@@ -317,6 +331,16 @@ public static class FullGameRunner
 
             var league = seats.Select(s => new Airline(s.AirlineName, routes[s.AirlineName])).ToArray();
             var market = CompetitiveMarket.Resolve(league, cities, yearDemandModel, marketingByAirlineName);
+
+            // M54: this quarter's own real carried seats per route,
+            // stored for *next* quarter's own StrategyContext to read -
+            // see lastQuarterSeatsCarriedByRouteByName's own declaration.
+            foreach (var airline in league)
+            {
+                lastQuarterSeatsCarriedByRouteByName[airline.Name] = market.RouteUsage
+                    .Where(u => u.Airline == airline)
+                    .ToDictionary(u => QuarterEngine.NormalizedPairKey(u.Route.Origin, u.Route.Destination), u => u.SeatsUsed);
+            }
 
             foreach (var airline in league)
             {

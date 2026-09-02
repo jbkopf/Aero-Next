@@ -166,4 +166,55 @@ public class FareCalculatorTests
 
         Assert.Equal(FareCalculator.DemandDeltaFraction(discounted), -FareCalculator.DemandDeltaFraction(expensive), precision: 3);
     }
+
+    // --- M54: EstimatedProfit ---
+
+    [Fact]
+    public void EstimatedProfit_MatchesRevenueMinusFullCapacityCost_IndependentlyComputed()
+    {
+        var a = MakeCity("a", 0, 0);
+        var b = MakeCity("b", 5, 5);
+        var route = MakeRoute(a, b);
+        var carried = route.SeatsPerQuarter / 2;
+
+        var expectedRevenue = route.FarePerPassenger * carried;
+        var expectedCost = FareCalculator.CostPerSeatCarried(route) * route.SeatsPerQuarter;
+
+        Assert.Equal(expectedRevenue - expectedCost, FareCalculator.EstimatedProfit(route, carried));
+    }
+
+    [Fact]
+    public void EstimatedProfit_ZeroCarried_EqualsNegativeFullCapacityCost()
+    {
+        var a = MakeCity("a", 0, 0);
+        var b = MakeCity("b", 5, 5);
+        var route = MakeRoute(a, b);
+
+        var expectedCost = FareCalculator.CostPerSeatCarried(route) * route.SeatsPerQuarter;
+
+        Assert.Equal(-expectedCost, FareCalculator.EstimatedProfit(route, 0));
+    }
+
+    [Fact]
+    public void EstimatedProfit_FullyLoadedAtDefaultFare_IsPositive()
+    {
+        // The default fare's own 30% margin over CostPerSeatCarried means
+        // a fully-sold route at the default fare always clears cost.
+        var a = MakeCity("a", 0, 0);
+        var b = MakeCity("b", 5, 5);
+        var route = MakeRoute(a, b);
+
+        Assert.True(FareCalculator.EstimatedProfit(route, route.SeatsPerQuarter) > Money.Zero);
+    }
+
+    [Fact]
+    public void EstimatedProfit_SeverelyUndersold_IsNegative()
+    {
+        var a = MakeCity("a", 0, 0);
+        var b = MakeCity("b", 5, 5);
+        var route = MakeRoute(a, b);
+        var barelyAnyone = route.SeatsPerQuarter / 100; // 1% load - nowhere near the ~77% breakeven a 30% margin implies
+
+        Assert.True(FareCalculator.EstimatedProfit(route, barelyAnyone) < Money.Zero);
+    }
 }

@@ -20,9 +20,12 @@ public class AiToolkitTests
     private static StrategyContext MakeContext(
         IReadOnlyList<City> cities, City homeCity,
         System.Collections.Generic.IReadOnlyDictionary<string, int>? idleContestableSlotsByCity = null,
-        int actionCap = 3, Money? availableCash = null, IReadOnlyList<Route>? routes = null) =>
+        int actionCap = 3, Money? availableCash = null, IReadOnlyList<Route>? routes = null,
+        System.Collections.Generic.IReadOnlyDictionary<(string OriginId, string DestinationId), int>? rivalCountByServedRoute = null,
+        System.Collections.Generic.IReadOnlyDictionary<(string OriginId, string DestinationId), long>? lastQuarterSeatsCarriedByRoute = null) =>
         new(routes ?? Array.Empty<Route>(), actionCap, cities, DemandModel, new[] { Aircraft }, AirlineFleet.Empty, homeCity.Region, homeCity,
-            IdleContestableSlotsByCity: idleContestableSlotsByCity, AvailableCash: availableCash);
+            IdleContestableSlotsByCity: idleContestableSlotsByCity, AvailableCash: availableCash,
+            RivalCountByServedRoute: rivalCountByServedRoute, LastQuarterSeatsCarriedByRoute: lastQuarterSeatsCarriedByRoute);
 
     // --- ComputeCityWideSlotsRemaining ---
 
@@ -308,14 +311,16 @@ public class AiToolkitTests
         Assert.Single(orders.OfType<HireExecutiveOrder>());
     }
 
-    // --- ApplyManagementToolkit: fare cut (M37, removed by M51, reinstated by M53) ---
+    // --- ApplyManagementToolkit: unprofitable-route response (M37 fare cut, M35 shrink, M54 real profit + closure) ---
 
     [Fact]
-    public void ApplyManagementToolkit_StrugglingRoute_CutsFare()
+    public void ApplyManagementToolkit_UnprofitableRoute_CutsFare()
     {
         // BigAircraft's huge capacity against real demand for these
-        // close, weight-50 cities gives a low load factor - below
-        // BaselineAi.CloseRouteLoadFactorFloor.
+        // close, weight-50 cities means operating cost (charged on
+        // capacity OFFERED) dwarfs revenue (capped by tiny real demand)
+        // - genuinely unprofitable under FareCalculator.EstimatedProfit,
+        // not just low load factor.
         var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
         var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
         var route = new Route(a, b, BigAircraft, AircraftCount: 1);
@@ -330,13 +335,15 @@ public class AiToolkitTests
     }
 
     [Fact]
-    public void ApplyManagementToolkit_HealthyRoute_DoesNotCutFare()
+    public void ApplyManagementToolkit_ProfitableRoute_DoesNotCutFare()
     {
         // Aircraft's small capacity against the same demand gives a high
-        // (likely oversold/saturated) load factor - not struggling.
-        // Asserts specifically that no cut happened (rather than "no
-        // SetFareOrder at all") since a saturated route legitimately
-        // still gets a raise from the separate RaisedFare branch above.
+        // (likely oversold/saturated) load factor - genuinely profitable
+        // at the default fare (revenue from a fully-sold route comfortably
+        // clears cost, per FareCalculator's own 30% margin). Asserts
+        // specifically that no cut happened (rather than "no SetFareOrder
+        // at all") since a saturated route legitimately still gets a
+        // raise from the separate RaisedFare branch above.
         var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
         var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
         var route = new Route(a, b, Aircraft, AircraftCount: 1);
@@ -351,15 +358,103 @@ public class AiToolkitTests
         Assert.DoesNotContain(orders.OfType<SetFareOrder>(), o => o.FarePerPassenger < route.FarePerPassenger);
     }
 
-    // --- ApplyMarketingCampaign (M52, retargeted at struggling routes by M53) ---
+    [Fact]
+    public void ApplyManagementToolkit_UnprofitableMultiAircraftRoute_ShrinksByOne()
+    {
+        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
+        var route = new Route(a, b, BigAircraft, AircraftCount: 3);
+        var context = MakeContext(new[] { a, b }, a, routes: new[] { route });
+        var orders = new System.Collections.Generic.List<QuarterOrder>();
 
-    // M53: Aircraft (100 seats) against these tests' own close, weight-50
-    // city pairs produces demand well above capacity - a "healthy"
-    // (oversold, high load factor) route, exactly why the pre-M53 tests
-    // below broke when the struggling-only filter landed. BigAircraft's
-    // huge capacity against the same demand produces a "struggling" (near
-    // -zero load factor) route instead - the two together let a test
-    // build both kinds from the same cities/demand.
+        AiToolkit.ApplyManagementToolkit(context, orders, new System.Collections.Generic.HashSet<int>(), spentBeforeToolkit: 0);
+
+        var order = Assert.Single(orders.OfType<CloseRouteOrder>());
+        Assert.Equal(new HashSet<string> { "a", "b" }, new HashSet<string> { order.Origin.Id, order.Destination.Id });
+    }
+
+    [Fact]
+    public void ApplyManagementToolkit_UnprofitableSingleAircraftRoute_NeverClosesEntirely()
+    {
+        // M54: full closure was designed, built, and measured here (an
+        // uncontested + contiguity-bridge-safe gate), then deliberately
+        // NOT shipped - a 300-game sweep found it firing on almost as
+        // many routes as were opened (19,679 closures against 25,722
+        // opens), churning the network rather than pruning genuinely
+        // dead pairs. See docs/BASELINE_AI_ROADMAP.md's M54 for the full
+        // numbers. This test locks in the shipped behavior: nothing left
+        // to shrink still just means a fare cut, never a close.
+        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
+        var route = new Route(a, b, BigAircraft, AircraftCount: 1);
+        var rivalCount = new System.Collections.Generic.Dictionary<(string, string), int> { [QuarterEngine.NormalizedPairKey(a, b)] = 0 };
+        var context = MakeContext(new[] { a, b }, a, routes: new[] { route }, rivalCountByServedRoute: rivalCount);
+        var orders = new System.Collections.Generic.List<QuarterOrder>();
+
+        AiToolkit.ApplyManagementToolkit(context, orders, new System.Collections.Generic.HashSet<int>(), spentBeforeToolkit: 0);
+
+        Assert.Empty(orders.OfType<CloseRouteOrder>());
+        Assert.Single(orders.OfType<SetFareOrder>()); // the cut still applies
+    }
+
+    [Fact]
+    public void ApplyManagementToolkit_RealCarriedData_OverridesSoloEstimate()
+    {
+        // Aircraft's small capacity against real demand is profitable
+        // under the solo estimate alone (see ProfitableRoute_DoesNotCutFare)
+        // - but LastQuarterSeatsCarriedByRoute says this airline is
+        // really only carrying a tiny fraction of that (losing a
+        // competitive fight the solo estimate can't see), which should
+        // now drive a cut the solo-only view never would have.
+        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
+        var route = new Route(a, b, Aircraft, AircraftCount: 1);
+        var realCarried = new System.Collections.Generic.Dictionary<(string, string), long> { [QuarterEngine.NormalizedPairKey(a, b)] = 1 };
+        var context = MakeContext(new[] { a, b }, a, routes: new[] { route }, lastQuarterSeatsCarriedByRoute: realCarried);
+        var orders = new System.Collections.Generic.List<QuarterOrder>();
+
+        AiToolkit.ApplyManagementToolkit(context, orders, new System.Collections.Generic.HashSet<int>(), spentBeforeToolkit: 0);
+
+        // Contains, not Single: the route is also solo-saturated (fully
+        // sold under the naive estimate), so RaisedFare's own separate,
+        // untouched branch legitimately proposes a raise for the same
+        // pair at the same time - this test only cares that the real
+        // data also drove a genuine cut, not that it's the only order.
+        Assert.Contains(orders.OfType<SetFareOrder>(), o => o.FarePerPassenger < route.FarePerPassenger);
+    }
+
+    [Fact]
+    public void ApplyManagementToolkit_LastQuarterDataMissingThisPair_FallsBackToSoloEstimate()
+    {
+        // The dict itself is non-null (real data exists for other
+        // routes) but has no entry for THIS pair - falls back to the
+        // solo estimate exactly like a fully-null dict would, rather
+        // than misreading a missing key as "carried zero passengers."
+        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
+        var elsewhere = MakeCity("el", Region.NorthAmerica, 5, 5, 50);
+        var route = new Route(a, b, Aircraft, AircraftCount: 1);
+        var realCarried = new System.Collections.Generic.Dictionary<(string, string), long> { [QuarterEngine.NormalizedPairKey(a, elsewhere)] = 1 };
+        var context = MakeContext(new[] { a, b }, a, routes: new[] { route }, lastQuarterSeatsCarriedByRoute: realCarried);
+        var orders = new System.Collections.Generic.List<QuarterOrder>();
+
+        AiToolkit.ApplyManagementToolkit(context, orders, new System.Collections.Generic.HashSet<int>(), spentBeforeToolkit: 0);
+
+        Assert.DoesNotContain(orders.OfType<SetFareOrder>(), o => o.FarePerPassenger < route.FarePerPassenger);
+    }
+
+    // --- ApplyMarketingCampaign (M52, retargeted at load factor by M53, then real profit by M54) ---
+
+    // Aircraft (100 seats) against these tests' own close, weight-50 city
+    // pairs produces demand well above capacity - carried is pinned at
+    // 100% of a small capacity, which is also genuinely PROFITABLE at the
+    // default fare's own margin (a "healthy" route, in both the old
+    // load-factor sense and the current real-profit sense). BigAircraft's
+    // huge capacity against the same demand means operating cost (charged
+    // on capacity offered) swamps the same real revenue - genuinely
+    // UNPROFITABLE (a "struggling" route, in both senses too) - the two
+    // together let a test build both kinds from the same cities/demand.
+    // Test names below still say "struggling"; read it as "unprofitable."
     private static readonly AircraftType BigAircraft = new("big", "Big", Seats: 100_000, RangeKm: 10_000, CruiseSpeedKmh: 900, CostPerAvailableSeatKm: 0.1);
 
     private static StrategyContext MakeMarketingContext(
@@ -413,7 +508,7 @@ public class AiToolkitTests
     {
         var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
         var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
-        var route = new Route(a, b, BigAircraft, AircraftCount: 1); // huge capacity against real demand - low load factor
+        var route = new Route(a, b, BigAircraft, AircraftCount: 1); // huge capacity against real demand - unprofitable
         var key = QuarterEngine.NormalizedPairKey(a, b);
         var rivalCount = new System.Collections.Generic.Dictionary<(string, string), int> { [key] = 1 };
         var context = MakeMarketingContext(new[] { route }, rivalCount, availableCash: Money.FromDollars(50_000_000));
@@ -431,14 +526,15 @@ public class AiToolkitTests
     [Fact]
     public void ApplyMarketingCampaign_ContestedRouteNotStruggling_NoOp()
     {
-        // M53: a contested route with a HIGH load factor (demand exceeds
-        // this small aircraft's capacity) no longer draws a campaign at
-        // all - M52's own original demand-ranking would have picked it
-        // unconditionally; the retargeted version requires it be
-        // genuinely struggling first.
+        // M54: a contested route that's genuinely PROFITABLE (demand
+        // exceeds this small aircraft's capacity, comfortably clearing
+        // cost at the default fare) no longer draws a campaign - M52's
+        // own original demand-ranking would have picked it unconditionally
+        // regardless of health; the retargeted version requires it be
+        // genuinely unprofitable first.
         var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
         var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
-        var route = new Route(a, b, Aircraft, AircraftCount: 1); // small capacity against real demand - high load factor
+        var route = new Route(a, b, Aircraft, AircraftCount: 1); // small capacity against real demand - profitable
         var key = QuarterEngine.NormalizedPairKey(a, b);
         var rivalCount = new System.Collections.Generic.Dictionary<(string, string), int> { [key] = 1 };
         var context = MakeMarketingContext(new[] { route }, rivalCount, availableCash: Money.FromDollars(50_000_000));
