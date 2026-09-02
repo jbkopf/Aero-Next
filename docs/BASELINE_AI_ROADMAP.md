@@ -1627,6 +1627,69 @@ unreachable in the meantime).
 `RaisedFare` (saturated routes) is untouched — a separate, already-correct
 mechanic for the opposite case, never in scope here.
 
+## M55 — Real cross-quarter route memory ✅
+
+**Origin:** the user's own direct request, right after M54 shipped: give
+the AI real memory so it can make decisions based on historical data —
+scope confirmed with the user as route history specifically (not general
+AI memory), since two separate rounds this session had already diagnosed
+the same missing piece and explicitly deferred the same fix. M43 traced
+a real oscillation (`BaselineAi.FindBestPerformingRoute` ranks by load
+factor; shrinking a route mechanically raises its own load factor, so a
+route shrunk one quarter could rank "best performing" again the very
+next and get grown right back) and found a static same-quarter threshold
+*made it worse* — "a route needs to remember it was just shrunk, not
+just prove itself strong in isolation." M54 built full route closure,
+measured it firing on nearly as many routes as were ever opened, and
+pulled it — "the real fix needs cross-quarter memory... explicitly out
+of scope for this round."
+
+**Shipped:** new `AiRouteHistory` (`LastShrunkQuarter`, `LastClosedQuarter`,
+`ConsecutiveUnprofitableQuarters`) per (airline, pair), built fresh each
+quarter in `FullGameRunner.cs` from state it already resolves (which
+`CloseRouteOrder` actually applied, and real carried seats from
+`CompetitiveMarket.Resolve`) and read one-quarter-lagged via new
+`StrategyContext.RouteHistoryByPair`/`QuarterNumber` fields — the same
+lag-and-permissive-default convention every real field here already
+follows. Two real fixes built on it: `RecentlyShrunkPairKeys` excludes a
+just-shrunk route from `FindBestPerformingRoute`'s own growth ranking
+(`RapidExpansionStrategy`'s own call site — the direct fix for M43's own
+oscillation), and `RecentlyClosedPairKeys` excludes a just-closed pair
+from both strategies' own new-pair searches (`RapidExpansionStrategy`'s
+own demand-only search was M54's own named "known, accepted risk").
+
+**Measured: overall win rate 39.0% (M54) → 41.3%** (124/300, avg quarter
+51.1 → 60.8), NorthAmerica 84.6% → 85.5% — a real, clean win from the two
+cooldown fixes alone, independently reproduced.
+
+**Full route closure — reattempted with real cross-quarter memory,
+measured, and pulled a second time, for a different and deeper reason
+than M54's own.** The reasonable hypothesis going in: M54's own churn
+(19,679 closures against 25,722 opens) was a *timing* problem — closing
+on a single unlucky quarter's reading — fixable by requiring
+`ConsecutiveUnprofitableQuarters` sustained across multiple quarters in
+a row before eligibility, alongside M54's own uncontested-only and
+contiguity-bridge safety checks (both rebuilt from scratch — the working
+tree changes never made it into a commit before M54 reverted them).
+It wasn't: at a 2-quarter confirmation window, closures still ran 12,997
+against 19,044 opens (68%) and win rate *fell* to 12.0% (from 41.3% with
+closure disabled); a considerably more patient 6-quarter window improved
+the picture but didn't fix it (58% closure ratio, 24.7% win rate, still
+well below 41.3%). The real signal, read plainly: this AI's own
+route-opening heuristics send a large, persistent fraction of new routes
+into genuine, *sustained* unprofitability — not a one-quarter fluke
+cross-quarter memory can filter out, but a route-*selection* quality
+problem. No amount of patience in the closure trigger fixes that;
+punishing it with closure, however patiently confirmed, cost more than
+it saved. Removed a second time — the closure branch itself, and its own
+now-dead `ClosureWouldSeverContiguity`/`ReachableCityIds` helpers, per
+the same coverage-gate discipline M54 already applied.
+`AiRouteHistory.ConsecutiveUnprofitableQuarters` itself is still tracked
+(real, working, genuinely used by nothing right now) — kept as
+infrastructure for whoever next improves route-*opening* quality first,
+since that's the real prerequisite closure needs before it can help
+rather than hurt.
+
 ---
 
 ## Kept in mind, not scheduled
@@ -1646,23 +1709,34 @@ mechanic for the opposite case, never in scope here.
   this surfaced instead: the recovery (9.7%→23.7%) doesn't fully close
   M49's own drop from M48's 40.7% — see M50's own "not chased further"
   note.
-- **The route open/shrink/regrow (now also open/close/reopen) thrash
-  cycle** — real, diagnosed directly (M43 above), not yet fixed, and
-  confirmed to hit even harder on the close side: M54's own full-closure
-  attempt measured 19,679 closures against 25,722 opens in one sweep
-  before being pulled entirely. `BaselineAi.FindBestPerformingRoute` can
-  pick a route that was *just* shrunk the previous quarter, since
-  shrinking mechanically raises its own load factor; a static
-  load-factor floor was tried and measurably made things worse (M43's
-  own writeup has the full investigation). The real fix needs
-  cross-quarter state — remembering which route was shrunk/closed how
-  recently, not just evaluating each route in isolation each quarter —
-  filed here for the AI strategy expansion work this roadmap's own M39
-  already anticipated, not solved as a quick patch. M54's own removed
-  `AiToolkit.ClosureWouldSeverContiguity` (a same-quarter graph-reachability
-  safety check, real and tested but not the actual bottleneck) is a
-  reasonable starting point for whoever builds the real cross-quarter fix
-  and wants to reintroduce closure alongside it.
+- ~~**The route open/shrink/regrow thrash cycle**~~ — closed by M55:
+  `AiToolkit.RecentlyShrunkPairKeys` (real cross-quarter memory,
+  `AiRouteHistory`) stops `BaselineAi.FindBestPerformingRoute` from
+  re-picking a route it just shrunk, the exact mechanism M43 traced. A
+  static load-factor floor was tried back in M43 and measurably made
+  things worse; the real fix needed memory, not a threshold, exactly as
+  that round's own writeup predicted.
+- **The open/close/reopen side is a separate, still-open problem, now
+  understood to be a different one than originally guessed.** M54's own
+  full-closure attempt measured 19,679 closures against 25,722 opens in
+  one sweep and was pulled. M55 re-tried it with real cross-quarter
+  memory (`ConsecutiveUnprofitableQuarters`, requiring sustained
+  unprofitability before eligibility, not a same-quarter reading) on the
+  hypothesis that this was the same kind of timing/thrash problem the
+  growth side turned out to be — it wasn't: even a patient 6-quarter
+  confirmation window still closed 58% as many routes as were opened and
+  underperformed not closing at all (24.7% vs. 41.3% win rate). The real
+  driver is this AI's own route-*opening* heuristics sending a large,
+  persistent fraction of new routes into genuinely sustained
+  unprofitability - a selection-quality problem, not a timing one.
+  Closure needs better route-opening judgment upstream before it can
+  help rather than hurt - filed here, not solved. M55's own removed
+  `AiToolkit.ClosureWouldSeverContiguity` (a same-quarter
+  graph-reachability safety check, real and tested but never the actual
+  bottleneck in either round) and `AiRouteHistory.ConsecutiveUnprofitableQuarters`
+  itself (still tracked, unconsumed) are both reasonable starting points
+  for whoever improves route-opening quality and wants to reintroduce
+  closure alongside it.
 - **Europe's own idle-fleet stall under `DomesticProfitOptimizerStrategy`**
   — flagged in M43, not yet root-caused. A natural next round in the
   regional-balance effort, alongside the thrash-cycle item above.

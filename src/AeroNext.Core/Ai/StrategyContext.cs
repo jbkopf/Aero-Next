@@ -70,6 +70,20 @@ namespace AeroNext.Core.Ai;
 /// which is already accurate for an uncontested route (no rival to split
 /// demand with) and only genuinely needed for a contested one. See
 /// FareCalculator.EstimatedProfit and AiToolkit.ApplyMarketingCampaign.
+///
+/// M55: QuarterNumber — every real caller (FullGameRunner.cs) always
+/// knows and always passes this; it carries a default (1, not null,
+/// since it's a plain int) purely so the many existing positional test
+/// call sites up through HomeCity don't all need updating, not because
+/// it's meant to be treated as optional the way every field after it
+/// genuinely is. Needed for cooldown math: RouteHistoryByPair's own
+/// timestamps only mean something relative to "how long ago." See
+/// AiToolkit.RecentlyShrunkPairKeys/RecentlyClosedPairKeys.
+///
+/// M55: RouteHistoryByPair, nullable/permissive-default like everything
+/// else, scoped to this airline's own pairs. The missing piece M43 and
+/// M54 each separately diagnosed and deferred — see AiRouteHistory's own
+/// doc comment for the full reasoning.
 /// </summary>
 public sealed record StrategyContext(
     IReadOnlyList<Route> CurrentRoutes,
@@ -87,4 +101,6 @@ public sealed record StrategyContext(
     IReadOnlyDictionary<string, int>? CityWideSlotsRemaining = null,
     IReadOnlyDictionary<string, int>? IdleContestableSlotsByCity = null,
     IReadOnlyDictionary<(string OriginId, string DestinationId), int>? RivalCountByServedRoute = null,
-    IReadOnlyDictionary<(string OriginId, string DestinationId), long>? LastQuarterSeatsCarriedByRoute = null);
+    IReadOnlyDictionary<(string OriginId, string DestinationId), long>? LastQuarterSeatsCarriedByRoute = null,
+    int QuarterNumber = 1,
+    IReadOnlyDictionary<(string OriginId, string DestinationId), AiRouteHistory>? RouteHistoryByPair = null);

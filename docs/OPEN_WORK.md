@@ -18,8 +18,8 @@ Compiled 2026-08-31, cross-referencing every `docs/*_ROADMAP.md`'s own
 writing: M0–M14 (`SIM_CORE_ROADMAP.md`), M15–M19 (`GAME_SETUP_ROADMAP.md`),
 M20–M22 (`HISTORICAL_DYNAMICS_ROADMAP.md`), M23–M24
 (`WIN_CONDITIONS_ROADMAP.md`), M25–M30/M34 (`FINANCIAL_MODEL_ROADMAP.md`,
-M31 retired), M31/M35–M44/M49–M54 (`BASELINE_AI_ROADMAP.md`), M32–M33/M45–M46
-(`ROUTE_CAPACITY_ROADMAP.md`), M47–M48 (`MARKETING_ROADMAP.md`). M54 is
+M31 retired), M31/M35–M44/M49–M55 (`BASELINE_AI_ROADMAP.md`), M32–M33/M45–M46
+(`ROUTE_CAPACITY_ROADMAP.md`), M47–M48 (`MARKETING_ROADMAP.md`). M55 is
 the current highest issued number. Update this line the moment a new
 milestone is opened anywhere.
 
@@ -198,6 +198,30 @@ Closure was pulled entirely rather than shipped broken; its own
 graph-reachability safety-check code was removed too as genuinely dead
 code, with a note for whoever builds the real fix to reuse it.
 
+**M55 (`docs/BASELINE_AI_ROADMAP.md`, real cross-quarter route memory)
+built exactly the fix M43 and M54 both called for, and split the
+thrash-cycle problem cleanly in two.** New `AiRouteHistory` per
+(airline, pair) — `LastShrunkQuarter`, `LastClosedQuarter`,
+`ConsecutiveUnprofitableQuarters` — fed one-quarter-lagged into
+`StrategyContext`. The growth side is genuinely fixed:
+`RecentlyShrunkPairKeys` stops `FindBestPerformingRoute` from re-picking
+a route it just shrunk (M43's own traced mechanism), and
+`RecentlyClosedPairKeys` stops a new-pair search from immediately
+reopening a pair just closed. **Win rate 39.0% → 41.3%** (124/300, avg
+60.8), reproduced identically. The close side was re-tried with real
+memory — requiring sustained unprofitability, not a single quarter's
+reading, before eligibility — on the hypothesis that M54's own churn was
+the same kind of timing problem. It wasn't: a 2-quarter confirmation
+window still closed 68% as many routes as were opened and made things
+worse (12.0% win rate); a 6-quarter window improved but still
+underperformed doing nothing (24.7% vs. 41.3%). The real driver, now
+understood: this AI's own route-*opening* heuristics send a large,
+persistent share of new routes into genuinely sustained unprofitability
+— a selection-quality problem, not a timing one memory can filter out.
+Closure was pulled a second time; `ConsecutiveUnprofitableQuarters`
+stays tracked as infrastructure for whoever improves route-opening
+quality first.
+
 Three items found during these investigations, deliberately deferred
 rather than folded in — all filed under `BASELINE_AI_ROADMAP.md`'s own
 "Kept in mind" now:
@@ -277,16 +301,25 @@ AI strategy/network-topology behavior, not starting conditions.
   Recovers most, not all, of M49's own win-rate drop (9.7%→23.7%,
   against M48's pre-M49 40.7%) — see the active-priority note below for
   the still-open gap between 23.7% and 40.7%.
-- **The route open/shrink/regrow (now also open/close/reopen) thrash
-  cycle** — real (M43), a tried static load-factor floor measurably made
-  things worse. M54 confirmed it hits closure even harder: a full-closure
-  attempt measured 19,679 closures against 25,722 opens in one sweep
-  before being pulled entirely. Needs real cross-quarter state (which
-  route was shrunk/closed how recently), filed for a future
-  AI-strategy-expansion round, not a quick patch — `AiToolkit`'s own
-  removed `ClosureWouldSeverContiguity` (a real, tested, same-quarter
-  graph-reachability safety check — just not the actual bottleneck) is a
-  reasonable starting point for whoever builds it.
+- ~~**The route open/shrink/regrow thrash cycle**~~ — closed by M55:
+  real cross-quarter memory (`AiRouteHistory`/`RecentlyShrunkPairKeys`)
+  stops growth from re-picking a route it just shrunk, exactly the
+  mechanism M43 traced. A tried static load-factor floor had measurably
+  made things worse; the fix needed memory, not a threshold.
+- **The open/close/reopen side is separate and still open, now
+  understood differently than first guessed.** M54's full-closure
+  attempt measured 19,679 closures against 25,722 opens and was pulled.
+  M55 re-tried it with real sustained-unprofitability memory (the fix
+  the growth side itself needed) and it *still* underperformed doing
+  nothing, even at a patient 6-quarter confirmation window (24.7% vs.
+  41.3% win rate, 58% closure-to-open ratio) — not a timing problem
+  after all, but this AI's own route-*opening* heuristics sending a
+  large, persistent share of new routes into genuinely sustained
+  unprofitability. Filed for whoever improves route-opening quality
+  first; `AiToolkit`'s own removed `ClosureWouldSeverContiguity` and
+  `AiRouteHistory.ConsecutiveUnprofitableQuarters` itself (still
+  tracked, unconsumed) are both real starting points for reintroducing
+  closure once that prerequisite exists.
 - **Europe's own idle-fleet stall under `DomesticProfitOptimizerStrategy`**
   — Europe remains the worst-performing region (86.3% bankrupt after
   M43+M44 both) throughout; root cause not yet isolated.

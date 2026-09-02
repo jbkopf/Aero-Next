@@ -523,9 +523,21 @@ public static class BaselineAi
             .FirstOrDefault();
     }
 
-    internal static Route? FindBestPerformingRoute(IReadOnlyList<Route> currentRoutes, GravityDemandModel demandModel)
+    /// <param name="excludePairKeys">
+    /// M55: normalized pair keys (QuarterEngine.NormalizedPairKey) to
+    /// skip entirely, regardless of load factor - null (the default)
+    /// preserves every pre-M55 call site's exact behavior, including
+    /// this method's own frozen legacy caller, BaselineAi.DecideOrders.
+    /// RapidExpansionStrategy passes AiToolkit.RecentlyShrunkPairKeys
+    /// here, the real fix for the oscillation M43 traced: shrinking a
+    /// route mechanically raises its own load factor, so without this a
+    /// route shrunk one quarter could rank as "best performing" again the
+    /// very next and get grown right back.
+    /// </param>
+    internal static Route? FindBestPerformingRoute(IReadOnlyList<Route> currentRoutes, GravityDemandModel demandModel, IReadOnlySet<(string, string)>? excludePairKeys = null)
     {
         return RouteEvaluator.EvaluateNetwork(currentRoutes, demandModel)
+            .Where(l => excludePairKeys is null || !excludePairKeys.Contains(QuarterEngine.NormalizedPairKey(l.Route.Origin, l.Route.Destination)))
             .OrderByDescending(l => l.LoadFactor)
             .ThenBy(l => l.Route.Origin.Id, StringComparer.Ordinal)
             .ThenBy(l => l.Route.Destination.Id, StringComparer.Ordinal)

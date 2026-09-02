@@ -185,16 +185,27 @@ public sealed class DomesticProfitOptimizerStrategy : IAiStrategy
         return FindMostProfitableDomesticPairAcrossTypes(context, candidateTypes, validOriginCityIds);
     }
 
-    /// <summary>M44: validOriginCityIds filters candidates to those touching a city this airline can legally originate a new route from - see AiToolkit.ValidOriginCityIds/TryOrientFromValidOrigin.</summary>
+    /// <summary>
+    /// M44: validOriginCityIds filters candidates to those touching a
+    /// city this airline can legally originate a new route from - see
+    /// AiToolkit.ValidOriginCityIds/TryOrientFromValidOrigin. M55: also
+    /// excludes any pair this airline closed within ReopenCooldownQuarters
+    /// - this strategy's own profit-based ranking already makes this a
+    /// smaller real risk than RapidExpansionStrategy's own demand-only
+    /// search (M54's named risk), but the same rule applies regardless of
+    /// which strategy is looking, for one consistent contract.
+    /// </summary>
     private static (PairDemand Pair, AircraftType Aircraft)? FindMostProfitableDomesticPairAcrossTypes(StrategyContext context, IReadOnlyList<AircraftType> candidateTypes, IReadOnlySet<string> validOriginCityIds)
     {
         var served = context.CurrentRoutes
             .SelectMany(r => new[] { (r.Origin.Id, r.Destination.Id), (r.Destination.Id, r.Origin.Id) })
             .ToHashSet();
+        var recentlyClosed = AiToolkit.RecentlyClosedPairKeys(context, AiToolkit.ReopenCooldownQuarters);
 
         var domesticPairs = context.DemandModel.AllPairs(context.AllCities)
             .Where(p => p.Origin.Region == context.HomeRegion && p.Destination.Region == context.HomeRegion)
             .Where(p => !served.Contains((p.Origin.Id, p.Destination.Id)))
+            .Where(p => !recentlyClosed.Contains(QuarterEngine.NormalizedPairKey(p.Origin, p.Destination)))
             .Where(p => validOriginCityIds.Contains(p.Origin.Id) || validOriginCityIds.Contains(p.Destination.Id))
             .ToList();
 

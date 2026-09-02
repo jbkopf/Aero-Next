@@ -21,8 +21,10 @@ public class RapidExpansionStrategyTests
     // override only where a test specifically needs a different one.
     private static StrategyContext MakeContext(
         IReadOnlyList<Route> routes, IReadOnlyList<City> cities, IReadOnlyList<AircraftType> eraTypes, Region homeRegion,
-        AirlineFleet? fleet = null, int actionCap = 3, Money? cash = null, City? homeCity = null) =>
-        new(routes, actionCap, cities, DemandModel, eraTypes, fleet ?? AirlineFleet.Empty, homeRegion, HomeCity: homeCity ?? cities[0], AvailableCash: cash);
+        AirlineFleet? fleet = null, int actionCap = 3, Money? cash = null, City? homeCity = null,
+        int quarterNumber = 1, System.Collections.Generic.IReadOnlyDictionary<(string OriginId, string DestinationId), AiRouteHistory>? routeHistoryByPair = null) =>
+        new(routes, actionCap, cities, DemandModel, eraTypes, fleet ?? AirlineFleet.Empty, homeRegion, HomeCity: homeCity ?? cities[0], AvailableCash: cash,
+            QuarterNumber: quarterNumber, RouteHistoryByPair: routeHistoryByPair);
 
     [Fact]
     public void DecideOrders_TightBudget_PrefersOpeningANewPair_OverGrowingAnExistingRoute()
@@ -50,6 +52,32 @@ public class RapidExpansionStrategyTests
         var routeOrder = Assert.Single(orders.OfType<RouteOrder>());
         Assert.NotEqual(new HashSet<string> { "home", "near" }, new HashSet<string> { routeOrder.Origin.Id, routeOrder.Destination.Id });
         Assert.Contains("far", new[] { routeOrder.Origin.Id, routeOrder.Destination.Id });
+    }
+
+    [Fact]
+    public void DecideOrders_NewPair_RecentlyClosedPair_NeverReopened()
+    {
+        // M55: this strategy's own demand-only new-pair ranking (no
+        // profit awareness, unlike DomesticProfitOptimizerStrategy) was
+        // M54's own named "known, accepted risk" - without the cooldown,
+        // it could immediately re-propose a pair the shared toolkit just
+        // closed for real, structural reasons. The only candidate pair
+        // here is recently closed, so step 1 should produce nothing.
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
+        var far = MakeCity("far", Region.NorthAmerica, 5, 5, 20);
+        var cities = new[] { home, far };
+        var aircraft = new AircraftType("t", "Test", Seats: 140);
+        var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, aircraft, quantity: 1, FleetOwnershipMode.Owned);
+        var key = QuarterEngine.NormalizedPairKey(home, far);
+        var history = new System.Collections.Generic.Dictionary<(string, string), AiRouteHistory> { [key] = new(LastShrunkQuarter: null, LastClosedQuarter: 9, ConsecutiveUnprofitableQuarters: 0) };
+
+        var context = MakeContext(Array.Empty<Route>(), cities, new[] { aircraft }, Region.NorthAmerica, fleet, quarterNumber: 10, routeHistoryByPair: history);
+
+        var orders = Strategy.DecideOrders(context);
+
+        Assert.Empty(orders.OfType<RouteOrder>());
+        Assert.Empty(orders.OfType<AircraftOrder>());
+        Assert.Empty(orders.OfType<LeaseAircraftOrder>());
     }
 
     [Fact]
@@ -316,6 +344,34 @@ public class RapidExpansionStrategyTests
 
         var routeOrder = Assert.Single(orders.OfType<RouteOrder>());
         Assert.Equal(new HashSet<string> { "home", "near" }, new HashSet<string> { routeOrder.Origin.Id, routeOrder.Destination.Id });
+        Assert.Empty(orders.OfType<AircraftOrder>());
+        Assert.Empty(orders.OfType<LeaseAircraftOrder>());
+    }
+
+    [Fact]
+    public void DecideOrders_GrowExisting_RecentlyShrunkRoute_NeverPickedAgain()
+    {
+        // M55: same fixture as DecideOrders_GrowExisting_IdleUnitAvailable_UsesItDirectly,
+        // but the only existing route was shrunk last quarter - the real
+        // fix for the oscillation M43 traced (shrinking a route
+        // mechanically raises its own load factor, so without this it
+        // could rank "best performing" again the very next quarter and
+        // get grown right back). No other candidate exists, so growth
+        // step 2 should produce nothing at all.
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
+        var near = MakeCity("near", Region.NorthAmerica, 1, 1, 90);
+        var cities = new[] { home, near };
+        var aircraft = new AircraftType("t", "Test", Seats: 140);
+        var existing = new[] { new Route(home, near, aircraft, AircraftCount: 1) };
+        var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, aircraft, quantity: 1, FleetOwnershipMode.Owned);
+        var key = QuarterEngine.NormalizedPairKey(home, near);
+        var history = new System.Collections.Generic.Dictionary<(string, string), AiRouteHistory> { [key] = new(LastShrunkQuarter: 9, LastClosedQuarter: null, ConsecutiveUnprofitableQuarters: 0) };
+
+        var context = MakeContext(existing, cities, new[] { aircraft }, Region.NorthAmerica, fleet, quarterNumber: 10, routeHistoryByPair: history);
+
+        var orders = Strategy.DecideOrders(context);
+
+        Assert.Empty(orders.OfType<RouteOrder>());
         Assert.Empty(orders.OfType<AircraftOrder>());
         Assert.Empty(orders.OfType<LeaseAircraftOrder>());
     }

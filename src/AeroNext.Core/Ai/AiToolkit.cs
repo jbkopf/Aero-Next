@@ -84,6 +84,57 @@ public static class AiToolkit
         return ids;
     }
 
+    /// <summary>M55 (proposed, tunable) — a route shrunk within this many quarters of context.QuarterNumber is excluded from being picked as "best performing" to grow. See RecentlyShrunkPairKeys.</summary>
+    public const int GrowthCooldownQuarters = 2;
+
+    /// <summary>M55 (proposed, tunable) — a pair closed within this many quarters of context.QuarterNumber is excluded from every new-pair search. See RecentlyClosedPairKeys.</summary>
+    public const int ReopenCooldownQuarters = 2;
+
+    /// <summary>
+    /// M55: every pair this airline shrunk (CloseRouteOrder with
+    /// AircraftCount left &gt; 0) within GrowthCooldownQuarters of the
+    /// current quarter - the real fix for the oscillation M43 traced
+    /// (shrinking a route mechanically raises its own load factor, so a
+    /// route shrunk one quarter could rank as "best performing" again the
+    /// very next and get grown right back). A no-op (empty set, same
+    /// permissive-default convention as every other nullable
+    /// StrategyContext field) when RouteHistoryByPair is null.
+    /// </summary>
+    public static IReadOnlySet<(string, string)> RecentlyShrunkPairKeys(StrategyContext context, int cooldownQuarters)
+    {
+        if (context.RouteHistoryByPair is null)
+        {
+            return new HashSet<(string, string)>();
+        }
+
+        return context.RouteHistoryByPair
+            .Where(kv => kv.Value.LastShrunkQuarter is not null && context.QuarterNumber - kv.Value.LastShrunkQuarter.Value < cooldownQuarters)
+            .Select(kv => kv.Key)
+            .ToHashSet();
+    }
+
+    /// <summary>
+    /// M55: every pair this airline closed entirely (CloseRouteOrder down
+    /// to AircraftCount 0) within ReopenCooldownQuarters of the current
+    /// quarter - stops a demand-only new-pair search (RapidExpansionStrategy's
+    /// own, the "known, accepted risk" M54 named but didn't fix) from
+    /// immediately re-proposing a pair the shared toolkit just closed for
+    /// real, structural reasons. A no-op (empty set) when
+    /// RouteHistoryByPair is null.
+    /// </summary>
+    public static IReadOnlySet<(string, string)> RecentlyClosedPairKeys(StrategyContext context, int cooldownQuarters)
+    {
+        if (context.RouteHistoryByPair is null)
+        {
+            return new HashSet<(string, string)>();
+        }
+
+        return context.RouteHistoryByPair
+            .Where(kv => kv.Value.LastClosedQuarter is not null && context.QuarterNumber - kv.Value.LastClosedQuarter.Value < cooldownQuarters)
+            .Select(kv => kv.Key)
+            .ToHashSet();
+    }
+
     /// <summary>
     /// M44: true, and correctly oriented, only if at least one side of
     /// candidate is a valid origin. GravityDemandModel.AllPairs's own
@@ -534,20 +585,32 @@ public static class AiToolkit
                 orders.Add(new CloseRouteOrder(load.Route.Origin, load.Route.Destination));
             }
 
-            // A single-aircraft route just gets the cut above - full
-            // closure was tried here and measured, not shipped. See
-            // docs/BASELINE_AI_ROADMAP.md's M54 for the full numbers: a
-            // same-quarter profit read alone (even gated to uncontested
-            // routes, and even with a same-quarter contiguity-bridge
-            // safety check) fires on far too many routes to be a stable
-            // signal - measured at nearly one full closure for every
-            // route opened (19,679 closures against 25,722 opens across
-            // one 300-game sweep), churning the network almost as fast
-            // as it grows rather than pruning genuinely dead pairs. The
-            // real fix needs cross-quarter memory (has this route stayed
-            // unprofitable for more than one quarter, not just this
-            // one) - already flagged as future work in this roadmap's
-            // own "Kept in mind" section, not built here.
+            // A single-aircraft route just gets the cut above. M54 tried
+            // full closure gated on a same-quarter profit read alone and
+            // measured it firing on nearly as many routes as were ever
+            // opened (19,679 closures against 25,722 opens) - pulled
+            // entirely. M55 tried again with the real fix that finding
+            // called for - requiring ConsecutiveUnprofitableQuarters
+            // sustained for real, not just a same-quarter snapshot - plus
+            // the same uncontested-only and contiguity-bridge safety
+            // checks M54 already reasoned through. It didn't help the way
+            // hypothesized: at a 2-quarter confirmation window, closures
+            // still ran 12,997 against 19,044 opens (68%) and win rate
+            // fell to 12.0% (from 41.3% with closure disabled); a much
+            // more patient 6-quarter window improved but didn't fix it
+            // (58% closure ratio, 24.7% win rate, still well below
+            // 41.3%). The real signal: this AI's own route-opening
+            // heuristics send a large, persistent fraction of new routes
+            // into genuine, sustained unprofitability - not a timing
+            // artifact cross-quarter memory can filter out, but a route-
+            // selection quality problem. Punishing that with closure,
+            // however patiently confirmed, cost more than it saved.
+            // AiRouteHistory.ConsecutiveUnprofitableQuarters is still
+            // tracked (FullGameRunner.cs) - real, working infrastructure
+            // for whoever next improves route-opening quality and wants
+            // to reattempt closure once fewer opens are the reason
+            // closure would ever trigger in the first place. See
+            // docs/BASELINE_AI_ROADMAP.md's M55 for the full numbers.
         }
 
         var validOriginCityIds = ValidOriginCityIds(context);

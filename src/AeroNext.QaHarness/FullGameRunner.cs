@@ -88,6 +88,18 @@ public static class FullGameRunner
         // airline's own quarter-1 route is the M18 guaranteed one anyway
         // (no strategy consults this that early).
         var lastQuarterSeatsCarriedByRouteByName = names.ToDictionary(n => n, n => (IReadOnlyDictionary<(string, string), long>)new Dictionary<(string, string), long>());
+
+        // M55: each airline's own real memory of its own routes' recent
+        // past - the missing piece M43 and M54 each separately diagnosed
+        // and deferred (see AiRouteHistory's own doc comment). A plain
+        // mutable Dictionary, updated in place across the whole game
+        // (unlike lastQuarterSeatsCarriedByRouteByName just above, which
+        // is replaced wholesale each quarter) - StrategyContext reads it
+        // by reference at build time, before this same quarter's own two
+        // update passes run later in the loop, so the one-quarter lag
+        // every other real field here already has falls out naturally,
+        // with no extra bookkeeping needed.
+        var routeHistoryByAirlineName = names.ToDictionary(n => n, n => new Dictionary<(string, string), AiRouteHistory>());
         var humanCount = seats.Count(s => s.IsHuman);
 
         // M18's AircraftQuantity (2), real data never consumed until now —
@@ -239,7 +251,9 @@ public static class FullGameRunner
                         CityWideSlotsRemaining: cityWideSlotsRemaining,
                         IdleContestableSlotsByCity: idleContestableSlotsByCity,
                         RivalCountByServedRoute: rivalCountByServedRoute,
-                        LastQuarterSeatsCarriedByRoute: lastQuarterSeatsCarriedByRouteByName[name]);
+                        LastQuarterSeatsCarriedByRoute: lastQuarterSeatsCarriedByRouteByName[name],
+                        QuarterNumber: q,
+                        RouteHistoryByPair: routeHistoryByAirlineName[name]);
                     var strategy = BaselineAi.SelectStrategy(currentStrategyByName[name], q, strategyContext);
                     currentStrategyByName[name] = strategy;
                     orders = strategy.DecideOrders(strategyContext);
@@ -266,6 +280,25 @@ public static class FullGameRunner
                 if (q == 1 && result.RejectedOrders.Count > 0)
                 {
                     violations.Add(new GameViolation(q, name, "M18's guaranteed quarter-1 route was rejected — should never happen."));
+                }
+
+                // M55, pass 1 of 2: stamp LastShrunkQuarter/LastClosedQuarter
+                // from what actually applied - routes[name] here is still
+                // the *pre*-quarter route list (reassigned just below), so
+                // this is the same technique M54 used to gather its own
+                // 19,679-vs-25,722 closure count: look up the pair's own
+                // AircraftCount before this quarter's own CloseRouteOrder
+                // to tell a shrink from a full closure.
+                foreach (var closeOrder in result.AppliedOrders.OfType<CloseRouteOrder>())
+                {
+                    var pairKey = QuarterEngine.NormalizedPairKey(closeOrder.Origin, closeOrder.Destination);
+                    var before = routes[name].FirstOrDefault(r => r.Origin.Id == closeOrder.Origin.Id && r.Destination.Id == closeOrder.Destination.Id);
+                    var wasFullClosure = before is not null && before.AircraftCount == 1;
+                    var existingHistory = routeHistoryByAirlineName[name].GetValueOrDefault(pairKey) ?? new AiRouteHistory(null, null, 0);
+
+                    routeHistoryByAirlineName[name][pairKey] = wasFullClosure
+                        ? existingHistory with { LastClosedQuarter = q }
+                        : existingHistory with { LastShrunkQuarter = q };
                 }
 
                 routes[name] = result.Routes;
@@ -335,11 +368,30 @@ public static class FullGameRunner
             // M54: this quarter's own real carried seats per route,
             // stored for *next* quarter's own StrategyContext to read -
             // see lastQuarterSeatsCarriedByRouteByName's own declaration.
+            // M55, pass 2 of 2 (same loop, real data already in hand):
+            // ConsecutiveUnprofitableQuarters - increment on a real
+            // negative FareCalculator.EstimatedProfit reading, reset to 0
+            // otherwise. A route closed this quarter already dropped out
+            // of airline.Routes (built from routes[name] above, after
+            // pass 1's own reassignment), so it naturally stops updating
+            // here - its own LastClosedQuarter stamp from pass 1 is what
+            // matters going forward, not a stale profit streak.
             foreach (var airline in league)
             {
-                lastQuarterSeatsCarriedByRouteByName[airline.Name] = market.RouteUsage
+                var usageByPair = market.RouteUsage
                     .Where(u => u.Airline == airline)
-                    .ToDictionary(u => QuarterEngine.NormalizedPairKey(u.Route.Origin, u.Route.Destination), u => u.SeatsUsed);
+                    .ToDictionary(u => QuarterEngine.NormalizedPairKey(u.Route.Origin, u.Route.Destination), u => u);
+
+                lastQuarterSeatsCarriedByRouteByName[airline.Name] = usageByPair.ToDictionary(kv => kv.Key, kv => kv.Value.SeatsUsed);
+
+                foreach (var (pairKey, usage) in usageByPair)
+                {
+                    var profit = FareCalculator.EstimatedProfit(usage.Route, usage.SeatsUsed);
+                    var existingHistory = routeHistoryByAirlineName[airline.Name].GetValueOrDefault(pairKey) ?? new AiRouteHistory(null, null, 0);
+                    var streak = profit < Money.Zero ? existingHistory.ConsecutiveUnprofitableQuarters + 1 : 0;
+
+                    routeHistoryByAirlineName[airline.Name][pairKey] = existingHistory with { ConsecutiveUnprofitableQuarters = streak };
+                }
             }
 
             foreach (var airline in league)

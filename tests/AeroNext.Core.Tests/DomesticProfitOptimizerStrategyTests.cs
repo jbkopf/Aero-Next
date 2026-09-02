@@ -21,8 +21,10 @@ public class DomesticProfitOptimizerStrategyTests
     // override only where a test specifically needs a different one.
     private static StrategyContext MakeContext(
         IReadOnlyList<Route> routes, IReadOnlyList<City> cities, IReadOnlyList<AircraftType> eraTypes, Region homeRegion,
-        AirlineFleet? fleet = null, int actionCap = 3, Money? cash = null, City? homeCity = null) =>
-        new(routes, actionCap, cities, DemandModel, eraTypes, fleet ?? AirlineFleet.Empty, homeRegion, HomeCity: homeCity ?? cities[0], AvailableCash: cash);
+        AirlineFleet? fleet = null, int actionCap = 3, Money? cash = null, City? homeCity = null,
+        int quarterNumber = 1, System.Collections.Generic.IReadOnlyDictionary<(string OriginId, string DestinationId), AiRouteHistory>? routeHistoryByPair = null) =>
+        new(routes, actionCap, cities, DemandModel, eraTypes, fleet ?? AirlineFleet.Empty, homeRegion, HomeCity: homeCity ?? cities[0], AvailableCash: cash,
+            QuarterNumber: quarterNumber, RouteHistoryByPair: routeHistoryByPair);
 
     [Fact]
     public void DecideOrders_BelowCap_OpensMostProfitableIntraRegionPair_NotHighestDemandPair()
@@ -50,6 +52,30 @@ public class DomesticProfitOptimizerStrategyTests
         // check membership, not a specific Origin/Destination order.
         var routeOrder = Assert.Single(orders.OfType<RouteOrder>());
         Assert.Equal(new HashSet<string> { "home", "far" }, new HashSet<string> { routeOrder.Origin.Id, routeOrder.Destination.Id });
+    }
+
+    [Fact]
+    public void DecideOrders_RecentlyClosedPair_NeverReopened()
+    {
+        // M55: the same cooldown rule RapidExpansionStrategy's own
+        // demand-only search needed (M54's named risk) - applied here
+        // too for one consistent contract, even though this strategy's
+        // own profit-based ranking already makes it a smaller real risk.
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
+        var near = MakeCity("near", Region.NorthAmerica, 1, 1, 100);
+        var cities = new[] { home, near };
+        var aircraft = new AircraftType("t", "Test", Seats: 5, RangeKm: 2000, CruiseSpeedKmh: 400, CostPerAvailableSeatKm: 0.15);
+        var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, aircraft, quantity: 1, FleetOwnershipMode.Owned);
+        var key = QuarterEngine.NormalizedPairKey(home, near);
+        var history = new System.Collections.Generic.Dictionary<(string, string), AiRouteHistory> { [key] = new(LastShrunkQuarter: null, LastClosedQuarter: 9, ConsecutiveUnprofitableQuarters: 0) };
+
+        var context = MakeContext(Array.Empty<Route>(), cities, new[] { aircraft }, Region.NorthAmerica, fleet, quarterNumber: 10, routeHistoryByPair: history);
+
+        var orders = Strategy.DecideOrders(context);
+
+        Assert.Empty(orders.OfType<RouteOrder>());
+        Assert.Empty(orders.OfType<AircraftOrder>());
+        Assert.Empty(orders.OfType<LeaseAircraftOrder>());
     }
 
     [Fact]

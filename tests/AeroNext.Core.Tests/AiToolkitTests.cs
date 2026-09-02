@@ -22,10 +22,13 @@ public class AiToolkitTests
         System.Collections.Generic.IReadOnlyDictionary<string, int>? idleContestableSlotsByCity = null,
         int actionCap = 3, Money? availableCash = null, IReadOnlyList<Route>? routes = null,
         System.Collections.Generic.IReadOnlyDictionary<(string OriginId, string DestinationId), int>? rivalCountByServedRoute = null,
-        System.Collections.Generic.IReadOnlyDictionary<(string OriginId, string DestinationId), long>? lastQuarterSeatsCarriedByRoute = null) =>
+        System.Collections.Generic.IReadOnlyDictionary<(string OriginId, string DestinationId), long>? lastQuarterSeatsCarriedByRoute = null,
+        int quarterNumber = 1,
+        System.Collections.Generic.IReadOnlyDictionary<(string OriginId, string DestinationId), AiRouteHistory>? routeHistoryByPair = null) =>
         new(routes ?? Array.Empty<Route>(), actionCap, cities, DemandModel, new[] { Aircraft }, AirlineFleet.Empty, homeCity.Region, homeCity,
             IdleContestableSlotsByCity: idleContestableSlotsByCity, AvailableCash: availableCash,
-            RivalCountByServedRoute: rivalCountByServedRoute, LastQuarterSeatsCarriedByRoute: lastQuarterSeatsCarriedByRoute);
+            RivalCountByServedRoute: rivalCountByServedRoute, LastQuarterSeatsCarriedByRoute: lastQuarterSeatsCarriedByRoute,
+            QuarterNumber: quarterNumber, RouteHistoryByPair: routeHistoryByPair);
 
     // --- ComputeCityWideSlotsRemaining ---
 
@@ -311,6 +314,86 @@ public class AiToolkitTests
         Assert.Single(orders.OfType<HireExecutiveOrder>());
     }
 
+    // --- RecentlyShrunkPairKeys / RecentlyClosedPairKeys (M55) ---
+
+    [Fact]
+    public void RecentlyShrunkPairKeys_NullHistory_ReturnsEmpty()
+    {
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 50);
+        var context = MakeContext(new[] { home }, home, quarterNumber: 10);
+
+        Assert.Empty(AiToolkit.RecentlyShrunkPairKeys(context, cooldownQuarters: 2));
+    }
+
+    [Fact]
+    public void RecentlyShrunkPairKeys_WithinCooldown_Included()
+    {
+        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
+        var key = QuarterEngine.NormalizedPairKey(a, b);
+        var history = new System.Collections.Generic.Dictionary<(string, string), AiRouteHistory> { [key] = new(LastShrunkQuarter: 9, LastClosedQuarter: null, ConsecutiveUnprofitableQuarters: 0) };
+        var context = MakeContext(new[] { a, b }, a, quarterNumber: 10, routeHistoryByPair: history);
+
+        Assert.Contains(key, AiToolkit.RecentlyShrunkPairKeys(context, cooldownQuarters: 2));
+    }
+
+    [Fact]
+    public void RecentlyShrunkPairKeys_OutsideCooldown_Excluded()
+    {
+        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
+        var key = QuarterEngine.NormalizedPairKey(a, b);
+        var history = new System.Collections.Generic.Dictionary<(string, string), AiRouteHistory> { [key] = new(LastShrunkQuarter: 5, LastClosedQuarter: null, ConsecutiveUnprofitableQuarters: 0) };
+        var context = MakeContext(new[] { a, b }, a, quarterNumber: 10, routeHistoryByPair: history);
+
+        Assert.DoesNotContain(key, AiToolkit.RecentlyShrunkPairKeys(context, cooldownQuarters: 2));
+    }
+
+    [Fact]
+    public void RecentlyShrunkPairKeys_NeverShrunk_Excluded()
+    {
+        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
+        var key = QuarterEngine.NormalizedPairKey(a, b);
+        var history = new System.Collections.Generic.Dictionary<(string, string), AiRouteHistory> { [key] = new(LastShrunkQuarter: null, LastClosedQuarter: null, ConsecutiveUnprofitableQuarters: 3) };
+        var context = MakeContext(new[] { a, b }, a, quarterNumber: 10, routeHistoryByPair: history);
+
+        Assert.Empty(AiToolkit.RecentlyShrunkPairKeys(context, cooldownQuarters: 2));
+    }
+
+    [Fact]
+    public void RecentlyClosedPairKeys_NullHistory_ReturnsEmpty()
+    {
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 50);
+        var context = MakeContext(new[] { home }, home, quarterNumber: 10);
+
+        Assert.Empty(AiToolkit.RecentlyClosedPairKeys(context, cooldownQuarters: 2));
+    }
+
+    [Fact]
+    public void RecentlyClosedPairKeys_WithinCooldown_Included()
+    {
+        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
+        var key = QuarterEngine.NormalizedPairKey(a, b);
+        var history = new System.Collections.Generic.Dictionary<(string, string), AiRouteHistory> { [key] = new(LastShrunkQuarter: null, LastClosedQuarter: 9, ConsecutiveUnprofitableQuarters: 0) };
+        var context = MakeContext(new[] { a, b }, a, quarterNumber: 10, routeHistoryByPair: history);
+
+        Assert.Contains(key, AiToolkit.RecentlyClosedPairKeys(context, cooldownQuarters: 2));
+    }
+
+    [Fact]
+    public void RecentlyClosedPairKeys_OutsideCooldown_Excluded()
+    {
+        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
+        var key = QuarterEngine.NormalizedPairKey(a, b);
+        var history = new System.Collections.Generic.Dictionary<(string, string), AiRouteHistory> { [key] = new(LastShrunkQuarter: null, LastClosedQuarter: 5, ConsecutiveUnprofitableQuarters: 0) };
+        var context = MakeContext(new[] { a, b }, a, quarterNumber: 10, routeHistoryByPair: history);
+
+        Assert.DoesNotContain(key, AiToolkit.RecentlyClosedPairKeys(context, cooldownQuarters: 2));
+    }
+
     // --- ApplyManagementToolkit: unprofitable-route response (M37 fare cut, M35 shrink, M54 real profit + closure) ---
 
     [Fact]
@@ -374,21 +457,34 @@ public class AiToolkitTests
     }
 
     [Fact]
-    public void ApplyManagementToolkit_UnprofitableSingleAircraftRoute_NeverClosesEntirely()
+    public void ApplyManagementToolkit_SustainedlyUnprofitableSingleAircraftRoute_StillNeverClosesEntirely()
     {
-        // M54: full closure was designed, built, and measured here (an
-        // uncontested + contiguity-bridge-safe gate), then deliberately
-        // NOT shipped - a 300-game sweep found it firing on almost as
-        // many routes as were opened (19,679 closures against 25,722
-        // opens), churning the network rather than pruning genuinely
-        // dead pairs. See docs/BASELINE_AI_ROADMAP.md's M54 for the full
-        // numbers. This test locks in the shipped behavior: nothing left
-        // to shrink still just means a fare cut, never a close.
+        // M54 tried full closure gated on a same-quarter profit read
+        // alone and pulled it (19,679 closures against 25,722 opens). M55
+        // tried again with real cross-quarter memory - requiring
+        // ConsecutiveUnprofitableQuarters sustained for multiple quarters
+        // in a row, not just this one - on the reasonable hypothesis that
+        // this was a timing/thrash problem memory could fix. It measured
+        // worse than doing nothing at both a 2-quarter window (12.0% win
+        // rate vs. 41.3% with closure disabled) and a much more patient
+        // 6-quarter one (24.7%, still well below 41.3%): the real
+        // driver is this AI's own route-opening heuristics sending a
+        // large, persistent fraction of new routes into genuine,
+        // sustained unprofitability - not a timing artifact, a
+        // route-selection quality problem punishing with closure only
+        // makes worse. See docs/BASELINE_AI_ROADMAP.md's M55 for the
+        // full numbers. This test locks in the shipped behavior: even a
+        // route this airline has now read as unprofitable for many
+        // consecutive quarters in a row still only gets a fare cut.
         var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
         var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
         var route = new Route(a, b, BigAircraft, AircraftCount: 1);
         var rivalCount = new System.Collections.Generic.Dictionary<(string, string), int> { [QuarterEngine.NormalizedPairKey(a, b)] = 0 };
-        var context = MakeContext(new[] { a, b }, a, routes: new[] { route }, rivalCountByServedRoute: rivalCount);
+        var history = new System.Collections.Generic.Dictionary<(string, string), AiRouteHistory>
+        {
+            [QuarterEngine.NormalizedPairKey(a, b)] = new(LastShrunkQuarter: null, LastClosedQuarter: null, ConsecutiveUnprofitableQuarters: 20),
+        };
+        var context = MakeContext(new[] { a, b }, a, routes: new[] { route }, rivalCountByServedRoute: rivalCount, routeHistoryByPair: history);
         var orders = new System.Collections.Generic.List<QuarterOrder>();
 
         AiToolkit.ApplyManagementToolkit(context, orders, new System.Collections.Generic.HashSet<int>(), spentBeforeToolkit: 0);

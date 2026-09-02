@@ -112,8 +112,15 @@ public sealed class RapidExpansionStrategy : IAiStrategy
         }
 
         // 2. Grow the best-performing existing route - runs second here,
-        // so it must exclude whatever step 1 already reserved.
-        var bestExisting = BaselineAi.FindBestPerformingRoute(context.CurrentRoutes, context.DemandModel);
+        // so it must exclude whatever step 1 already reserved. M55:
+        // also excludes any route shrunk within GrowthCooldownQuarters -
+        // the real fix for the oscillation M43 traced (shrinking a route
+        // mechanically raises its own load factor, so without this a
+        // route shrunk one quarter could rank "best performing" again
+        // the very next and get grown right back).
+        var bestExisting = BaselineAi.FindBestPerformingRoute(
+            context.CurrentRoutes, context.DemandModel,
+            excludePairKeys: AiToolkit.RecentlyShrunkPairKeys(context, AiToolkit.GrowthCooldownQuarters));
         if (bestExisting is not null && spent + 1 <= context.ActionCap
             && BaselineAi.HasSlotAtEveryGateway(bestExisting.Origin, bestExisting.Destination, context.AvailableSlotsByCity, slotsReservedByCity)
             && AiToolkit.HasRoomAtEveryCity(bestExisting.Origin, bestExisting.Destination, context.CityWideSlotsRemaining, citySpendReservedByCity))
@@ -193,15 +200,27 @@ public sealed class RapidExpansionStrategy : IAiStrategy
         return (best.Pair!, best.Aircraft);
     }
 
-    /// <summary>M44: validOriginCityIds filters candidates to those touching a city this airline can legally originate a new route from - see AiToolkit.ValidOriginCityIds/TryOrientFromValidOrigin.</summary>
+    /// <summary>
+    /// M44: validOriginCityIds filters candidates to those touching a
+    /// city this airline can legally originate a new route from - see
+    /// AiToolkit.ValidOriginCityIds/TryOrientFromValidOrigin. M55: also
+    /// excludes any pair this airline closed within ReopenCooldownQuarters
+    /// - this strategy's own demand-only ranking (no profit awareness,
+    /// unlike DomesticProfitOptimizerStrategy) was the specific "known,
+    /// accepted risk" M54 named but didn't fix: it could otherwise
+    /// immediately re-propose a pair the shared toolkit just closed for
+    /// real, structural reasons.
+    /// </summary>
     private static PairDemand? FindBestUnservedPairCrossRegionFirst(StrategyContext context, AircraftType aircraft, IReadOnlySet<string> validOriginCityIds)
     {
         var served = context.CurrentRoutes
             .SelectMany(r => new[] { (r.Origin.Id, r.Destination.Id), (r.Destination.Id, r.Origin.Id) })
             .ToHashSet();
+        var recentlyClosed = AiToolkit.RecentlyClosedPairKeys(context, AiToolkit.ReopenCooldownQuarters);
 
         return context.DemandModel.AllPairs(context.AllCities)
             .Where(p => !served.Contains((p.Origin.Id, p.Destination.Id)))
+            .Where(p => !recentlyClosed.Contains(QuarterEngine.NormalizedPairKey(p.Origin, p.Destination)))
             .Where(p => p.DistanceKm <= aircraft.RangeKm)
             .Where(p => validOriginCityIds.Contains(p.Origin.Id) || validOriginCityIds.Contains(p.Destination.Id))
             .OrderByDescending(p => IsCrossRegion(p, context))
