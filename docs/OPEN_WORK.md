@@ -18,10 +18,11 @@ Compiled 2026-08-31, cross-referencing every `docs/*_ROADMAP.md`'s own
 writing: M0–M14 (`SIM_CORE_ROADMAP.md`), M15–M19 (`GAME_SETUP_ROADMAP.md`),
 M20–M22 (`HISTORICAL_DYNAMICS_ROADMAP.md`), M23–M24
 (`WIN_CONDITIONS_ROADMAP.md`), M25–M30/M34 (`FINANCIAL_MODEL_ROADMAP.md`,
-M31 retired), M31/M35–M44/M49–M55 (`BASELINE_AI_ROADMAP.md`), M32–M33/M45–M46
-(`ROUTE_CAPACITY_ROADMAP.md`), M47–M48 (`MARKETING_ROADMAP.md`). M55 is
-the current highest issued number. Update this line the moment a new
-milestone is opened anywhere.
+M31 retired), M31/M35–M44/M49–M56 (`BASELINE_AI_ROADMAP.md`), M32–M33/M45–M46
+(`ROUTE_CAPACITY_ROADMAP.md`), M47–M48 (`MARKETING_ROADMAP.md`). M56 is
+the current highest issued number, and shipped no code change — four
+route-opening-quality designs were tried and all reverted; see its own
+writeup. Update this line the moment a new milestone is opened anywhere.
 
 ---
 
@@ -315,10 +316,22 @@ AI strategy/network-topology behavior, not starting conditions.
   41.3% win rate, 58% closure-to-open ratio) — not a timing problem
   after all, but this AI's own route-*opening* heuristics sending a
   large, persistent share of new routes into genuinely sustained
-  unprofitability. Filed for whoever improves route-opening quality
-  first; `AiToolkit`'s own removed `ClosureWouldSeverContiguity` and
+  unprofitability. **M56 attacked route-opening quality directly (the
+  real 51.7%-bad-open driver traced to `DomesticProfitOptimizerStrategy`'s
+  own revenue-only ranking) and tried four designs, all reverted** —
+  ranking by real profit, by captured demand, a minimal profitability
+  floor, and a load-factor-derated ranking all collapsed win rate
+  (worst: 10.0%; best: 29.0%, still far below 41.3%), because every one
+  of them rewards profitability/utilization once a candidate's own
+  capacity exceeds its pair's demand, which is structurally the same
+  as rewarding ever-smaller aircraft without bound — and this game's
+  economy (action budget as the scarce resource, not capacity) punishes
+  that hard. See `BASELINE_AI_ROADMAP.md`'s M56 for the full math and
+  all four measured regressions. Still filed for whoever attempts a
+  genuinely non-monotonic size-match objective next; `AiToolkit`'s own
+  removed `ClosureWouldSeverContiguity` and
   `AiRouteHistory.ConsecutiveUnprofitableQuarters` itself (still
-  tracked, unconsumed) are both real starting points for reintroducing
+  tracked, unconsumed) remain real starting points for reintroducing
   closure once that prerequisite exists.
 - **Europe's own idle-fleet stall under `DomesticProfitOptimizerStrategy`**
   — Europe remains the worst-performing region (86.3% bankrupt after

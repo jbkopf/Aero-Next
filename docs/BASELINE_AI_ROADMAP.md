@@ -1690,6 +1690,99 @@ infrastructure for whoever next improves route-*opening* quality first,
 since that's the real prerequisite closure needs before it can help
 rather than hurt.
 
+## M56 — AI route-opening logic: four designs tried, all reverted ✅
+
+**Origin:** the user's own direct follow-up right after M55 shipped: "let's
+go ahead and make a plan for AI route opening logic" — M55's own closing
+note named this the real prerequisite closure needs before it can help
+rather than hurt.
+
+**Step 1 confirmed, and corrected, the diagnosis.** A real 244-quarter
+trace (temporary instrumentation in `FullGameRunner.cs`, gathered then
+`git checkout`-reverted, never committed — the same M43/M45/M46
+methodology) found `DomesticProfitOptimizerStrategy` responsible for
+51.7% of its own opens going on to sustained real unprofitability
+(`AiRouteHistory.ConsecutiveUnprofitableQuarters` ≥ 3), against
+`RapidExpansionStrategy`'s 13.1% — the *opposite* weighting from what
+code inspection alone suggested going in (it had flagged
+`RapidExpansionStrategy`'s demand-only search and its longest-range-first
+aircraft pick as the likely culprits). The real driver:
+`DomesticProfitOptimizerStrategy`'s revenue-only ranking
+(fare-per-passenger x carried, unchanged since M40) has no cost or
+capacity term, so a bigger aircraft than a pair's own demand needs never
+lowers the ranking score — carried is capped at demand either way — and
+oversizing was structurally invisible to it.
+
+**Four designs were built, measured against M55's own 41.3%-win-rate
+baseline (124/300, avg quarter 60.8, NorthAmerica 85.5%), and all four
+reverted — none beat it:**
+
+1. **Rank both strategies' new-pair search by real, cost-subtracted
+   profit directly** (`FareCalculator.EstimatedProfit`), including
+   reworking `RapidExpansionStrategy`'s fallback into a joint
+   (pair, aircraft) search. **15.7%** (47/300), avg 17.5, NorthAmerica
+   win share 0%. An ablation (the floor alone disabled) reproduced these
+   exact numbers, proving the regression was the ranking key itself, not
+   the floor sitting on top of it.
+2. **Rank by real captured demand instead of profit,** keeping a floor
+   only as a pre-filter. Worse: **10.0%** (30/300), avg 16.4,
+   SouthWestAsia took 90% of wins, everyone else near zero. Direct
+   instrumentation ruled out literal candidate starvation (the search
+   still found something 85% of the time).
+3. **The most conservative possible design:** change nothing about
+   *which* candidate either strategy's existing, unchanged search picks —
+   only veto that single winning candidate (propose nothing instead) if
+   it fails a real profitability floor of `Money.Zero`. Still a severe
+   regression: **28.0%** (84/300), avg quarter 18.6, and bankruptcy
+   exploded almost everywhere it hadn't before (Europe 98%, EastAsia
+   65%, AustralAsia 63%, SouthAmerica 71%). Ablating the floor alone
+   exactly reproduced M55's own 124/300, avg 60.8, NorthAmerica 85.5% —
+   proving the floor was 100% the cause, not a bug in the revert.
+   Algebraically, under this fare model's flat 30%-margin default fare,
+   `EstimatedProfit >= 0` requires carried ≥ ~77% of seats offered —
+   the "break-even" floor was actually demanding near-full load factor
+   from a route's very first quarter, with no ramp-up allowance at all.
+4. **A load-factor-derated ranking, no absolute floor anywhere** —
+   `DomesticProfitOptimizerStrategy`'s ranking key changed to revenue x
+   predicted load factor (`RapidExpansionStrategy` left completely
+   untouched, since it wasn't the dominant driver). Confirmed by a real
+   unit test to pick a well-fit aircraft over a grossly oversized one on
+   the same pair, exactly as intended — and still a severe regression in
+   the full sweep: **29.0%** (87/300), avg 21.4, nearly the same
+   bankruptcy pattern as design 3 (Europe 98%, EastAsia 64.5%,
+   AustralAsia 66%, SouthAmerica 36.7%).
+
+**Why design 4 failed too, and what that proves generally.** Once a
+candidate's own capacity exceeds a pair's demand, `carriedPassengers` is
+capped at that same demand figure for every such candidate — a constant.
+Any ranking key that rewards higher utilization or profitability in that
+regime is therefore, in that regime, a function of capacity alone, and
+every version tried (real profit's subtracted cost term, load factor's
+capacity denominator) is monotonic in the same direction: it favors
+ever-smaller capacity without bound, not just moderately-better-fit
+capacity. This isn't a property of any one formula — it's structural,
+built into the `carried = min(demand, capacity)` cap this whole fare
+model rests on. And this game's economy punishes that particular bias
+unusually hard, because the truly scarce resource is the per-quarter
+**action budget** (this project's own core design pillar), not aircraft
+capacity: an AI that systematically commits to the smallest aircraft that
+merely clears whatever bar is in front of it grows total network capacity
+far more slowly per action spent than one that matches aircraft to real
+market size — which is exactly the mechanism behind every one of these
+four regressions' widespread bankruptcy (falling behind on fixed
+per-aircraft/per-route costs before out-growing them).
+
+**Nothing shipped.** All four designs were fully reverted; the working
+tree matches `main` (M55's own shipped state) exactly, confirmed via
+`git diff --stat`. No commit exists for this milestone. The real root
+cause from step 1 (`DomesticProfitOptimizerStrategy`'s revenue-only
+ranking, 51.7% bad-open rate) remains open — see "Kept in mind" below.
+Fixing it needs a genuinely different kind of objective than anything
+tried here: something that penalizes a poor size *match* without ever
+rewarding minimal size on its own, likely non-monotonic (peaking near a
+target load factor rather than decreasing all the way down), which no
+design this round attempted.
+
 ---
 
 ## Kept in mind, not scheduled
@@ -1736,7 +1829,17 @@ rather than hurt.
   bottleneck in either round) and `AiRouteHistory.ConsecutiveUnprofitableQuarters`
   itself (still tracked, unconsumed) are both reasonable starting points
   for whoever improves route-opening quality and wants to reintroduce
-  closure alongside it.
+  closure alongside it. **M56 tried four designs directly at
+  `DomesticProfitOptimizerStrategy`'s own revenue-only ranking (the real,
+  traced 51.7%-bad-open driver) and reverted all four** - every one that
+  rewarded profitability/utilization once a candidate's own capacity
+  exceeds its pair's demand collapsed into favoring the smallest
+  aircraft available, without bound, which this game's economy punishes
+  hard (slower total capacity growth per action spent). The real fix
+  needs an objective that's non-monotonic in capacity - penalizing a
+  poor size *match* in both directions, never rewarding minimal size for
+  its own sake - which nothing tried in M56 attempted. See M56's own
+  writeup above for the full math and all four measured regressions.
 - **Europe's own idle-fleet stall under `DomesticProfitOptimizerStrategy`**
   — flagged in M43, not yet root-caused. A natural next round in the
   regional-balance effort, alongside the thrash-cycle item above.
