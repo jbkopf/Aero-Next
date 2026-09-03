@@ -25,6 +25,26 @@ public static class CityCatalog
     /// </summary>
     public const int MinimumStartingCapacity = 2;
 
+    /// <summary>
+    /// M61 — the concrete engineering guard against the exact failure class
+    /// that already broke two earlier hub-demand attempts twice this
+    /// project's own history (see docs/HUB_DEMAND_DESIGN.md): an additive
+    /// bonus that ends up a large *percentage* of a small city's own base.
+    /// Enforced at data-load time rather than left to one-time manual
+    /// authoring review, so it's structurally impossible to author a city
+    /// whose HubQuality could ever swing a future consumer's math (M63's
+    /// own DemandWeight + HubQuality bonus) by more than this fraction.
+    /// </summary>
+    public const double MaxHubQualityToDemandWeightRatio = 0.6;
+
+    /// <summary>
+    /// M61 — a flat sanity ceiling on top of the ratio cap above, so a
+    /// hypothetical future city with an enormous DemandWeight couldn't
+    /// still be authored an implausibly large HubQuality just because the
+    /// ratio happens to allow it.
+    /// </summary>
+    public const int MaxAuthoredHubQuality = 40;
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
@@ -108,6 +128,24 @@ public static class CityCatalog
             if (city.AutoCapacity is < MinimumStartingCapacity)
             {
                 throw new InvalidDataException($"City '{city.Id}' has an AutoCapacity below the minimum starting capacity of {MinimumStartingCapacity}.");
+            }
+
+            // M61: HubQuality must be non-negative and bounded relative to
+            // this city's own DemandWeight - see MaxHubQualityToDemandWeightRatio's
+            // own doc comment for why this specific guard exists.
+            if (city.HubQuality < 0)
+            {
+                throw new InvalidDataException($"City '{city.Id}' must have a non-negative HubQuality.");
+            }
+
+            if (city.HubQuality > MaxAuthoredHubQuality)
+            {
+                throw new InvalidDataException($"City '{city.Id}' has a HubQuality of {city.HubQuality}, above the flat ceiling of {MaxAuthoredHubQuality}.");
+            }
+
+            if (city.HubQuality > MaxHubQualityToDemandWeightRatio * city.DemandWeight)
+            {
+                throw new InvalidDataException($"City '{city.Id}' has a HubQuality of {city.HubQuality}, more than {MaxHubQualityToDemandWeightRatio:P0} of its DemandWeight ({city.DemandWeight}).");
             }
         }
     }

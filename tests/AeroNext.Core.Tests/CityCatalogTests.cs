@@ -493,4 +493,136 @@ public class CityCatalogTests
                 $"{city.Id} has starting capacity {startingCapacity}, below the minimum of {CityCatalog.MinimumStartingCapacity}.");
         }
     }
+
+    // --- M61: HubQuality ---
+
+    [Fact]
+    public void Load_MissingHubQualityField_DefaultsToZero_NotAThrow()
+    {
+        // Every pre-M61 JSON literal (this file's own, and any older
+        // fixture) never includes hubQuality at all - City's own default
+        // parameter must keep deserializing them, not require the field.
+        const string json = """
+        [
+          { "id": "old", "name": "Old Fixture", "region": "EastAsia", "latitude": 0, "longitude": 0, "demandWeight": 10, "isGateway": false, "gateCapacity": null, "autoCapacity": 2 }
+        ]
+        """;
+
+        var cities = CityCatalog.Load(json);
+
+        Assert.Equal(0, cities.Single().HubQuality);
+    }
+
+    [Fact]
+    public void Load_ThrowsOnNegativeHubQuality()
+    {
+        const string json = """
+        [
+          { "id": "bad", "name": "Bad", "region": "EastAsia", "latitude": 0, "longitude": 0, "demandWeight": 50, "isGateway": false, "gateCapacity": null, "autoCapacity": 2, "hubQuality": -1 }
+        ]
+        """;
+
+        Assert.Throws<InvalidDataException>(() => CityCatalog.Load(json));
+    }
+
+    [Fact]
+    public void Load_ThrowsWhenHubQualityExceedsFlatCeiling()
+    {
+        // DemandWeight is large enough that the ratio cap alone wouldn't
+        // catch this (MaxAuthoredHubQuality + 1 stays under 60% of 1000) -
+        // this is specifically the flat-ceiling check, not the ratio one.
+        const string json = """
+        [
+          { "id": "bad", "name": "Bad", "region": "EastAsia", "latitude": 0, "longitude": 0, "demandWeight": 1000, "isGateway": false, "gateCapacity": null, "autoCapacity": 2, "hubQuality": 41 }
+        ]
+        """;
+
+        Assert.Throws<InvalidDataException>(() => CityCatalog.Load(json));
+    }
+
+    [Fact]
+    public void Load_ThrowsWhenHubQualityExceedsDemandWeightRatio()
+    {
+        // hubQuality 25 against demandWeight 40 is a 0.625 ratio, above
+        // MaxHubQualityToDemandWeightRatio (0.6) - the exact failure class
+        // this guard exists to catch (a bonus that's a large percentage of
+        // a small city's own base), enforced at data-load time.
+        const string json = """
+        [
+          { "id": "bad", "name": "Bad", "region": "EastAsia", "latitude": 0, "longitude": 0, "demandWeight": 40, "isGateway": false, "gateCapacity": null, "autoCapacity": 2, "hubQuality": 25 }
+        ]
+        """;
+
+        Assert.Throws<InvalidDataException>(() => CityCatalog.Load(json));
+    }
+
+    [Fact]
+    public void Load_AcceptsHubQualityAtZeroAndAtRatioBoundary()
+    {
+        const string zeroJson = """
+        [
+          { "id": "ok1", "name": "OK", "region": "EastAsia", "latitude": 0, "longitude": 0, "demandWeight": 40, "isGateway": false, "gateCapacity": null, "autoCapacity": 2, "hubQuality": 0 }
+        ]
+        """;
+
+        // Exactly CityCatalog.MaxHubQualityToDemandWeightRatio (0.6) of 40 - the boundary itself must not throw.
+        const string boundaryJson = """
+        [
+          { "id": "ok2", "name": "OK", "region": "EastAsia", "latitude": 0, "longitude": 0, "demandWeight": 40, "isGateway": false, "gateCapacity": null, "autoCapacity": 2, "hubQuality": 24 }
+        ]
+        """;
+
+        Assert.Equal(0, CityCatalog.Load(zeroJson).Single().HubQuality);
+        Assert.Equal(24, CityCatalog.Load(boundaryJson).Single().HubQuality);
+    }
+
+    [Fact]
+    public void LoadFile_RealDataset_AtlantaAndDubaiHaveMeaningfullyHigherHubQualityThanTypicalCity()
+    {
+        // Coarse, not pinned to exact authored numbers, so future
+        // re-tuning of the tier values doesn't require test surgery -
+        // just locks in the design doc's own named examples (Atlanta,
+        // Dubai: real-world hubs where most traffic connects rather than
+        // originates/terminates) as genuinely elevated over the median.
+        var cities = CityCatalog.LoadFile(DataPath);
+        var median = cities.Select(c => c.HubQuality).OrderBy(v => v).ElementAt(cities.Count / 2);
+
+        var atlanta = cities.Single(c => c.Id == "atl");
+        var dubai = cities.Single(c => c.Id == "dxb");
+
+        Assert.True(atlanta.HubQuality > median, $"Atlanta's HubQuality ({atlanta.HubQuality}) should exceed the dataset median ({median}).");
+        Assert.True(dubai.HubQuality > median, $"Dubai's HubQuality ({dubai.HubQuality}) should exceed the dataset median ({median}).");
+    }
+
+    [Fact]
+    public void LoadFile_RealDataset_HubQualityRankingDiffersFromDemandWeightAndGatewayStatus()
+    {
+        // The design doc's own explicit instruction: HubQuality must not
+        // just be a relabeling of DemandWeight or IsGateway. Concretely:
+        // several of the highest-DemandWeight cities (JFK, Tokyo, Beijing,
+        // Los Angeles, Shanghai - all >= 85) carry zero HubQuality, and at
+        // least one non-gateway city (Atlanta) outranks every gateway.
+        var cities = CityCatalog.LoadFile(DataPath);
+
+        Assert.All(new[] { "jfk", "hnd", "pek", "lax", "pvg" }, id =>
+            Assert.Equal(0, cities.Single(c => c.Id == id).HubQuality));
+
+        var atlanta = cities.Single(c => c.Id == "atl");
+        Assert.False(atlanta.IsGateway);
+        Assert.True(cities.Where(c => c.IsGateway).All(g => g.HubQuality < atlanta.HubQuality));
+    }
+
+    [Fact]
+    public void LoadFile_RealDataset_EveryHubQualityRespectsBothCaps()
+    {
+        var cities = CityCatalog.LoadFile(DataPath);
+
+        Assert.All(cities, city =>
+        {
+            Assert.True(city.HubQuality >= 0, $"{city.Id} has a negative HubQuality.");
+            Assert.True(city.HubQuality <= CityCatalog.MaxAuthoredHubQuality, $"{city.Id} exceeds the flat HubQuality ceiling.");
+            Assert.True(city.HubQuality <= CityCatalog.MaxHubQualityToDemandWeightRatio * city.DemandWeight,
+                $"{city.Id} exceeds the HubQuality-to-DemandWeight ratio cap.");
+        });
+    }
 }
