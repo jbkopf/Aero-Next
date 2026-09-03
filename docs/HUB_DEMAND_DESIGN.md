@@ -233,10 +233,13 @@ the reverse. Hub quality now plugs in at three points instead of one:
    NYC is established, not because Boston got worse, but because it isn't
    adding new catchment). Both terms are airline-specific and itinerary-
    selection-scoped, same contained surface as item 1 — still never touches
-   `ForPair` or any other airline's view of the same city. Precise metric
-   for "already a hub" (e.g. share of the airline's own routes touching
-   that city) and for "how close counts as substitutable" are implementation
-   questions, not resolved here.
+   `ForPair` or any other airline's view of the same city. **Decided:**
+   "already a hub" is measured as a route-count-share proxy (some share of
+   the airline's own existing routes touching that city) — a full
+   explicit hub-designation system is the real long-term answer but is
+   deferred, out of scope here (see Decisions below and
+   `docs/OPEN_WORK.md`). "How close counts as substitutable" is still an
+   implementation-time question, not resolved in this document.
 3. **A bounded, additive innate-hub-demand term inside `ForPair` itself**
    (the follow-up refinement's first point — this is the one piece of Path
    B that *does* touch the O&D layer, deliberately shaped to avoid both
@@ -334,37 +337,47 @@ items 1-2 — no `ForPair` change):**
 
 ## Recommendation
 
-Build Path B, step 1 alone first: a new `HubQuality` city field, wired into
-`NetworkPlanner.FindBestHub`'s ranking for detour, loyalty, and
-substitution (items 1-2) — no `ForPair` change yet — with its own real
-300-game sweep before anything else changes. Measure whether that alone
-produces the kind of network topology the user is after (real hubs
-attracting real connecting traffic, airlines consolidating around one hub
-per catchment region instead of stacking adjacent cities) before adding
-step 2's innate-demand bonus inside `ForPair`, which needs its own separate
-measurement precisely because it's the one piece touching the layer that
-broke twice already. Path A stays off the table unless step 1 and step 2
-together are measured and still found insufficient.
+**Superseded by the Decisions above where the two disagree** — kept here
+for the original reasoning. The document's own original recommendation was
+to build step 1 (selection/loyalty/substitution) alone first, then measure,
+then decide on step 2 (the `ForPair` bonus) separately, specifically to
+isolate attribution if a sweep regressed. The user's decision is to build
+both together as one round instead: a new `HubQuality` city field, wired
+into `NetworkPlanner.FindBestHub`'s ranking (detour + loyalty +
+substitution) *and* into a bounded additive bonus inside `ForPair`, shipped
+and measured together via one real 300-game sweep. The implementation plan
+needs to keep the two halves independently toggleable/revertible so a
+regression can still be isolated after the fact — see Decisions item 2.
+Path A stays off the table unless this combined round is measured and
+still found insufficient.
 
-## Open questions for the user
+## Decisions (resolved with the user, following the open questions above)
 
-1. Does `HubQuality` need to be a brand-new authored field (most accurate,
-   most authoring effort — every one of ~99 cities needs a real,
-   inspected value), or would a cheaper starting point be acceptable —
-   e.g., deriving it from `DemandWeight` with a manually-authored
-   *override list* for the real Atlanta/Dubai-style exceptions (cities
-   whose real-world hub role doesn't match their `DemandWeight`)?
-2. Should step 1 (selection + loyalty + substitution, no `ForPair` change)
-   ship and be measured on its own before step 2 (the innate-demand bonus
-   inside `ForPair`) is even designed, as recommended above — or is the
-   innate-demand half the actually important part to the user (it's the
-   piece that directly represents the Buffalo→NYC→Miami pressure), worth
-   designing together now rather than deferring?
-3. For loyalty/substitution: is "share of the airline's own existing
-   routes touching this city" a reasonable proxy for "already treats this
-   as a hub," or does the user have a more specific real-world definition
-   in mind (e.g. a minimum route count, or an explicit hub designation the
-   player/AI sets rather than one inferred from route counts)?
-4. Is Path A (the full trip-generation/distribution rearchitecture) worth
-   keeping on the table for later, or should this document's own
-   recommendation against it for now be treated as settled?
+1. **`HubQuality` authoring: new authored field.** Every city gets its own
+   real, inspected value — not derived from `DemandWeight`. Confirms the
+   document's own recommendation.
+2. **Step ordering: build and ship step 1 and step 2 together, as one
+   round** — selection/loyalty/substitution (`FindBestHub`) and the
+   innate-demand bonus (`ForPair`) land in the same milestone, measured
+   together via one real 300-game sweep. This overrides the document's
+   original "step 1 alone first" recommendation, which was about isolating
+   attribution if a sweep regresses — the user's call is to build the
+   whole intended behavior at once instead. **Implication for
+   implementation:** if the combined sweep does regress, the two halves
+   (routing/loyalty vs. the additive `ForPair` bonus) need to be
+   independently toggleable or independently revertible so the cause can
+   still be isolated after the fact, even though they weren't built or
+   measured that way. Carry this into the implementation plan explicitly.
+3. **Loyalty/substitution metric: route-count-share proxy for now.** A
+   full explicit hub-designation system (the player or AI marks specific
+   cities as their hubs, with its own bonuses and restrictions) is the
+   real long-term answer the user wants — but is explicitly **out of
+   scope for this round**, tracked separately (see `docs/OPEN_WORK.md`).
+   Loyalty/substitution in this round uses the cheaper, fully-derivable
+   proxy instead: "already a hub" ≈ some share of the airline's own
+   existing routes touching that city. When the explicit-designation
+   system is eventually built, this proxy is the natural thing it
+   replaces — not two competing systems.
+4. **Path A: settled against, for now.** Off the table unless Path B
+   (both steps, now being built together) is shipped, measured, and found
+   insufficient.

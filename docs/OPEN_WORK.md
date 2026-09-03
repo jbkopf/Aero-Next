@@ -378,6 +378,20 @@ AI strategy/network-topology behavior, not starting conditions.
   deliberate close-then-reopen sequencing, and is doubly blocked on the
   same cross-quarter-state gap as the thrash-cycle item above.
 
+### `HUB_DEMAND_DESIGN.md`
+- **Player-designated hubs** — a real system letting the player (and AI)
+  explicitly mark specific cities as their own hubs, with associated
+  bonuses and restrictions (e.g. preferential treatment in itinerary
+  routing, possibly a cap on how many an airline can hold at once).
+  Surfaced by the user during the hub-and-spoke demand design pass as the
+  real long-term answer to "how does the game know an airline already
+  treats a city as a hub" — deliberately kept out of that round's scope.
+  Until this exists, hub loyalty/substitution in
+  `NetworkPlanner.FindBestHub` uses a cheaper derived proxy (share of the
+  airline's own existing routes touching a city) instead of a real
+  designation; when this system is eventually built, it should replace
+  that proxy rather than coexist with it.
+
 ### `WIN_CONDITIONS_ROADMAP.md`
 - **Difficulty tiers** — explicitly deferred, no `Difficulty` concept
   exists anywhere yet.
