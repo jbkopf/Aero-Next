@@ -157,6 +157,21 @@ public static class QuarterEngine
     /// otherwise multiple airlines could each independently see spare
     /// room and collectively overshoot a hard cap.
     /// </param>
+    /// <param name="pendingNegotiationCityIds">
+    /// M59: null (the default) preserves fully permissive behavior — a
+    /// NegotiationOrder is never rejected for an already-pending bid at
+    /// the same city, exactly as before this parameter existed. Passing
+    /// this airline's own set of city ids it already has an unresolved
+    /// bid at (the same set StrategyContext.PendingNegotiationCityIds
+    /// already carries — FullGameRunner.cs computes it once and threads
+    /// it into both) turns on the real, engine-enforced rule: a second
+    /// NegotiationOrder targeting a city already in this set is rejected
+    /// outright, before any cash is spent — checked here, not left to
+    /// LandingRightsResolver.Submit's own defense-in-depth no-op,
+    /// specifically so the rejection happens *before* the cash-debit
+    /// step below ever runs, rather than wasting a real bid's worth of
+    /// cash on a silently-dropped duplicate.
+    /// </param>
     public static QuarterResult RunQuarter(
         int quarterNumber,
         IReadOnlyList<Route> currentRoutes,
@@ -169,7 +184,8 @@ public static class QuarterEngine
         IReadOnlyDictionary<string, int>? availableSlotsByCity = null,
         Money? currentDebtBalance = null,
         City? homeCity = null,
-        IReadOnlyDictionary<string, int>? cityWideSlotsRemaining = null)
+        IReadOnlyDictionary<string, int>? cityWideSlotsRemaining = null,
+        IReadOnlySet<string>? pendingNegotiationCityIds = null)
     {
         var validOriginCityIds = homeCity is null
             ? null
@@ -233,6 +249,17 @@ public static class QuarterEngine
                     rejected.Add(order);
                     continue;
                 }
+            }
+
+            // M59: checked before the cash gate below, so a duplicate
+            // bid is rejected without ever spending cash on it - the
+            // real, engine-enforced version of the AI's own
+            // CitiesAlreadyPursuedForNegotiation convention.
+            if (order is NegotiationOrder pendingCheckOrder && pendingNegotiationCityIds is not null
+                && pendingNegotiationCityIds.Contains(pendingCheckOrder.TargetCity.Id))
+            {
+                rejected.Add(order);
+                continue;
             }
 
             if (order is NegotiationOrder negotiationOrder && availableCash is not null)

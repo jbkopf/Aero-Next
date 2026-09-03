@@ -29,10 +29,54 @@ public static class LandingRightsResolver
     /// <summary>Placeholder tunable: how much a loss raises standing (and therefore future Score) at that city.</summary>
     private const double StandingGainPerLoss = 0.2;
 
-    public static LandingRightsBoard Submit(LandingRightsBoard board, Airline airline, NegotiationOrder order, int currentQuarter, SimRng rng)
+    /// <summary>
+    /// M59 (proposed, tunable) — the largest fraction of a city's own
+    /// current total slots (starting capacity + any M46 growth bonus) a
+    /// single bid may request, minimum 1 regardless of how small that
+    /// fraction rounds down to. Enforced by clamping in Submit, never by
+    /// rejecting the bid outright.
+    /// </summary>
+    public const double BidSlotRequestCapFraction = 0.3;
+
+    /// <param name="capacityBonusByCity">
+    /// M59: extra slots each city has earned via M46's own periodic
+    /// expansion (see CityCapacityBoard) — the same value ResolveQuarter
+    /// already accepts, threaded here too since the slot-request cap is
+    /// against the city's *current* total, not just its starting figure.
+    /// Null (the default) preserves every pre-M59 call site's exact
+    /// behavior (the cap applies against starting capacity alone).
+    /// </param>
+    public static LandingRightsBoard Submit(
+        LandingRightsBoard board, Airline airline, NegotiationOrder order, int currentQuarter, SimRng rng,
+        IReadOnlyDictionary<string, int>? capacityBonusByCity = null)
     {
+        // M59: no duplicate pending bid at the same city - a real,
+        // engine-enforced rule now, not just the AI's own
+        // CitiesAlreadyPursuedForNegotiation convention. The real,
+        // cash-safe enforcement is QuarterEngine.RunQuarter's own
+        // pendingNegotiationCityIds rejection, which runs *before* any
+        // cash is spent; this is a defense-in-depth backstop for any
+        // caller that doesn't thread that parameter through - a silent
+        // no-op, matching this codebase's own "never attempt what will
+        // predictably fail" convention, rather than throwing.
+        if (board.Pending.Any(p => p.Airline.Name == airline.Name && p.TargetCity.Id == order.TargetCity.Id))
+        {
+            return board;
+        }
+
+        // M59: clamp, never reject outright - "minimum 1" only means
+        // something if a request that's too large still becomes a real,
+        // smaller bid rather than nothing at all. Bid itself never
+        // scales with quantity (no per-slot cost model exists), so
+        // clamping down costs the bidder nothing extra beyond the
+        // smaller grant.
+        var startingCapacity = order.TargetCity.GateCapacity ?? order.TargetCity.AutoCapacity ?? 0;
+        var totalSlots = startingCapacity + (capacityBonusByCity?.GetValueOrDefault(order.TargetCity.Id) ?? 0);
+        var maxRequestable = Math.Max(1, (int)Math.Floor(BidSlotRequestCapFraction * totalSlots));
+        var slotsRequested = Math.Clamp(order.SlotsRequested, 1, maxRequestable);
+
         var delay = rng.Next(MinDelayQuarters, MaxDelayQuartersExclusive);
-        var pending = new PendingNegotiation(airline, order.TargetCity, order.Bid, currentQuarter, currentQuarter + delay);
+        var pending = new PendingNegotiation(airline, order.TargetCity, order.Bid, currentQuarter, currentQuarter + delay, slotsRequested);
 
         return board with { Pending = board.Pending.Append(pending).ToList() };
     }
@@ -74,10 +118,11 @@ public static class LandingRightsResolver
         foreach (var group in due.GroupBy(p => p.TargetCity.Id).OrderBy(g => g.Key, StringComparer.Ordinal))
         {
             var city = group.First().TargetCity;
-            var remainingSlots = board.SlotsRemaining(city, capacityBonusByCity?.GetValueOrDefault(city.Id) ?? 0);
+            var freshRemaining = board.SlotsRemaining(city, capacityBonusByCity?.GetValueOrDefault(city.Id) ?? 0);
             var idleExpiredHolders = routesByAirline is null
                 ? Array.Empty<string>()
                 : board.IdleExpiredHolders(city, routesByAirline);
+            var transferIndex = 0;
 
             var ranked = group
                 .Select(p => (Pending: p, Score: p.Bid.Cents * board.GetStanding(p.Airline, city)))
@@ -85,32 +130,61 @@ public static class LandingRightsResolver
                 .ThenBy(x => x.Pending.Airline.Name, StringComparer.Ordinal)
                 .ToList();
 
-            for (var i = 0; i < ranked.Count; i++)
+            // M59: running-counter allocation, not index-vs-remainingSlots
+            // - a single ranked bidder can now consume more than one
+            // unit (real multi-slot bidding), walked in the same
+            // Score-descending order as before. Fresh grants are drawn
+            // first, any shortfall from idle-expired transfers next,
+            // exactly the same fresh-then-transfer priority the old
+            // index-based check encoded. A bid that can't get its full
+            // request still gets whatever's left (partial fulfillment) -
+            // when every bid requests exactly 1 (every pre-M59 caller),
+            // this reproduces the old win/lose behavior exactly.
+            foreach (var (pending, _) in ranked)
             {
-                var pending = ranked[i].Pending;
-                var wonFreshGrant = i < remainingSlots;
-                var wonTransfer = !wonFreshGrant && i < remainingSlots + idleExpiredHolders.Count;
-                var won = wonFreshGrant || wonTransfer;
                 var key = (pending.Airline.Name, city.Id);
+                var requested = pending.SlotsRequested;
 
-                if (wonFreshGrant)
+                var freshGranted = Math.Min(requested, freshRemaining);
+                freshRemaining -= freshGranted;
+
+                var stillNeeded = requested - freshGranted;
+                var transferAvailable = idleExpiredHolders.Count - transferIndex;
+                var transferGranted = Math.Min(stillNeeded, transferAvailable);
+
+                for (var t = 0; t < transferGranted; t++)
                 {
-                    slots[city.Id] = slots.GetValueOrDefault(city.Id) + 1;
-                    slotsHeld[key] = slotsHeld.GetValueOrDefault(key) + 1;
-                }
-                else if (wonTransfer)
-                {
-                    var fromHolder = idleExpiredHolders[i - remainingSlots];
+                    var fromHolder = idleExpiredHolders[transferIndex];
                     var fromKey = (fromHolder, city.Id);
                     slotsHeld[fromKey] = slotsHeld.GetValueOrDefault(fromKey) - 1;
-                    slotsHeld[key] = slotsHeld.GetValueOrDefault(key) + 1;
+                    transferIndex++;
                 }
-                else
+
+                var totalGranted = freshGranted + transferGranted;
+
+                if (freshGranted > 0)
+                {
+                    slots[city.Id] = slots.GetValueOrDefault(city.Id) + freshGranted;
+                }
+
+                if (totalGranted > 0)
+                {
+                    slotsHeld[key] = slotsHeld.GetValueOrDefault(key) + totalGranted;
+                }
+
+                // M59: any unfulfilled remainder - a full loss included -
+                // raises Standing by the same flat StandingGainPerLoss
+                // once, not scaled by how many slots were missed. Same
+                // flat generosity the old binary win/lose model already
+                // had, extended rather than re-tuned.
+                if (totalGranted < requested)
                 {
                     standing[key] = board.GetStanding(pending.Airline, city) + StandingGainPerLoss;
                 }
 
-                outcomes.Add(new NegotiationOutcome(pending.Airline, city, pending.Bid, won, standing.GetValueOrDefault(key, board.GetStanding(pending.Airline, city))));
+                outcomes.Add(new NegotiationOutcome(
+                    pending.Airline, city, pending.Bid, totalGranted > 0,
+                    standing.GetValueOrDefault(key, board.GetStanding(pending.Airline, city)), totalGranted));
             }
         }
 

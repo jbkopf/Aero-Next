@@ -14,16 +14,23 @@ Compiled 2026-08-31, cross-referencing every `docs/*_ROADMAP.md`'s own
 
 ## Milestone status
 
-**Every milestone across all 9 roadmap docs is complete** as of this
-writing: M0–M14 (`SIM_CORE_ROADMAP.md`), M15–M19 (`GAME_SETUP_ROADMAP.md`),
-M20–M22 (`HISTORICAL_DYNAMICS_ROADMAP.md`), M23–M24
-(`WIN_CONDITIONS_ROADMAP.md`), M25–M30/M34 (`FINANCIAL_MODEL_ROADMAP.md`,
-M31 retired), M31/M35–M44/M49–M57 (`BASELINE_AI_ROADMAP.md`), M32–M33/M45–M46
-(`ROUTE_CAPACITY_ROADMAP.md`), M47–M48 (`MARKETING_ROADMAP.md`). M57 is
-the current highest issued number. M56 shipped no code change (four
-route-opening-quality designs tried and reverted); M57 followed with a
-real, contained fix — see both writeups. Update this line the moment a
-new milestone is opened anywhere.
+**Every milestone across all 9 roadmap docs is complete**, with one
+open exception, as of this writing: M0–M14 (`SIM_CORE_ROADMAP.md`),
+M15–M19 (`GAME_SETUP_ROADMAP.md`), M20–M22 (`HISTORICAL_DYNAMICS_ROADMAP.md`),
+M23–M24 (`WIN_CONDITIONS_ROADMAP.md`), M25–M30/M34
+(`FINANCIAL_MODEL_ROADMAP.md`, M31 retired), M31/M35–M44/M49–M57
+(`BASELINE_AI_ROADMAP.md`), M32–M33/M45–M46/M59 (`ROUTE_CAPACITY_ROADMAP.md`),
+M47–M48 (`MARKETING_ROADMAP.md`). M59 is the current highest *shipped*
+number. M56 shipped no code change (four route-opening-quality designs
+tried and reverted); M57 followed with a real, contained fix. **M58
+(`NetworkOptimizerStrategy` + win-condition plumbing) is real,
+committed work that is *not* merged to `main`** — it sits on its own
+branch (`m58a-win-condition-plumbing`), paused mid-investigation after
+a persistent sweep regression traced back to the same shared
+city-capacity mechanic M59 then addressed; whether M58's own strategy
+recovers now that M59 has shipped is unconfirmed, not assumed. Update
+this line the moment a new milestone is opened, or M58 is resolved,
+anywhere.
 
 ---
 

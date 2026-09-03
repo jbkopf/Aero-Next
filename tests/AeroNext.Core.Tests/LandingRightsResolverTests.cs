@@ -797,4 +797,229 @@ public class LandingRightsResolverTests
 
         Assert.Equal(2, outcomes.Count(o => o.Won));
     }
+
+    // --- M59: real multi-slot bidding ---
+
+    [Fact]
+    public void Submit_SlotsRequestedWithinCap_KeptAsRequested()
+    {
+        var city = MakeCity("gate", gateCapacity: 10); // 30% of 10 = 3
+        var airline = MakeAirline("A");
+        var rng = new SimRng(seed: 1);
+
+        var board = LandingRightsResolver.Submit(LandingRightsBoard.Empty, airline, new NegotiationOrder(city, Money.FromDollars(1_000), SlotsRequested: 2), currentQuarter: 1, rng);
+
+        Assert.Equal(2, board.Pending.Single().SlotsRequested);
+    }
+
+    [Fact]
+    public void Submit_SlotsRequestedAboveCap_ClampedDownToCapFraction()
+    {
+        var city = MakeCity("gate", gateCapacity: 10); // 30% of 10 = 3
+        var airline = MakeAirline("A");
+        var rng = new SimRng(seed: 1);
+
+        var board = LandingRightsResolver.Submit(LandingRightsBoard.Empty, airline, new NegotiationOrder(city, Money.FromDollars(1_000), SlotsRequested: 5), currentQuarter: 1, rng);
+
+        Assert.Equal(3, board.Pending.Single().SlotsRequested);
+    }
+
+    [Fact]
+    public void Submit_TinyCity_CapFloorsToOne_NeverZero()
+    {
+        var city = MakeCity("gate", gateCapacity: 2); // 30% of 2 = 0.6, floors to 0 - minimum 1 still applies
+        var airline = MakeAirline("A");
+        var rng = new SimRng(seed: 1);
+
+        var board = LandingRightsResolver.Submit(LandingRightsBoard.Empty, airline, new NegotiationOrder(city, Money.FromDollars(1_000), SlotsRequested: 5), currentQuarter: 1, rng);
+
+        Assert.Equal(1, board.Pending.Single().SlotsRequested);
+    }
+
+    [Fact]
+    public void Submit_SlotsRequestedZeroOrNegative_ClampedUpToOne()
+    {
+        var city = MakeCity("gate", gateCapacity: 10);
+        var airline = MakeAirline("A");
+        var rng = new SimRng(seed: 1);
+
+        var board = LandingRightsResolver.Submit(LandingRightsBoard.Empty, airline, new NegotiationOrder(city, Money.FromDollars(1_000), SlotsRequested: 0), currentQuarter: 1, rng);
+
+        Assert.Equal(1, board.Pending.Single().SlotsRequested);
+    }
+
+    [Fact]
+    public void Submit_NonGatewayCity_CapCalculatedFromAutoCapacity_NotJustGateCapacity()
+    {
+        // A NegotiationOrder can target any city, gateway or not (M28 -
+        // "borrow", not restricted to gateways). GateCapacity is null
+        // here, so the cap must fall through to AutoCapacity: 30% of 10 = 3.
+        var city = new City("plain", "Plain", Region.EastAsia, 0, 0, 50, IsGateway: false, GateCapacity: null, AutoCapacity: 10);
+        var airline = MakeAirline("A");
+        var rng = new SimRng(seed: 1);
+
+        var board = LandingRightsResolver.Submit(LandingRightsBoard.Empty, airline, new NegotiationOrder(city, Money.FromDollars(1_000), SlotsRequested: 5), currentQuarter: 1, rng);
+
+        Assert.Equal(3, board.Pending.Single().SlotsRequested);
+    }
+
+    [Fact]
+    public void Submit_CapacityBonus_IncludedInCapCalculation()
+    {
+        var city = MakeCity("gate", gateCapacity: 10); // base cap alone: 30% of 10 = 3
+        var airline = MakeAirline("A");
+        var rng = new SimRng(seed: 1);
+        var capacityBonusByCity = new Dictionary<string, int> { ["gate"] = 10 }; // total 20, 30% = 6
+
+        var board = LandingRightsResolver.Submit(LandingRightsBoard.Empty, airline, new NegotiationOrder(city, Money.FromDollars(1_000), SlotsRequested: 5), currentQuarter: 1, rng, capacityBonusByCity);
+
+        Assert.Equal(5, board.Pending.Single().SlotsRequested); // not clamped - 5 <= 6
+    }
+
+    [Fact]
+    public void Submit_DuplicatePendingBidAtSameCity_SilentlyNoOps()
+    {
+        var city = MakeCity("gate", gateCapacity: 10);
+        var airline = MakeAirline("A");
+        var rng = new SimRng(seed: 1);
+
+        var board = LandingRightsResolver.Submit(LandingRightsBoard.Empty, airline, new NegotiationOrder(city, Money.FromDollars(1_000)), currentQuarter: 1, rng);
+        var afterSecond = LandingRightsResolver.Submit(board, airline, new NegotiationOrder(city, Money.FromDollars(2_000)), currentQuarter: 2, rng);
+
+        Assert.Single(afterSecond.Pending); // second bid silently dropped
+        Assert.Same(board, afterSecond); // genuinely unchanged, not just same count
+    }
+
+    [Fact]
+    public void Submit_DifferentAirlineSameCity_NotBlockedByAnotherAirlinesPendingBid()
+    {
+        var city = MakeCity("gate", gateCapacity: 10);
+        var a = MakeAirline("A");
+        var b = MakeAirline("B");
+        var rng = new SimRng(seed: 1);
+
+        var board = LandingRightsResolver.Submit(LandingRightsBoard.Empty, a, new NegotiationOrder(city, Money.FromDollars(1_000)), currentQuarter: 1, rng);
+        var afterB = LandingRightsResolver.Submit(board, b, new NegotiationOrder(city, Money.FromDollars(1_000)), currentQuarter: 1, rng);
+
+        Assert.Equal(2, afterB.Pending.Count);
+    }
+
+    [Fact]
+    public void Submit_SameAirlineDifferentCity_NotBlockedByPendingBidElsewhere()
+    {
+        var gate1 = MakeCity("gate1", gateCapacity: 10);
+        var gate2 = MakeCity("gate2", gateCapacity: 10);
+        var airline = MakeAirline("A");
+        var rng = new SimRng(seed: 1);
+
+        var board = LandingRightsResolver.Submit(LandingRightsBoard.Empty, airline, new NegotiationOrder(gate1, Money.FromDollars(1_000)), currentQuarter: 1, rng);
+        var afterSecond = LandingRightsResolver.Submit(board, airline, new NegotiationOrder(gate2, Money.FromDollars(1_000)), currentQuarter: 1, rng);
+
+        Assert.Equal(2, afterSecond.Pending.Count);
+    }
+
+    [Fact]
+    public void ResolveQuarter_MultiSlotBid_WinsMultipleFreshGrantsAtOnce()
+    {
+        var city = MakeCity("gate", gateCapacity: 5);
+        var a = MakeAirline("A");
+        var board = LandingRightsBoard.Empty with
+        {
+            Pending = new[] { new PendingNegotiation(a, city, Money.FromDollars(1_000_000), 1, 3, SlotsRequested: 3) },
+        };
+
+        var (resolvedBoard, outcomes) = LandingRightsResolver.ResolveQuarter(board, currentQuarter: 3);
+
+        var outcome = outcomes.Single();
+        Assert.True(outcome.Won);
+        Assert.Equal(3, outcome.SlotsWon);
+        Assert.Equal(3, resolvedBoard.SlotsGranted["gate"]);
+        Assert.Equal(3, resolvedBoard.SlotsHeldBy(a, city));
+    }
+
+    [Fact]
+    public void ResolveQuarter_MultiSlotBid_PartialFulfillment_GetsWhateversLeft()
+    {
+        var city = MakeCity("gate", gateCapacity: 2);
+        var a = MakeAirline("A");
+        var board = LandingRightsBoard.Empty with
+        {
+            Pending = new[] { new PendingNegotiation(a, city, Money.FromDollars(1_000_000), 1, 3, SlotsRequested: 5) },
+        };
+
+        var (resolvedBoard, outcomes) = LandingRightsResolver.ResolveQuarter(board, currentQuarter: 3);
+
+        var outcome = outcomes.Single();
+        Assert.True(outcome.Won); // got something
+        Assert.Equal(2, outcome.SlotsWon); // capped at what's actually there
+        Assert.Equal(2, resolvedBoard.SlotsHeldBy(a, city));
+        Assert.True(outcome.StandingAfter > LandingRightsBoard.BaselineStanding); // unfulfilled remainder still raises Standing
+    }
+
+    [Fact]
+    public void ResolveQuarter_MultiSlotBid_FullyBlocked_StandingRaisedOnceNotScaledByShortfall()
+    {
+        var city = MakeCity("gate", gateCapacity: 1);
+        var incumbent = MakeAirline("Incumbent");
+        var challenger = MakeAirline("Challenger");
+        var board = LandingRightsBoard.Empty with
+        {
+            SlotsGranted = new Dictionary<string, int> { ["gate"] = 1 }, // fully granted already, no fresh room
+            SlotsHeld = new Dictionary<(string, string), int> { [("Incumbent", "gate")] = 1 },
+            Pending = new[] { new PendingNegotiation(challenger, city, Money.FromDollars(1_000_000), 1, 3, SlotsRequested: 5) },
+        };
+
+        var (_, outcomes) = LandingRightsResolver.ResolveQuarter(board, currentQuarter: 3);
+
+        var outcome = outcomes.Single();
+        Assert.False(outcome.Won);
+        Assert.Equal(0, outcome.SlotsWon);
+        // Exactly one StandingGainPerLoss worth of increase, not 5x for the 5 slots missed.
+        Assert.Equal(LandingRightsBoard.BaselineStanding + 0.2, outcome.StandingAfter, precision: 6);
+    }
+
+    [Fact]
+    public void ResolveQuarter_TwoMultiSlotBidders_SecondGetsRemainderAfterFirstIsSatisfied()
+    {
+        var city = MakeCity("gate", gateCapacity: 5);
+        var a = MakeAirline("A");
+        var b = MakeAirline("B");
+        var board = LandingRightsBoard.Empty with
+        {
+            Pending = new[]
+            {
+                new PendingNegotiation(a, city, Money.FromDollars(1_000_000), 1, 3, SlotsRequested: 4), // higher bid, ranked first
+                new PendingNegotiation(b, city, Money.FromDollars(500_000), 1, 3, SlotsRequested: 3),
+            },
+        };
+
+        var (_, outcomes) = LandingRightsResolver.ResolveQuarter(board, currentQuarter: 3);
+
+        Assert.Equal(4, outcomes.Single(o => o.Airline.Name == "A").SlotsWon); // fully satisfied
+        Assert.Equal(1, outcomes.Single(o => o.Airline.Name == "B").SlotsWon); // only 1 of 5 left after A
+    }
+
+    [Fact]
+    public void ResolveQuarter_MultiSlotBid_DrawsFromIdleTransfersAfterFreshExhausted()
+    {
+        var city = MakeCity("gate", gateCapacity: 1); // fully granted already
+        var incumbent = MakeAirline("Incumbent");
+        var challenger = MakeAirline("Challenger");
+        var board = LandingRightsBoard.Empty with
+        {
+            SlotsGranted = new Dictionary<string, int> { ["gate"] = 1 },
+            SlotsHeld = new Dictionary<(string, string), int> { [("Incumbent", "gate")] = 1 },
+            IdleStreak = new Dictionary<(string, string), int> { [("Incumbent", "gate")] = LandingRightsBoard.IdleExpiryThreshold },
+            Pending = new[] { new PendingNegotiation(challenger, city, Money.FromDollars(1_000_000), 1, 3, SlotsRequested: 1) },
+        };
+
+        var (resolvedBoard, outcomes) = LandingRightsResolver.ResolveQuarter(board, currentQuarter: 3, RoutesFor("Incumbent"));
+
+        var outcome = outcomes.Single();
+        Assert.True(outcome.Won);
+        Assert.Equal(1, outcome.SlotsWon);
+        Assert.Equal(1, resolvedBoard.SlotsHeldBy(challenger, city));
+        Assert.Equal(0, resolvedBoard.SlotsHeldBy(incumbent, city));
+        Assert.Equal(1, resolvedBoard.SlotsGranted["gate"]); // ownership moved, city-wide total unchanged - a transfer, not a fresh grant
+    }
 }

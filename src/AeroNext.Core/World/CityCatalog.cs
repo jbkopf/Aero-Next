@@ -10,6 +10,21 @@ namespace AeroNext.Core.World;
 /// </summary>
 public static class CityCatalog
 {
+    /// <summary>
+    /// M59 (proposed, tunable) — every city's starting capacity
+    /// (AutoCapacity or GateCapacity) must be at least this many slots,
+    /// the base CityCapacityBoard's own growth math scales from. A city
+    /// starting at 1 needed only a single aircraft, from any of the 4
+    /// airlines, to be permanently maxed out (M46's own growth mechanic
+    /// can at most double a city's starting figure) - measured against
+    /// the real dataset, small starting capacity, not real strategic
+    /// importance, was what actually drove saturation (Fukuoka,
+    /// AutoCapacity 1, fully saturated 72.8% of sampled quarters in a
+    /// real 300-game sweep, well above Atlanta - AutoCapacity 4, a
+    /// genuinely major hub - at 20.4%).
+    /// </summary>
+    public const int MinimumStartingCapacity = 2;
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
@@ -63,9 +78,16 @@ public static class CityCatalog
                 throw new InvalidDataException($"City '{city.Id}' must have a positive demand weight.");
             }
 
-            if (city.IsGateway && city.GateCapacity is null or <= 0)
+            // M59: below MinimumStartingCapacity - not just non-positive
+            // (the pre-M59 check this replaces) - since the real fix a
+            // real 300-game sweep called for was raising the floor
+            // itself, not merely rejecting zero/negative garbage. C#'s
+            // relational pattern doesn't match null, so a gateway with no
+            // GateCapacity at all is still caught by the null branch
+            // exactly as before.
+            if (city.IsGateway && city.GateCapacity is null or < MinimumStartingCapacity)
             {
-                throw new InvalidDataException($"Gateway city '{city.Id}' must have a positive gate capacity.");
+                throw new InvalidDataException($"Gateway city '{city.Id}' must have a GateCapacity of at least {MinimumStartingCapacity}.");
             }
 
             // M45: AutoCapacity and GateCapacity are two different
@@ -78,9 +100,14 @@ public static class CityCatalog
                 throw new InvalidDataException($"City '{city.Id}' has both AutoCapacity and GateCapacity set - these are mutually exclusive.");
             }
 
-            if (city.AutoCapacity is <= 0)
+            // M59: same MinimumStartingCapacity floor as gateways - a
+            // present-but-null AutoCapacity (no capacity mechanism on
+            // this city at all - a legacy fixture predating M45) still
+            // doesn't match this relational pattern, preserving that
+            // existing behavior unchanged.
+            if (city.AutoCapacity is < MinimumStartingCapacity)
             {
-                throw new InvalidDataException($"City '{city.Id}' has a non-positive AutoCapacity.");
+                throw new InvalidDataException($"City '{city.Id}' has an AutoCapacity below the minimum starting capacity of {MinimumStartingCapacity}.");
             }
         }
     }

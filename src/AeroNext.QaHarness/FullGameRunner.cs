@@ -207,6 +207,18 @@ public static class FullGameRunner
                 // cityWideSlotsRemaining doc comment).
                 var cityWideSlotsRemaining = AiToolkit.ComputeCityWideSlotsRemaining(routes, cities, capacityBoard.CapacityBonusByCity);
 
+                // M41: which gateways this airline already has an
+                // unresolved negotiation bid at - this loop already
+                // builds a real landingBoard, so it's the one real call
+                // site that can populate this for real. M59: hoisted out
+                // of the q != 1 branch below (was StrategyContext-only)
+                // since QuarterEngine.RunQuarter now needs it too, to
+                // reject a duplicate bid before any cash is spent.
+                var pendingNegotiationCityIds = landingBoard.Pending
+                    .Where(p => p.Airline.Name == name)
+                    .Select(p => p.TargetCity.Id)
+                    .ToHashSet(StringComparer.Ordinal);
+
                 IReadOnlyList<QuarterOrder> orders;
                 if (q == 1)
                 {
@@ -223,18 +235,11 @@ public static class FullGameRunner
                     // M39: strategy-driven from here on - selected once
                     // per airline (initial assignment then re-evaluated
                     // once per in-game year) rather than BaselineAi's own
-                    // single fixed heuristic.
+                    // single fixed heuristic. M41's own
+                    // pendingNegotiationCityIds (so the strategy stops
+                    // re-bidding a gateway already pending) is now
+                    // computed above, before this branch.
                     //
-                    // M41: also tells the strategy which gateways it
-                    // already has a negotiation pending at, so it stops
-                    // re-bidding the same one every quarter - this loop
-                    // already builds a real landingBoard, so it's the one
-                    // real call site that can populate this for real.
-                    var pendingNegotiationCityIds = landingBoard.Pending
-                        .Where(p => p.Airline.Name == name)
-                        .Select(p => p.TargetCity.Id)
-                        .ToHashSet(StringComparer.Ordinal);
-
                     // M52: scoped to only this airline's own currently-
                     // served routes - servingAirlineNamesByPairKey's own
                     // count includes this airline itself wherever it
@@ -275,7 +280,8 @@ public static class FullGameRunner
                     availableSlotsByCity: q == 1 ? null : availableSlotsByCity,
                     currentDebtBalance: finances[name].DebtBalance,
                     homeCity: q == 1 ? null : seatByName[name].StartingCity,
-                    cityWideSlotsRemaining: q == 1 ? null : cityWideSlotsRemaining);
+                    cityWideSlotsRemaining: q == 1 ? null : cityWideSlotsRemaining,
+                    pendingNegotiationCityIds: q == 1 ? null : pendingNegotiationCityIds);
 
                 if (q == 1 && result.RejectedOrders.Count > 0)
                 {
@@ -310,7 +316,7 @@ public static class FullGameRunner
                 var airlineSnapshot = new Airline(name, routes[name]);
                 foreach (var negotiation in result.AppliedOrders.OfType<NegotiationOrder>())
                 {
-                    landingBoard = LandingRightsResolver.Submit(landingBoard, airlineSnapshot, negotiation, q, campaignRng);
+                    landingBoard = LandingRightsResolver.Submit(landingBoard, airlineSnapshot, negotiation, q, campaignRng, capacityBoard.CapacityBonusByCity);
                 }
 
                 foreach (var relinquish in result.AppliedOrders.OfType<RelinquishSlotOrder>())

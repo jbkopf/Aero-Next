@@ -434,4 +434,63 @@ public class CityCatalogTests
 
         Assert.Throws<InvalidDataException>(() => CityCatalog.Load(json));
     }
+
+    // --- M59: MinimumStartingCapacity ---
+
+    [Fact]
+    public void Load_ThrowsWhenAutoCapacityBelowMinimumStartingCapacity()
+    {
+        // 1 used to be legal (the pre-M59 check was just "> 0") - a real
+        // 300-game sweep found small starting capacity, not real
+        // strategic importance, was what actually drove saturation
+        // (Fukuoka at AutoCapacity 1 saturated 72.8% of sampled
+        // quarters). Below CityCatalog.MinimumStartingCapacity (2) is
+        // now a real data error, not just non-positive.
+        const string json = """
+        [
+          { "id": "bad", "name": "Bad", "region": "EastAsia", "latitude": 0, "longitude": 0, "demandWeight": 10, "isGateway": false, "gateCapacity": null, "autoCapacity": 1 }
+        ]
+        """;
+
+        Assert.Throws<InvalidDataException>(() => CityCatalog.Load(json));
+    }
+
+    [Fact]
+    public void Load_ThrowsWhenGateCapacityBelowMinimumStartingCapacity()
+    {
+        const string json = """
+        [
+          { "id": "bad", "name": "Bad Gateway", "region": "EastAsia", "latitude": 0, "longitude": 0, "demandWeight": 10, "isGateway": true, "gateCapacity": 1, "autoCapacity": null }
+        ]
+        """;
+
+        Assert.Throws<InvalidDataException>(() => CityCatalog.Load(json));
+    }
+
+    [Fact]
+    public void Load_AcceptsAutoCapacityExactlyAtMinimumStartingCapacity()
+    {
+        const string json = """
+        [
+          { "id": "ok", "name": "OK", "region": "EastAsia", "latitude": 0, "longitude": 0, "demandWeight": 10, "isGateway": false, "gateCapacity": null, "autoCapacity": 2 }
+        ]
+        """;
+
+        var cities = CityCatalog.Load(json);
+
+        Assert.Equal(CityCatalog.MinimumStartingCapacity, cities.Single().AutoCapacity);
+    }
+
+    [Fact]
+    public void LoadFile_RepoDataset_EveryCityMeetsMinimumStartingCapacity()
+    {
+        var cities = CityCatalog.LoadFile(DataPath);
+
+        foreach (var city in cities)
+        {
+            var startingCapacity = city.GateCapacity ?? city.AutoCapacity;
+            Assert.True(startingCapacity is >= CityCatalog.MinimumStartingCapacity,
+                $"{city.Id} has starting capacity {startingCapacity}, below the minimum of {CityCatalog.MinimumStartingCapacity}.");
+        }
+    }
 }

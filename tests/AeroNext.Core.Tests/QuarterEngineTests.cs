@@ -1403,6 +1403,80 @@ public class QuarterEngineTests
         Assert.Single(result.RejectedOrders);
     }
 
+    // --- M59: no duplicate pending bid at the same city ---
+
+    [Fact]
+    public void RunQuarter_NoPendingNegotiationCityIdsPassed_NeverRejectedForDuplicate()
+    {
+        var demandModel = new GravityDemandModel();
+        var gateway = MakeGateway("gw", 0, 0, 50, gateCapacity: 5);
+        var order = new NegotiationOrder(gateway, Money.FromDollars(2_000_000));
+
+        var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, new[] { gateway }, demandModel);
+
+        Assert.Single(result.AppliedOrders);
+        Assert.Empty(result.RejectedOrders);
+    }
+
+    [Fact]
+    public void RunQuarter_NegotiationOrderTargetsCityAlreadyPending_Rejected_CashLeftUntouched()
+    {
+        var demandModel = new GravityDemandModel();
+        var gateway = MakeGateway("gw", 0, 0, 50, gateCapacity: 5);
+        var order = new NegotiationOrder(gateway, Money.FromDollars(2_000_000));
+        var pendingCityIds = new HashSet<string> { "gw" };
+
+        var result = QuarterEngine.RunQuarter(
+            1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, new[] { gateway }, demandModel,
+            availableCash: Money.FromDollars(2_000_000), pendingNegotiationCityIds: pendingCityIds);
+
+        Assert.Empty(result.AppliedOrders);
+        Assert.Single(result.RejectedOrders);
+    }
+
+    [Fact]
+    public void RunQuarter_NegotiationOrderTargetsCityAlreadyPending_RejectedBeforeCashCheck_LeavesFullBudgetForOtherOrders()
+    {
+        // The real reason this has to be rejected before the cash gate:
+        // if it were rejected after, the cash would already be spent for
+        // nothing. Confirmed here indirectly - a second, real
+        // NegotiationOrder at a DIFFERENT city still gets the full
+        // availableCash, proving the duplicate never touched cashSpent.
+        var demandModel = new GravityDemandModel();
+        var duplicateTarget = MakeGateway("gw", 0, 0, 50, gateCapacity: 5);
+        var freshTarget = MakeGateway("gw2", 1, 1, 50, gateCapacity: 5);
+        var orders = new QuarterOrder[]
+        {
+            new NegotiationOrder(duplicateTarget, Money.FromDollars(2_000_000)),
+            new NegotiationOrder(freshTarget, Money.FromDollars(2_000_000)),
+        };
+        var pendingCityIds = new HashSet<string> { "gw" };
+
+        var result = QuarterEngine.RunQuarter(
+            1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, orders, new[] { duplicateTarget, freshTarget }, demandModel,
+            availableCash: Money.FromDollars(2_000_000), pendingNegotiationCityIds: pendingCityIds);
+
+        Assert.Single(result.AppliedOrders);
+        Assert.Equal("gw2", Assert.IsType<NegotiationOrder>(result.AppliedOrders.Single()).TargetCity.Id);
+        Assert.Single(result.RejectedOrders);
+    }
+
+    [Fact]
+    public void RunQuarter_NegotiationOrderTargetsDifferentCity_NotBlockedByPendingBidElsewhere()
+    {
+        var demandModel = new GravityDemandModel();
+        var gateway = MakeGateway("gw", 0, 0, 50, gateCapacity: 5);
+        var order = new NegotiationOrder(gateway, Money.FromDollars(2_000_000));
+        var pendingCityIds = new HashSet<string> { "some-other-city" };
+
+        var result = QuarterEngine.RunQuarter(
+            1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, new[] { gateway }, demandModel,
+            availableCash: Money.FromDollars(2_000_000), pendingNegotiationCityIds: pendingCityIds);
+
+        Assert.Single(result.AppliedOrders);
+        Assert.Empty(result.RejectedOrders);
+    }
+
     [Fact]
     public void RunQuarter_RelinquishSlotOrder_NoSlotsPassed_NeverRejectedForScarcity()
     {

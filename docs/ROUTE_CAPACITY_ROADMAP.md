@@ -596,3 +596,80 @@ own reachability problem regardless of the specific numbers, is a call
 for the user, not decided here — all three constants are marked
 `(Proposed, tunable)` in code precisely so this can be revisited without
 a structural change.
+
+## M59 — Slot-system rules: capacity floor, real multi-slot bidding, no duplicate pending bids ✅
+
+**Origin:** a direct follow-on from an M58 investigation (see
+`docs/BASELINE_AI_ROADMAP.md`) into why a new AI strategy's own
+new-pair/grow-existing actions were blocked ~75% of the time. Real
+per-city saturation data (a 300-game sweep instrumented then reverted)
+found small starting capacity, not real strategic importance, was
+actually driving most of it: Fukuoka (`AutoCapacity` 1) sat fully
+saturated 72.8% of sampled quarters — well above Atlanta
+(`AutoCapacity` 4, a genuinely major hub) at 20.4%. The user then asked
+for three specific rules on top of that finding.
+
+**1. Every city's starting capacity (`AutoCapacity` or `GateCapacity`)
+must be at least 2** — the base `CityCapacityBoard`'s own growth math
+already scales from (`GrowthBreakpoints`, M46 above, reads
+`startingCapacity` generically — raising the floor automatically gives
+every bumped city both a higher max bonus and a faster growth pace with
+zero code change there). `CityCatalog.MinimumStartingCapacity` is a
+real, enforced invariant now, not just a data convention: `Validate`
+throws for anything below it, the same way it already threw for
+non-positive values. `data/cities.json`'s 22 `autoCapacity: 1` cities
+bumped to 2 in the same commit — the data and the validator that
+enforces it against future changes ship together, atomically, or the
+real dataset itself would fail to load.
+
+**2. Real multi-slot bidding, capped at 30% of a city's current total
+(minimum 1)** — genuinely new capability, not a rule on something that
+already existed: `NegotiationOrder` had no quantity field at all before
+this: every bid was implicitly for exactly one slot.
+`NegotiationOrder`/`PendingNegotiation` both gain `SlotsRequested = 1`
+(so every pre-M59 call site, every AI strategy included, compiles and
+behaves identically). `LandingRightsResolver.Submit` clamps — never
+rejects outright — into `[1, Max(1, Floor(0.3 x totalSlots))]`; Bid
+itself never scales with quantity, so clamping down costs the bidder
+nothing extra. `ResolveQuarter`'s own allocation loop reworked from
+index-vs-remainingSlots to running counters, so one ranked bidder can
+consume more than one unit (fresh grants first, then idle-expired
+transfers, same priority as before) with genuine **partial
+fulfillment** — a bid that can't get its full request still gets
+whatever's left, and any unfulfilled remainder (a full loss included)
+raises Standing by the same flat `StandingGainPerLoss` once, not scaled
+by the shortfall. `NegotiationOutcome` gains `SlotsWon` alongside the
+existing `Won` (kept, `SlotsWon > 0`) — zero changes needed at any of
+its three existing consumers. When every bid requests exactly 1 (every
+real caller today), the reworked loop reproduces the old win/lose
+behavior exactly — confirmed by the full pre-existing resolver test
+suite passing unchanged.
+
+**3. No duplicate pending bid at the same city — a real, engine-enforced
+rule now, not just the AI's own `CitiesAlreadyPursuedForNegotiation`
+convention.** The dangerous failure mode this had to avoid: rejecting
+*after* cash is already committed wastes it for nothing
+(`QuarterEngine.RunQuarter`'s own apply-time step debits cash before
+`FullGameRunner.cs` ever calls `LandingRightsResolver.Submit`). Enforced
+at the right layer instead: `QuarterEngine.RunQuarter` gains a new
+`pendingNegotiationCityIds` parameter, checked *before* the existing
+cash gate, so a duplicate is rejected before any cash is spent — the
+real, cash-safe version of the check. `FullGameRunner.cs` already
+computed exactly this set for `StrategyContext.PendingNegotiationCityIds`
+(M41); hoisted out of its old strategy-only scope so both consumers
+share the one computation. `LandingRightsResolver.Submit` keeps a
+second, defense-in-depth no-op check of its own for any caller that
+doesn't thread the new parameter through.
+
+**Measured: 300-game sweep, 41.3%/124/300/avg 60.8 (M57 baseline) →
+39.0%/117/300/avg 83.5.** A modest win-rate dip, not a collapse, paired
+with a genuinely different game shape: average win quarter rose ~40%,
+and — for the first time this whole session — EastAsia and
+SouthWestAsia produced real winners (8 and 5 respectively) instead of
+zero. NorthAmerica bankruptcy rose slightly (24.1% → 29.9%) alongside
+its own win share (85.5% → 88.9%); EastAsia bankruptcy fell (64.5% →
+48.3%) while SouthWestAsia's rose (35.2% → 48.6%). All 802 tests pass,
+100% line/branch coverage on every touched class. Shipped as a real,
+mixed-but-not-regressive trade rather than held back — the three rules
+are correctness/fairness fixes to a shared mechanic every strategy
+depends on, not a strategy-tuning question with a clean pass/fail bar.
