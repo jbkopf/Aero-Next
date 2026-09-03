@@ -32,6 +32,21 @@ recovers now that M59 has shipped is unconfirmed, not assumed. Update
 this line the moment a new milestone is opened, or M58 is resolved,
 anywhere.
 
+**M60 (hub-and-spoke demand) was attempted, measured, and reverted —
+not shipped.** Two formula-level fixes to `GravityDemandModel.ForPair`
+were tried (an additive catchment bonus, then a weight-dependent
+distance-exponent discount) and both failed real verification: the
+first structurally favored small cities more, not less; the second
+flipped the intended city-pair rankings correctly but inflated total
+world demand 31× (even for pairs with no hub involvement at all),
+collapsing a real 300-game sweep's win rate from 39.0% to 0.3%. Both
+were fully reverted — `main` is unaffected. See
+`docs/HUB_DEMAND_DESIGN.md` for the real architectural finding this
+surfaced (connecting-passenger routing already exists and works via
+`NetworkPlanner`/`CompetitiveMarket`; what's actually missing is a
+hub-*quality* concept influencing hub *selection*, not the O&D demand
+formula itself) and its own recommended path forward, not yet built.
+
 ---
 
 ## Active priority
