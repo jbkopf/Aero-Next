@@ -102,9 +102,98 @@ cities on `HubQuality`. Both are now permanent regression tests (see below).
 
 ---
 
-## M62 — `NetworkPlanner.FindBestHub`: quality + loyalty + substitution
+## M62 — `NetworkPlanner.FindBestHub`: quality + loyalty + substitution ✅
 
-Not yet started.
+Hub selection was pure shortest-total-great-circle-detour before this
+milestone — `FindBestHub` now ranks candidates by an "effective detour"
+that also subtracts a quality bonus (the candidate's own `HubQuality`), a
+loyalty bonus (this airline's own route-count-share at that city — the
+proxy decided in `docs/HUB_DEMAND_DESIGN.md`'s Decisions section, pending
+the deferred real hub-designation system tracked in `docs/OPEN_WORK.md`),
+and adds a substitution penalty for sitting close to a *different* hub the
+airline already treats as loyal (the New York/Boston case). All three
+terms are bounded well below realistic intercontinental detour deltas —
+they can tilt a genuinely close choice, never make a transcontinental
+detour look cheaper than a nearby direct hub.
+
+**Changes:**
+- `src/AeroNext.Core/Airlines/NetworkPlanner.cs` — `Plan` precomputes
+  `loyaltyShareByCityId` and the sorted `loyalHubCities` list once per
+  call (not once per `FindBestHub` call inside the O(cities²) double loop
+  — the same class of redundant recomputation `GravityDemandModel`'s own
+  M21 fixed once already). `FindBestHub`'s ranking gained the three terms;
+  its public API (`Plan(routes, allCities, demandModel)`) is unchanged, so
+  every one of the ~10 real call sites across `Core`/`Sim`/`QaHarness`
+  needed zero changes.
+- Five new `public const double` weights, each with a doc comment stating
+  the shared ablation-lever convention ("set to 0.0 to reproduce pre-M62
+  pure-detour selection"), matching M45's own established discipline.
+
+**Tests** (`tests/AeroNext.Core.Tests/NetworkPlannerTests.cs`, 5 new):
+`Plan_HigherHubQuality_PreferredWhenDetourNearlyEqual`,
+`Plan_HubQuality_DoesNotOverrideLargeDetourAdvantage`,
+`Plan_LoyaltyBonus_PrefersHubAirlineAlreadyUses`,
+`Plan_SubstitutionPenalty_PenalizesHubNearAnAlreadyLoyalHub`,
+`RealDataset_CombinedHubBonusStaysBelowASingleIntercontinentalLeg`. All
+verified geometrically before writing (a small scratchpad tool computed
+real `GreatCircle.DistanceKm` values for every fixture before committing
+to specific coordinates, rather than hand-calculating great-circle math).
+All ~12 pre-existing `NetworkPlannerTests.cs` tests needed **zero edits** —
+confirmed by running them before writing any new code: with `HubQuality =
+0` (M61's default) the quality term is always 0, and every pre-existing
+multi-candidate fixture happens to be either single-candidate or, in the
+one genuine tie-break test, exactly symmetric (equal detour AND equal
+route count on both candidates), so the new terms cancel out identically
+on both sides rather than needing to be zero.
+
+**A real mid-milestone finding, and the retune it drove:** the first,
+more conservative constants (`HubQualityKmPerPoint = 25`,
+`LoyaltyBonusMaxKm = SubstitutionPenaltyMaxKm = 800`) passed every unit
+test and produced zero sweep regression — but diagnostic instrumentation
+on a real 50-game sample found they **never once changed a real hub
+choice**: of 529,165 real `FindBestHub` calls, only 1,714 (0.3%) even had
+more than one valid connecting candidate, and across all of them the
+non-geometric terms flipped the winner **zero times** — even though ~40%
+of those close calls had a real `HubQuality` city in the running. Root
+cause, confirmed by further instrumentation: whichever hub wins on pure
+geometry also tends to already hold the airline's strongest existing
+route presence there (network growth is self-reinforcing), so
+`LoyaltyBonusMaxKm` was reinforcing the incumbent rather than ever
+challenging it — `HubQualityKmPerPoint`, a flat per-city constant immune
+to that feedback loop, was the one lever that could realistically
+overcome it. Presented to the user as a real decision (ship the safe-but-
+inert version, retune more aggressively, or reconsider the loyalty metric
+itself) — the user chose to retune. Final constants:
+`HubQualityKmPerPoint: 25 → 100` (4×, the disproportionate increase),
+`LoyaltyBonusMaxKm: 800 → 1000`, `SubstitutionPenaltyMaxKm: 800 → 1000`.
+The real-dataset bound test's own threshold was correspondingly loosened
+(from "under half a transatlantic leg" to "under one full transatlantic
+leg," ~5,540km) — still backed by the dedicated ~37,000km-margin
+does-not-override test, which needed no change at any constant value
+tested.
+
+**Verification:**
+- `dotnet build`, `dotnet test`: 815/815 passing (810 shipped as of M61 +
+  5 new `NetworkPlannerTests`), zero edits to any pre-existing test.
+- `dotnet test --collect:"XPlat Code Coverage"`: `NetworkPlanner.cs` at
+  100% line-rate and 100% branch-rate. One genuinely dead branch was
+  found and removed rather than papered over with a contrived test — a
+  defensive `totalRoutes > 0 ? ... : 0.0` guard that can never actually
+  run, since the dictionary it guards can only have entries when
+  `totalRoutes` is already positive.
+- **Retuned-constants 300-game QA sweep**: real, measured behavioral
+  change — 446 of 6,406 real multi-candidate `FindBestHub` decisions
+  (7.0%) now flip away from pure geometry because of quality, loyalty, or
+  substitution. **Macro win-rate stays byte-identical to the M59/M61
+  baseline** (117/300, 39.0%, avg quarter 83.5, NorthAmerica 88.9% win
+  share, identical per-region breakdown) — expected and correct: M62
+  changes *which route* carries a connecting passenger stream, not the
+  size of that stream (`ForPair`, M63's own concern), so a real, verified
+  routing-level change doesn't move a coarse win/bankruptcy metric. Zero
+  regression, real effect, honestly reported as both.
+
+**Done.** Branch `m62-network-planner-hub-selection`, to be merged to
+`main`.
 
 ## M63 — `GravityDemandModel.ForPair`: bounded, additive, off-by-default hub bonus
 

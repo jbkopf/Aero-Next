@@ -250,6 +250,158 @@ public class NetworkPlannerTests
         Assert.Equal(0.0, usage.LoadFactor);
     }
 
+    // --- M62: quality + loyalty + substitution ---
+
+    [Fact]
+    public void Plan_HigherHubQuality_PreferredWhenDetourNearlyEqual()
+    {
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 50);
+        var b = MakeCity("b", 0, 20, 50);
+        // Mirrored around lon=10, so base detourKm is exactly equal (the
+        // same fixture Plan_EquidistantHubCandidates_ResolveDeterministicallyByHubId
+        // proves ties exactly) - "aaa_hub" would win the plain ordinal
+        // tie-break, so a "zzz_hub" win here can only be HubQuality.
+        var hubLow = MakeCity("aaa_hub", 5, 5, 50, hubQuality: 0);
+        var hubHigh = MakeCity("zzz_hub", 5, 15, 50, hubQuality: 40);
+        var aircraft = new AircraftType("t", "Test", Seats: 400);
+        var routes = new[]
+        {
+            new Route(a, hubLow, aircraft, 5),
+            new Route(hubLow, b, aircraft, 5),
+            new Route(a, hubHigh, aircraft, 5),
+            new Route(hubHigh, b, aircraft, 5),
+        };
+
+        var plan = NetworkPlanner.Plan(routes, new[] { a, b, hubLow, hubHigh }, demandModel);
+
+        var aToB = plan.Itineraries.Single(i => i.Itinerary.Origin.Id == "a" && i.Itinerary.Destination.Id == "b");
+        Assert.Equal("zzz_hub", aToB.Itinerary.Legs[0].Destination.Id);
+    }
+
+    [Fact]
+    public void Plan_HubQuality_DoesNotOverrideLargeDetourAdvantage()
+    {
+        var demandModel = new GravityDemandModel();
+        // hubNear sits almost exactly on the direct path (tiny detour);
+        // hubFar sits nearly on the opposite side of the globe (detour
+        // ~37,000km more) - even at the maximum possible combined
+        // quality+loyalty bonus (~5,000km, post-M62-retune), nowhere close
+        // to overriding a detour delta an order of magnitude larger.
+        var a = MakeCity("a", 0, 0, 50);
+        var b = MakeCity("b", 0, 5, 50);
+        var hubNear = MakeCity("hubnear", 0, 2.5, 50, hubQuality: 0);
+        var hubFar = MakeCity("hubfar", 0, 170, 50, hubQuality: 40); // max quality
+        var filler = MakeCity("filler", 45, 45, 10);
+        var aircraft = new AircraftType("t", "Test", Seats: 400);
+        var routes = new[]
+        {
+            new Route(a, hubNear, aircraft, 5),
+            new Route(hubNear, b, aircraft, 5),
+            new Route(a, hubFar, aircraft, 5),
+            new Route(hubFar, b, aircraft, 5),
+            // Filler route gives hubFar outsized loyalty too (3/5 vs hubNear's 2/5) - still loses.
+            new Route(hubFar, filler, aircraft, 5),
+        };
+
+        var plan = NetworkPlanner.Plan(routes, new[] { a, b, hubNear, hubFar, filler }, demandModel);
+
+        var aToB = plan.Itineraries.Single(i => i.Itinerary.Origin.Id == "a" && i.Itinerary.Destination.Id == "b");
+        Assert.Equal("hubnear", aToB.Itinerary.Legs[0].Destination.Id);
+    }
+
+    [Fact]
+    public void Plan_LoyaltyBonus_PrefersHubAirlineAlreadyUses()
+    {
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 50);
+        var b = MakeCity("b", 0, 20, 50);
+        // Same exactly-equal-detour fixture as the tie-break test above,
+        // but this time both hubs have zero HubQuality - only an extra
+        // filler route (far away, so it can't trigger substitution) gives
+        // "zzz_hub" a higher loyalty share (3/5 vs "aaa_hub"'s 2/5),
+        // which should flip the plain ordinal tie-break on its own.
+        var hubLow = MakeCity("aaa_hub", 5, 5, 50);
+        var hubHigh = MakeCity("zzz_hub", 5, 15, 50);
+        var filler = MakeCity("filler", 80, 80, 10);
+        var aircraft = new AircraftType("t", "Test", Seats: 400);
+        var routes = new[]
+        {
+            new Route(a, hubLow, aircraft, 5),
+            new Route(hubLow, b, aircraft, 5),
+            new Route(a, hubHigh, aircraft, 5),
+            new Route(hubHigh, b, aircraft, 5),
+            new Route(hubHigh, filler, aircraft, 5),
+        };
+
+        var plan = NetworkPlanner.Plan(routes, new[] { a, b, hubLow, hubHigh, filler }, demandModel);
+
+        var aToB = plan.Itineraries.Single(i => i.Itinerary.Origin.Id == "a" && i.Itinerary.Destination.Id == "b");
+        Assert.Equal("zzz_hub", aToB.Itinerary.Legs[0].Destination.Id);
+    }
+
+    [Fact]
+    public void Plan_SubstitutionPenalty_PenalizesHubNearAnAlreadyLoyalHub()
+    {
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 50);
+        var b = MakeCity("b", 0, 40, 50);
+        // hubEstablished is already loyal (lots of filler routes, none
+        // touching a/b) and sits right next to hubDuplicate (~56km apart,
+        // well inside the substitution radius). hubDuplicate has the
+        // genuinely BETTER raw detour (it's closer to the direct a-b
+        // path than hubAlternate) - without substitution it would win;
+        // with it, the penalty for duplicating hubEstablished's coverage
+        // should hand the connection to hubAlternate instead.
+        var hubEstablished = MakeCity("hubestablished", 0, 20, 50);
+        var hubDuplicate = MakeCity("hubduplicate", 0, 20.5, 50);
+        var hubAlternate = MakeCity("hubalternate", 10, 20, 50);
+        var filler1 = MakeCity("filler1", 60, 60, 10);
+        var filler2 = MakeCity("filler2", 60, 70, 10);
+        var filler3 = MakeCity("filler3", 60, 80, 10);
+        var aircraft = new AircraftType("t", "Test", Seats: 400);
+        var routes = new[]
+        {
+            new Route(a, hubDuplicate, aircraft, 5),
+            new Route(hubDuplicate, b, aircraft, 5),
+            new Route(a, hubAlternate, aircraft, 5),
+            new Route(hubAlternate, b, aircraft, 5),
+            new Route(hubEstablished, filler1, aircraft, 5),
+            new Route(hubEstablished, filler2, aircraft, 5),
+            new Route(hubEstablished, filler3, aircraft, 5),
+        };
+        var cities = new[] { a, b, hubEstablished, hubDuplicate, hubAlternate, filler1, filler2, filler3 };
+
+        var plan = NetworkPlanner.Plan(routes, cities, demandModel);
+
+        var aToB = plan.Itineraries.Single(i => i.Itinerary.Origin.Id == "a" && i.Itinerary.Destination.Id == "b");
+        Assert.Equal("hubalternate", aToB.Itinerary.Legs[0].Destination.Id);
+    }
+
+    [Fact]
+    public void RealDataset_CombinedHubBonusStaysBelowASingleIntercontinentalLeg()
+    {
+        // The whole point of bounding these three terms (see
+        // NetworkPlanner.FindBestHub's own doc comment): quality/loyalty/
+        // substitution can tilt a genuinely close choice, never make a
+        // transcontinental detour look cheaper than a nearby direct hub.
+        // Concretely: even the maximum possible combined quality+loyalty
+        // bonus (post-M62-retune) stays under a single real transatlantic
+        // leg - Plan_HubQuality_DoesNotOverrideLargeDetourAdvantage above
+        // is the dedicated, much wider-margin (~37,000km) proof this can
+        // never override a genuinely distant hub; this test is a tighter,
+        // real-data sanity bound on top of that.
+        var cities = CityCatalog.LoadFile(Path.Combine(AppContext.BaseDirectory, "data", "cities.json"));
+        var jfk = cities.Single(c => c.Id == "jfk");
+        var lhr = cities.Single(c => c.Id == "lhr");
+        var transatlanticKm = GreatCircle.DistanceKm(jfk, lhr);
+
+        var maxCombinedBonusKm = NetworkPlanner.HubQualityKmPerPoint * CityCatalog.MaxAuthoredHubQuality + NetworkPlanner.LoyaltyBonusMaxKm;
+
+        Assert.True(maxCombinedBonusKm < transatlanticKm,
+            $"Combined bonus ({maxCombinedBonusKm}) should stay under a real transatlantic distance ({transatlanticKm}).");
+    }
+
     [Fact]
     public void Plan_IsDeterministic_RegardlessOfRouteOrCityInputOrder()
     {
