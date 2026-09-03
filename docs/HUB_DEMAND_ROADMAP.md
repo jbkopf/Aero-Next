@@ -195,7 +195,7 @@ tested.
 **Done.** Branch `m62-network-planner-hub-selection`, to be merged to
 `main`.
 
-## M63 — `GravityDemandModel.ForPair`: bounded, additive, off-by-default hub bonus ⚠️ implemented, real call sites left disabled
+## M63 — `GravityDemandModel.ForPair`: bounded, additive, off-by-default hub bonus ⚠️ shipped live, with a known real regression
 
 The design doc's literal recommended formula, following the exact
 `schedule`/`year` off-by-default convention `GravityDemandModel` already
@@ -250,17 +250,126 @@ EastAsia benefits disproportionately from the reshuffling because it sits
 geographically next to several boosted hubs (its own HKG/ICN plus
 SouthWestAsia's DXB and AustralAsia's SIN).
 
-**Status: implemented, tested, verified safe in isolation, but the 5 real
-call sites are left disabled (`main`'s exact pre-M63 form) pending the
-real fix — M64.** This is a genuine, honest interim state, not a silent
-regression: shipping M63's code without enabling it costs nothing (it's
-provably inert, same guarantee M61 gave `HubQuality` itself) and keeps the
-tested, bounded formula on `main` ready for M64 to build on.
+**Status, updated after M64's own investigation below: shipped live** (the
+5 real call sites are enabled) **at the user's own explicit, informed
+decision, with a known, real, unresolved regression** — see M64's own
+"A second real finding" section for the full chain of evidence and why
+this was still the right call to ship now rather than continue blocking on
+it. Branch `m63-forpair-hub-demand-bonus`, merged to `main`; the real call
+sites were re-enabled as part of M64's own branch/commit once the decision
+was made (see below), not a separate M63 follow-up commit.
 
-**Done, in this qualified sense.** Branch `m63-forpair-hub-demand-bonus`,
-merged to `main`.
+## M64 — route-opening consolidation bonus ✅ (real, partial fix — M63 shipped anyway, known regression remains)
 
-## M64 — route-opening consolidation bonus: the real fix
+The fix M63's own investigation called for: give route-*opening* ranking
+(which *new* direct route to open) the same kind of bounded consolidation
+signal M62 already gave hub-*selection* ranking (which existing connection
+an itinerary routes through) — two genuinely different decision points
+that M63's regression showed were both missing it.
 
-See `docs/HUB_DEMAND_DESIGN.md`'s Decisions and the M63 section above for
-full context. Not yet started.
+**What shipped, and works:**
+- `NetworkPlanner.ComputeRouteShareByCityId` — M62's own
+  `routeCountByCityId`/`loyaltyShareByCityId` precompute, extracted into a
+  small, reusable `public static` helper (a pure refactor; the full
+  pre-existing `NetworkPlannerTests.cs` suite passing unmodified is the
+  verification). `Plan` now calls it instead of its own inline block.
+- `AiToolkit.ConsolidationBonusFraction` (`0.5`) and two new helpers,
+  `EffectiveDemandScore`/`ConsolidationMultiplier` — a bounded,
+  *multiplicative* bonus (`1 + fraction × share`, using `Math.Max` of the
+  pair's two sides, not the sum), deliberately multiplicative rather than
+  additive like `NetworkPlanner`'s own km-based terms, since
+  `PassengersPerQuarter` varies over orders of magnitude across different
+  candidate pairs (a flat additive bonus would be negligible for huge
+  pairs, overwhelming for tiny ones).
+- Wired into **`RapidExpansionStrategy`'s two route-opening ranking
+  chains** (`FindBestUnservedPairCrossRegionFirst`,
+  `FindBestUnservedPairCrossRegionFirstUsingIdleFleet`) — the
+  cross-region-first tier stays the primary sort key, consolidation only
+  tilts *within* it.
+- **Not** wired into `DomesticProfitOptimizerStrategy` — see below.
+
+**Tests** (11 new): 3 in `RapidExpansionStrategyTests.cs`
+(`DecideOrders_ConsolidationBonus_PrefersPairTouchingExistingNetwork_WhenDemandGapIsModest`,
+`..._DoesNotOverrideMuchLargerUnrelatedPair`,
+`DecideOrders_CrossRegionTier_StillBeatsConsolidationBonus`), 4 direct unit
+tests on the shared helpers in `AiToolkitTests.cs`, 2 in
+`NetworkPlannerTests.cs` for the extracted `ComputeRouteShareByCityId`, and
+one pre-existing `DomesticProfitOptimizerStrategyTests.cs` fixture repaired
+(see below). All numeric fixtures verified via a scratchpad tool
+(`m64check`) before being committed to specific coordinates/weights —
+including two real dead ends discovered *while* verifying (repositioning a
+decoy city near an existing hub created an unrelated, unintended
+high-demand candidate; raising a decoy's weight alone did nothing once its
+own route was already capacity-capped) that shaped the final fixture
+design rather than being hidden.
+
+**A real regression, found and fixed mid-milestone:** the first version
+wired the consolidation bonus into *both* live strategies. It broke one
+pre-existing `DomesticProfitOptimizerStrategyTests.cs` fixture — a real,
+correct, *intended* consequence (the fixed test's own geometry was
+repositioned so the bonus cancels out of that specific comparison,
+restoring its original, unrelated M40 double-counting invariant rather
+than just asserting the new answer and losing that coverage). But a real
+300-game sweep with **M64 alone** (M63 still disabled) then found the
+whole thing regressed the M62 baseline itself — 39.0%→18.0%, avg win
+quarter 83.5→33.2, bankruptcy up broadly. Direct ablation (disabling each
+strategy's own wiring in turn, 100-game samples) isolated the cause
+precisely: `RapidExpansionStrategy`'s wiring alone reproduced the safe
+baseline (36-37/100 either way); `DomesticProfitOptimizerStrategy`'s
+wiring alone reproduced the regression (15/100). Likely mechanism:
+`DomesticProfitOptimizerStrategy` already has its own real M40
+`EstimatedHubBonusDemand` mechanism answering an overlapping question
+("does this candidate connect to my existing network"), and unlike
+`RapidExpansionStrategy` it has no cross-region tier bounding the new
+bonus's effect — stacking a second, cruder multiplier on top competed with
+rather than complemented the existing one. **Fix: the wiring was removed
+from `DomesticProfitOptimizerStrategy` entirely**, kept only in
+`RapidExpansionStrategy`. Re-measured, M64 alone: 117/300 (39.0%), avg
+quarter 83.6 — matches the M62 baseline almost exactly.
+
+**A second real finding, once M63 was re-enabled on top of the fixed
+M64:** the combined 300-game sweep still collapsed to 19/300 (6.3%), avg
+win quarter 60.0, NorthAmerica 10.5%/EastAsia 84.2% — nearly *identical* to
+M63's own original, unfixed collapse (7.0%, 9.5%/85.7%).
+`RapidExpansionStrategy`'s own consolidation-awareness provided **zero
+protection** against M63's regression, meaning `DomesticProfitOptimizerStrategy`
+was always the primary driver of the original problem too, not just of
+M64's own regression. Confirmed by a direct, decisive ablation: with
+`DomesticProfitOptimizerStrategy` temporarily removed from
+`BaselineAi.Strategies` entirely (all 4 airlines running
+`RapidExpansionStrategy` only) and M63 enabled, the game is **healthier
+than the M62 baseline** — 150/300 (50.0%), bankruptcy down sharply in
+every region, avg win quarter 129.2 (far less early snowballing). A real,
+smaller regional shift toward EastAsia remains even in that healthy state
+(70.0% win share vs. NorthAmerica's 26.0%) — non-catastrophic, but real
+and still unexplained.
+
+**The decision, made explicitly by the user with this full picture in
+hand:** ship M63 live now, with the full, real 2-strategy roster
+(`DomesticProfitOptimizerStrategy` included) and its known 6.3% collapse,
+rather than continue blocking on a fourth investigation round or ship a
+roster-reduced interim state. **Real, shipped numbers, the actual live
+state of `main` as of this milestone:** 19/300 win rate (6.3%), avg win
+quarter 60.0, NorthAmerica 20.8% bankrupt/10.5% win share, Europe 95.4%
+bankrupt/0%, EastAsia 15.2% bankrupt/84.2% win share, SouthWestAsia 55.2%
+bankrupt/5.3%, AustralAsia 87.6% bankrupt/0%, SouthAmerica 89.9%
+bankrupt/0%.
+
+**This is a known, real, and load-bearing regression from the M59/M62
+baseline (39.0%→6.3%), shipped deliberately, not accidentally** — see
+`docs/OPEN_WORK.md` for the follow-up item tracking
+`DomesticProfitOptimizerStrategy`'s own dedicated fix, which is now the
+active priority for this area.
+
+**Verification:** `dotnet build`, `dotnet test` — 831/831 passing (822
+pre-M64 + 3 RapidExpansionStrategy + 4 AiToolkit + 2 NetworkPlanner + 1
+repaired DomesticProfitOptimizerStrategy fixture, net +11 excluding the
+repair). Coverage: `NetworkPlanner.cs`, `RapidExpansionStrategy.cs`,
+`DomesticProfitOptimizerStrategy.cs` all 100% line+branch; `AiToolkit.cs`
+98.9%/98.36% overall, but both new methods (`EffectiveDemandScore`,
+`ConsolidationMultiplier`) are individually 100% — the class-level gap is
+confirmed pre-existing dead code in the unrelated `TryOrientFromValidOrigin`
+(lines 237-239), not touched by this milestone.
+
+Branch `m64-route-opening-consolidation` (which also carries the M63
+re-enable, made as part of this same decision), merged to `main`.

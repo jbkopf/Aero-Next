@@ -102,6 +102,94 @@ public class RapidExpansionStrategyTests
         Assert.Contains("frn", new[] { routeOrder.Origin.Id, routeOrder.Destination.Id });
     }
 
+    // --- M64: route-opening consolidation bonus ---
+
+    [Fact]
+    public void DecideOrders_ConsolidationBonus_PrefersPairTouchingExistingNetwork_WhenDemandGapIsModest()
+    {
+        // Numerically pre-verified: existing home-hub, hub-away gives hub
+        // a route-count-share of 1.0 (touches both), home only 0.5. candA
+        // (touches hub) has real, modestly *lower* raw demand than candB
+        // (touches home) - 5,460,924 vs 6,065,845 - but hub's bigger
+        // consolidation multiplier (1.5x vs home's 1.25x) flips the
+        // ranking: candA's boosted score (8,191,386) beats candB's
+        // (7,582,306). Both candidates are intra-region, so IsCrossRegion
+        // can't be the tiebreak here - this isolates the consolidation
+        // bonus itself.
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
+        var hub = MakeCity("hub", Region.NorthAmerica, 1, 0, 100);
+        var away = MakeCity("away", Region.NorthAmerica, 2, 0, 60);
+        var candA = MakeCity("canda", Region.NorthAmerica, 1, 1, 90); // touches hub - share 1.0
+        var candB = MakeCity("candb", Region.NorthAmerica, 0, 1, 100); // touches home - share 0.5, modestly higher raw demand
+        var cities = new[] { home, hub, away, candA, candB };
+        var aircraft = new AircraftType("t", "Test", Seats: 140, RangeKm: 10_000);
+        var existing = new[] { new Route(home, hub, aircraft, AircraftCount: 1), new Route(hub, away, aircraft, AircraftCount: 1) };
+        var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, aircraft, quantity: 1, FleetOwnershipMode.Owned);
+
+        var context = MakeContext(existing, cities, new[] { aircraft }, Region.NorthAmerica, fleet, actionCap: 1);
+
+        var orders = Strategy.DecideOrders(context);
+
+        var routeOrder = Assert.Single(orders.OfType<RouteOrder>());
+        Assert.Equal(new HashSet<string> { "hub", "canda" }, new HashSet<string> { routeOrder.Origin.Id, routeOrder.Destination.Id });
+    }
+
+    [Fact]
+    public void DecideOrders_ConsolidationBonus_DoesNotOverrideMuchLargerUnrelatedPair()
+    {
+        // Same fixture as the modest-gap test above, except candB's own
+        // weight is pushed much higher (400, not 100) - its raw demand
+        // (24,263,381) is now so far ahead of candA's (5,460,924) that
+        // even candA's full 1.5x consolidation multiplier
+        // (8,191,386) can't come close to candB's own 1.25x-boosted
+        // figure (30,329,226). The bonus tilts a genuinely close choice;
+        // it doesn't make a small pair look bigger than a dramatically
+        // larger, unrelated one.
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
+        var hub = MakeCity("hub", Region.NorthAmerica, 1, 0, 100);
+        var away = MakeCity("away", Region.NorthAmerica, 2, 0, 60);
+        var candA = MakeCity("canda", Region.NorthAmerica, 1, 1, 90);
+        var candB = MakeCity("candb", Region.NorthAmerica, 0, 1, 400);
+        var cities = new[] { home, hub, away, candA, candB };
+        var aircraft = new AircraftType("t", "Test", Seats: 140, RangeKm: 10_000);
+        var existing = new[] { new Route(home, hub, aircraft, AircraftCount: 1), new Route(hub, away, aircraft, AircraftCount: 1) };
+        var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, aircraft, quantity: 1, FleetOwnershipMode.Owned);
+
+        var context = MakeContext(existing, cities, new[] { aircraft }, Region.NorthAmerica, fleet, actionCap: 1);
+
+        var orders = Strategy.DecideOrders(context);
+
+        var routeOrder = Assert.Single(orders.OfType<RouteOrder>());
+        Assert.Equal(new HashSet<string> { "home", "candb" }, new HashSet<string> { routeOrder.Origin.Id, routeOrder.Destination.Id });
+    }
+
+    [Fact]
+    public void DecideOrders_CrossRegionTier_StillBeatsConsolidationBonus()
+    {
+        // The consolidation bonus only ever tilts *within* the
+        // cross-region-first tier - it can't cross it. "domestic" touches
+        // the existing hub (maximal 1.5x consolidation multiplier) but is
+        // intra-region; "frn" is a fresh, unconnected, cross-region
+        // candidate with much lower raw demand. Cross-region still wins,
+        // matching DecideOrders_PrefersACrossRegionCandidate_OverAHigherDemandIntraRegionOne's
+        // own established pattern - now proven robust to the new bonus too.
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
+        var hub = MakeCity("hub", Region.NorthAmerica, 1, 0, 100);
+        var domestic = MakeCity("domestic", Region.NorthAmerica, 1, 1, 500); // touches hub, huge raw demand, maximal consolidation - still intra-region
+        var foreign = MakeCity("frn", Region.Europe, 2, 2, 20); // cross-region, no consolidation, much lower raw demand
+        var cities = new[] { home, hub, domestic, foreign };
+        var aircraft = new AircraftType("t", "Test", Seats: 140, RangeKm: 10_000);
+        var existing = new[] { new Route(home, hub, aircraft, AircraftCount: 1) };
+        var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, aircraft, quantity: 1, FleetOwnershipMode.Owned);
+
+        var context = MakeContext(existing, cities, new[] { aircraft }, Region.NorthAmerica, fleet, actionCap: 1);
+
+        var orders = Strategy.DecideOrders(context);
+
+        var routeOrder = Assert.Single(orders.OfType<RouteOrder>());
+        Assert.Contains("frn", new[] { routeOrder.Origin.Id, routeOrder.Destination.Id });
+    }
+
     [Fact]
     public void DecideOrders_NegotiatesForACrossRegionGateway_OverAHigherDemandDomesticOne()
     {

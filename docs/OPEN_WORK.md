@@ -14,38 +14,44 @@ Compiled 2026-08-31, cross-referencing every `docs/*_ROADMAP.md`'s own
 
 ## Milestone status
 
-**Every milestone across all 9 roadmap docs is complete**, with one
+**Every milestone across all 10 roadmap docs is complete**, with one
 open exception, as of this writing: M0–M14 (`SIM_CORE_ROADMAP.md`),
 M15–M19 (`GAME_SETUP_ROADMAP.md`), M20–M22 (`HISTORICAL_DYNAMICS_ROADMAP.md`),
 M23–M24 (`WIN_CONDITIONS_ROADMAP.md`), M25–M30/M34
 (`FINANCIAL_MODEL_ROADMAP.md`, M31 retired), M31/M35–M44/M49–M57
 (`BASELINE_AI_ROADMAP.md`), M32–M33/M45–M46/M59 (`ROUTE_CAPACITY_ROADMAP.md`),
-M47–M48 (`MARKETING_ROADMAP.md`). M59 is the current highest *shipped*
-number. M56 shipped no code change (four route-opening-quality designs
-tried and reverted); M57 followed with a real, contained fix. **M58
-(`NetworkOptimizerStrategy` + win-condition plumbing) is real,
-committed work that is *not* merged to `main`** — it sits on its own
-branch (`m58a-win-condition-plumbing`), paused mid-investigation after
-a persistent sweep regression traced back to the same shared
-city-capacity mechanic M59 then addressed; whether M58's own strategy
-recovers now that M59 has shipped is unconfirmed, not assumed. Update
-this line the moment a new milestone is opened, or M58 is resolved,
-anywhere.
+M47–M48 (`MARKETING_ROADMAP.md`), M61-M64 (`HUB_DEMAND_ROADMAP.md`). M64 is
+the current highest *shipped* number (M60 was attempted, measured, and
+fully reverted — see below, not a shipped number). M56 shipped no code
+change (four route-opening-quality designs tried and reverted); M57
+followed with a real, contained fix. **M58 (`NetworkOptimizerStrategy` +
+win-condition plumbing) is real, committed work that is *not* merged to
+`main`** — it sits on its own branch (`m58a-win-condition-plumbing`),
+paused mid-investigation after a persistent sweep regression traced back
+to the same shared city-capacity mechanic M59 then addressed; whether
+M58's own strategy recovers now that M59 has shipped is unconfirmed, not
+assumed. **M61-M64 shipped a real, active, known regression** — see the
+Active priority section below for the full picture; this is not the same
+kind of "clean and done" as the other ranges listed here. Update this
+line the moment a new milestone is opened, or M58/the M61-M64 regression
+is resolved, anywhere.
 
-**M60 (hub-and-spoke demand) was attempted, measured, and reverted —
-not shipped.** Two formula-level fixes to `GravityDemandModel.ForPair`
-were tried (an additive catchment bonus, then a weight-dependent
+**M60 (hub-and-spoke demand, the first attempt) was tried, measured, and
+reverted — not shipped, superseded by M61-M64's later, different
+approach.** Two formula-level fixes to `GravityDemandModel.ForPair` were
+tried (an additive catchment bonus, then a weight-dependent
 distance-exponent discount) and both failed real verification: the
 first structurally favored small cities more, not less; the second
 flipped the intended city-pair rankings correctly but inflated total
 world demand 31× (even for pairs with no hub involvement at all),
 collapsing a real 300-game sweep's win rate from 39.0% to 0.3%. Both
-were fully reverted — `main` is unaffected. See
-`docs/HUB_DEMAND_DESIGN.md` for the real architectural finding this
-surfaced (connecting-passenger routing already exists and works via
+were fully reverted before M61-M64's own, differently-designed attempt
+began. See `docs/HUB_DEMAND_DESIGN.md` for the real architectural finding
+this surfaced (connecting-passenger routing already exists and works via
 `NetworkPlanner`/`CompetitiveMarket`; what's actually missing is a
 hub-*quality* concept influencing hub *selection*, not the O&D demand
-formula itself) and its own recommended path forward, not yet built.
+formula itself) and `docs/HUB_DEMAND_ROADMAP.md` for what M61-M64 actually
+built from that finding, and where it currently stands.
 
 ---
 
@@ -264,6 +270,39 @@ rather than folded in — all filed under `BASELINE_AI_ROADMAP.md`'s own
 imbalance (NorthAmerica and EastAsia shared the same 1.117 factor yet
 landed at opposite outcomes pre-M43) — the real driver was downstream
 AI strategy/network-topology behavior, not starting conditions.
+
+**A sixth round, `docs/HUB_DEMAND_ROADMAP.md`'s M61-M64, shipped with a
+known, real, active regression — the current top priority for this
+area.** M61 (new `HubQuality` city field) and M62 (`NetworkPlanner`
+hub-selection quality/loyalty/substitution) both shipped clean, real,
+positive, zero-regression. M63 (`GravityDemandModel.ForPair`'s bounded
+hub-demand bonus) initially shipped *disabled* after a real 300-game
+sweep collapsed the win rate 39.0%→7.0% when enabled. M64 (route-opening
+consolidation bonus, the fix M63's own investigation called for) found
+and fixed a real regression of its *own* (isolated to
+`DomesticProfitOptimizerStrategy`'s wiring specifically — dropped, kept
+only in `RapidExpansionStrategy`) — but even fixed, **M63's original
+regression persists almost unchanged when combined** (6.3% win rate,
+nearly identical to the original 7.0% collapse).
+`RapidExpansionStrategy`'s own consolidation-awareness provides zero
+protection. Decisive ablation (`DomesticProfitOptimizerStrategy`
+temporarily removed from the roster entirely) confirms it's the real,
+primary driver of *both* regressions: with only `RapidExpansionStrategy`
+running and M63 enabled, the game is healthier than the M59/M62 baseline
+(50.0% win rate, bankruptcy down sharply everywhere) — though a real,
+smaller regional shift toward EastAsia remains even then (70.0% vs.
+NorthAmerica's 26.0%), still unexplained. **The user made an explicit,
+informed decision to ship M63 live with the full, real 2-strategy roster
+anyway**, accepting the known 6.3%-win-rate collapse as a real, load-
+bearing regression from the M59/M62 baseline (39.0%), rather than keep
+blocking on a fourth investigation round. **`DomesticProfitOptimizerStrategy`'s
+own dedicated fix for its interaction with M63's boosted demand figures
+is now the active priority for this area** — not the same
+`ConsolidationMultiplier` approach already proven harmful there once (see
+M64's own write-up for the full evidence chain), a genuinely new design
+question. The smaller, still-unexplained EastAsia regional shift (present
+even in the healthy `RapidExpansionStrategy`-only state) is a real,
+separate follow-up once the primary collapse is fixed.
 
 ---
 

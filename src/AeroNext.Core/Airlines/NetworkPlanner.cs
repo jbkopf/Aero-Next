@@ -119,23 +119,7 @@ public static class NetworkPlanner
         // call rather than once per FindBestHub call inside the O(cities^2)
         // double loop below — the same class of accidental redundant
         // recomputation GravityDemandModel's own M21 already fixed once.
-        var routeCountByCityId = new Dictionary<string, int>(StringComparer.Ordinal);
-        foreach (var route in withinRangeRoutes)
-        {
-            routeCountByCityId[route.Origin.Id] = routeCountByCityId.GetValueOrDefault(route.Origin.Id) + 1;
-            routeCountByCityId[route.Destination.Id] = routeCountByCityId.GetValueOrDefault(route.Destination.Id) + 1;
-        }
-
-        // totalRoutes is always > 0 here: routeCountByCityId only ever gets
-        // entries from the same withinRangeRoutes loop above, so it's empty
-        // exactly when totalRoutes is 0 - no need for a defensive branch
-        // that can never actually run.
-        var totalRoutes = withinRangeRoutes.Count;
-        var loyaltyShareByCityId = new Dictionary<string, double>(StringComparer.Ordinal);
-        foreach (var (cityId, count) in routeCountByCityId)
-        {
-            loyaltyShareByCityId[cityId] = count / (double)totalRoutes;
-        }
+        var loyaltyShareByCityId = ComputeRouteShareByCityId(withinRangeRoutes);
 
         var cityById = allCities.ToDictionary(c => c.Id, StringComparer.Ordinal);
         var loyalHubCities = loyaltyShareByCityId
@@ -299,6 +283,44 @@ public static class NetworkPlanner
             .ToList();
 
         return new NetworkPlan(loads, routeUsage);
+    }
+
+    /// <summary>
+    /// M62 (extracted as a shared, reusable helper in M64): for every city
+    /// touched by at least one of the given routes, what share of the
+    /// total route count touches that city — the route-count-share proxy
+    /// for "how much does this network already center on this city,"
+    /// originally built for <see cref="FindBestHub"/>'s own loyalty term
+    /// and now reused by the AI layer's route-*opening* consolidation
+    /// bonus (<see cref="Ai.AiToolkit.EffectiveDemandScore"/>), so the two
+    /// distinct decisions this network cares about — which hub an existing
+    /// connection routes through, and which new direct route to open next
+    /// — read the exact same underlying "already a hub for this airline"
+    /// signal rather than deriving it twice. `routes` is expected to
+    /// already be filtered to whatever the caller considers "real" routes
+    /// (`Plan` filters to `IsWithinRange` first) — this method applies no
+    /// filtering of its own. Empty when `routes` is empty.
+    /// </summary>
+    public static IReadOnlyDictionary<string, double> ComputeRouteShareByCityId(IReadOnlyList<Route> routes)
+    {
+        var routeCountByCityId = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var route in routes)
+        {
+            routeCountByCityId[route.Origin.Id] = routeCountByCityId.GetValueOrDefault(route.Origin.Id) + 1;
+            routeCountByCityId[route.Destination.Id] = routeCountByCityId.GetValueOrDefault(route.Destination.Id) + 1;
+        }
+
+        // totalRoutes is always > 0 whenever routeCountByCityId has any
+        // entries at all - both are built from the same routes list, so
+        // there's no defensive branch that could ever actually run.
+        var totalRoutes = routes.Count;
+        var shareByCityId = new Dictionary<string, double>(StringComparer.Ordinal);
+        foreach (var (cityId, count) in routeCountByCityId)
+        {
+            shareByCityId[cityId] = count / (double)totalRoutes;
+        }
+
+        return shareByCityId;
     }
 
     private static void AddNeighbor(

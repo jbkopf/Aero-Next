@@ -24,6 +24,66 @@ namespace AeroNext.Core.Ai;
 public static class AiToolkit
 {
     /// <summary>
+    /// M64: the route-*opening* counterpart to
+    /// <see cref="Airlines.NetworkPlanner"/>'s M62 hub-*selection* loyalty
+    /// bonus. M63's real-dataset-verified, individually-safe
+    /// GravityDemandModel.ForPair hub-demand bonus caused a real 300-game
+    /// win-rate collapse (39.0%→7.0%) when its 5 real call sites were
+    /// enabled - a topology diagnostic found hub-and-spoke structure never
+    /// actually emerged, because every real route-opening ranking function
+    /// (BaselineAi.FindBestUnservedPair and its two live-strategy
+    /// equivalents) ranks candidate pairs by raw PassengersPerQuarter with
+    /// zero concept of "prefer a pair that reinforces a city I already
+    /// operate from." This constant is that missing signal's strength -
+    /// multiplicative, not additive like NetworkPlanner's own km-based
+    /// terms, because PassengersPerQuarter varies over orders of magnitude
+    /// across different candidate pairs (unlike detour, already a bounded,
+    /// comparable unit for one specific pair's own candidates). Bounded to
+    /// a modest fraction so it can tilt a genuinely close choice toward
+    /// consolidation, never make a small pair look bigger than a
+    /// dramatically larger, unrelated one - see EffectiveDemandScore's own
+    /// doc comment. Set to 0.0 to reproduce pre-M64 pure-demand ranking -
+    /// the sanctioned ablation lever, matching this project's own
+    /// established ablation-instrument discipline
+    /// (docs/ROUTE_CAPACITY_ROADMAP.md's M45, NetworkPlanner's own M62
+    /// constants).
+    /// </summary>
+    public const double ConsolidationBonusFraction = 0.5;
+
+    /// <summary>
+    /// M64: a candidate pair's demand, boosted by up to
+    /// <see cref="ConsolidationBonusFraction"/> (at shareByCityId = 1.0)
+    /// when either side of the pair is a city this airline's own existing
+    /// network already meaningfully touches - <see cref="Airlines.NetworkPlanner.ComputeRouteShareByCityId"/>'s
+    /// own route-count-share proxy, the exact "already a hub for this
+    /// airline" signal M62 already built and verified, reused rather than
+    /// re-derived. Math.Max, not the sum, of the two sides' shares - a
+    /// pair touching an already-used city on either end benefits once, not
+    /// twice. Callers should compute shareByCityId once per DecideOrders
+    /// call (via ComputeRouteShareByCityId(context.CurrentRoutes)), not
+    /// once per candidate pair being scored.
+    /// </summary>
+    public static double EffectiveDemandScore(PairDemand pair, IReadOnlyDictionary<string, double> shareByCityId) =>
+        pair.PassengersPerQuarter * ConsolidationMultiplier(pair.Origin, pair.Destination, shareByCityId);
+
+    /// <summary>
+    /// M64: the same bounded `1 + ConsolidationBonusFraction * share`
+    /// multiplier <see cref="EffectiveDemandScore"/> applies to raw
+    /// demand, factored out so a caller ranking by something other than
+    /// PassengersPerQuarter (e.g. DomesticProfitOptimizerStrategy's own
+    /// estimated-revenue figure) can apply the identical bonus to its own
+    /// metric instead, without going through PassengersPerQuarter at all.
+    /// </summary>
+    public static double ConsolidationMultiplier(City origin, City destination, IReadOnlyDictionary<string, double> shareByCityId)
+    {
+        var share = Math.Max(
+            shareByCityId.GetValueOrDefault(origin.Id, 0.0),
+            shareByCityId.GetValueOrDefault(destination.Id, 0.0));
+
+        return 1.0 + ConsolidationBonusFraction * share;
+    }
+
+    /// <summary>
     /// M36's negotiate-or-borrow logic, extracted so every strategy can
     /// reuse it with its own gateway-selection rule (DomesticProfitOptimizerStrategy
     /// restricts to intra-region gateways; RapidExpansionStrategy weights

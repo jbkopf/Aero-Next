@@ -113,7 +113,7 @@ public static class FullGameRunner
         // M46: each city's own 1955 total demand becomes the fixed
         // reference point periodic expansion measures growth against -
         // computed once, here, before any quarter runs.
-        var capacityBoard = CityCapacityBoard.Initialize(cities, new GravityDemandModel(schedule: growthSchedule, year: Timeline.StartYear));
+        var capacityBoard = CityCapacityBoard.Initialize(cities, new GravityDemandModel(schedule: growthSchedule, year: Timeline.StartYear, enableHubDemandBonus: true));
         var dominanceState = RegionalDominanceState.Empty;
         string? winner = null;
         int? winQuarter = null;
@@ -123,7 +123,7 @@ public static class FullGameRunner
         {
             var year = Timeline.YearForQuarter(q);
             var availableFleet = Timeline.AvailableAircraft(fleetCatalog, year);
-            var yearDemandModel = new GravityDemandModel(schedule: growthSchedule, year: year); // M20: model resolves global (and any region/city-scoped) growth itself
+            var yearDemandModel = new GravityDemandModel(schedule: growthSchedule, year: year, enableHubDemandBonus: true); // M20: model resolves global (and any region/city-scoped) growth itself
             var appliedOrdersByName = new Dictionary<string, IReadOnlyList<QuarterOrder>>();
             var retiredUnitsByName = new Dictionary<string, IReadOnlyList<FleetUnit>>();
 

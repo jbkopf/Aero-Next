@@ -39,7 +39,7 @@ public static class StartingConditionsResolver
         var cash = Money.FromDollars((long)Math.Round(
             BaseStartingCashDollars * RegionalEconomics.Factor(seat.HomeRegion, allCities), MidpointRounding.AwayFromZero));
 
-        var demandModel = new GravityDemandModel();
+        var demandModel = new GravityDemandModel(enableHubDemandBonus: true);
         var candidates = RegionalFleet.AppropriateAircraft(seat.HomeRegion, fleet, Timeline.StartYear)
             .OrderBy(a => a.RangeKm)
             .ThenBy(a => a.Id, StringComparer.Ordinal);

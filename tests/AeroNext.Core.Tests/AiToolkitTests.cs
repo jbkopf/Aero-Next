@@ -793,4 +793,63 @@ public class AiToolkitTests
         Assert.Single(orders.OfType<NetworkMarketingOrder>());
         Assert.Equal(1, spent);
     }
+
+    // --- M64: route-opening consolidation bonus ---
+    //
+    // Direct unit tests for the shared multiplier both real strategies'
+    // route-opening rankings wire in (RapidExpansionStrategy's own
+    // DecideOrders_ConsolidationBonus_* tests prove the real end-to-end
+    // wiring works in at least one strategy; these test the shared,
+    // pure-function mechanism itself, deliberately independent of any one
+    // strategy's own fare/capacity-cap complexity).
+
+    [Fact]
+    public void ConsolidationMultiplier_ZeroShareOnBothSides_IsExactlyOne()
+    {
+        var a = MakeCity("a", Region.EastAsia, 0, 0, 50);
+        var b = MakeCity("b", Region.EastAsia, 0, 10, 50);
+
+        var multiplier = AiToolkit.ConsolidationMultiplier(a, b, new System.Collections.Generic.Dictionary<string, double>());
+
+        Assert.Equal(1.0, multiplier);
+    }
+
+    [Fact]
+    public void ConsolidationMultiplier_UsesTheHigherOfTheTwoSidesShares_NotTheSum()
+    {
+        var a = MakeCity("a", Region.EastAsia, 0, 0, 50);
+        var b = MakeCity("b", Region.EastAsia, 0, 10, 50);
+        var shareByCityId = new System.Collections.Generic.Dictionary<string, double> { ["a"] = 0.2, ["b"] = 0.8 };
+
+        var multiplier = AiToolkit.ConsolidationMultiplier(a, b, shareByCityId);
+
+        // Math.Max(0.2, 0.8) = 0.8, not 0.2+0.8=1.0 - touching an
+        // already-used city on either end benefits once, not twice.
+        Assert.Equal(1.0 + AiToolkit.ConsolidationBonusFraction * 0.8, multiplier, precision: 9);
+    }
+
+    [Fact]
+    public void ConsolidationMultiplier_AtFullShare_EqualsOnePlusTheBoundedFraction()
+    {
+        var a = MakeCity("a", Region.EastAsia, 0, 0, 50);
+        var b = MakeCity("b", Region.EastAsia, 0, 10, 50);
+        var shareByCityId = new System.Collections.Generic.Dictionary<string, double> { ["a"] = 1.0 };
+
+        var multiplier = AiToolkit.ConsolidationMultiplier(a, b, shareByCityId);
+
+        Assert.Equal(1.0 + AiToolkit.ConsolidationBonusFraction, multiplier, precision: 9);
+    }
+
+    [Fact]
+    public void EffectiveDemandScore_MultipliesRawPassengersPerQuarterByTheConsolidationMultiplier()
+    {
+        var a = MakeCity("a", Region.EastAsia, 0, 0, 50);
+        var b = MakeCity("b", Region.EastAsia, 0, 10, 50);
+        var pair = new PairDemand(a, b, DistanceKm: 1000, PassengersPerQuarter: 10_000);
+        var shareByCityId = new System.Collections.Generic.Dictionary<string, double> { ["a"] = 1.0 };
+
+        var score = AiToolkit.EffectiveDemandScore(pair, shareByCityId);
+
+        Assert.Equal(10_000 * (1.0 + AiToolkit.ConsolidationBonusFraction), score, precision: 6);
+    }
 }

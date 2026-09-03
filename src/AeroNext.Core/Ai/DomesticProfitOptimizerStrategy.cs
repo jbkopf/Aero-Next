@@ -247,9 +247,23 @@ public sealed class DomesticProfitOptimizerStrategy : IAiStrategy
             .Select(p => (Pair: p, HubBonus: EstimatedHubBonusDemand(context.DemandModel, neighborsByCity, p)))
             .ToList();
 
-        // Phase 1: which pair wins - unchanged since M40. Still ranked by
-        // EstimatedRevenue, not real profit; see the class doc comment for
-        // why this stays untouched while Phase 2 below is new.
+        // M64: deliberately NOT wired in here, unlike RapidExpansionStrategy.
+        // A real 300-game sweep found stacking AiToolkit's own
+        // ConsolidationMultiplier on top of this strategy's already-real
+        // M40 EstimatedHubBonusDemand caused a severe regression
+        // (isolated by direct ablation: this strategy's wiring alone
+        // reproduced the collapse; RapidExpansionStrategy's wiring alone
+        // did not) - the two mechanisms answer overlapping questions
+        // ("does this candidate connect to my existing network") without
+        // being designed to compose, and this strategy's Phase 1 has no
+        // cross-region tier the way RapidExpansionStrategy's ranking does
+        // to bound the bonus's effect. See docs/HUB_DEMAND_ROADMAP.md's
+        // M64 section for the real measured numbers.
+
+        // Phase 1: which pair wins - unchanged since M40, still ranked by
+        // EstimatedRevenue (which already folds in HubBonus above); see
+        // the class doc comment for why this stays untouched while Phase
+        // 2 below is new.
         var best = candidateTypes
             .SelectMany(type => pairsWithHubBonus
                 .Where(pb => pb.Pair.DistanceKm <= type.RangeKm)

@@ -189,9 +189,11 @@ public sealed class RapidExpansionStrategy : IAiStrategy
             return null;
         }
 
+        var shareByCityId = NetworkPlanner.ComputeRouteShareByCityId(context.CurrentRoutes);
+
         var best = candidates
             .OrderByDescending(c => IsCrossRegion(c.Pair!, context))
-            .ThenByDescending(c => c.Pair!.PassengersPerQuarter)
+            .ThenByDescending(c => AiToolkit.EffectiveDemandScore(c.Pair!, shareByCityId))
             .ThenBy(c => c.Pair!.Origin.Id, StringComparer.Ordinal)
             .ThenBy(c => c.Pair!.Destination.Id, StringComparer.Ordinal)
             .ThenBy(c => c.Aircraft.Id, StringComparer.Ordinal)
@@ -217,6 +219,11 @@ public sealed class RapidExpansionStrategy : IAiStrategy
             .SelectMany(r => new[] { (r.Origin.Id, r.Destination.Id), (r.Destination.Id, r.Origin.Id) })
             .ToHashSet();
         var recentlyClosed = AiToolkit.RecentlyClosedPairKeys(context, AiToolkit.ReopenCooldownQuarters);
+        // M64: cheap (context.CurrentRoutes is a handful of routes, not
+        // the O(cities^2) scale NetworkPlanner's own M62 precompute cares
+        // about) - recomputed per aircraft type tried here rather than
+        // threaded through as a parameter, for a small, contained change.
+        var shareByCityId = NetworkPlanner.ComputeRouteShareByCityId(context.CurrentRoutes);
 
         return context.DemandModel.AllPairs(context.AllCities)
             .Where(p => !served.Contains((p.Origin.Id, p.Destination.Id)))
@@ -224,7 +231,7 @@ public sealed class RapidExpansionStrategy : IAiStrategy
             .Where(p => p.DistanceKm <= aircraft.RangeKm)
             .Where(p => validOriginCityIds.Contains(p.Origin.Id) || validOriginCityIds.Contains(p.Destination.Id))
             .OrderByDescending(p => IsCrossRegion(p, context))
-            .ThenByDescending(p => p.PassengersPerQuarter)
+            .ThenByDescending(p => AiToolkit.EffectiveDemandScore(p, shareByCityId))
             .ThenBy(p => p.Origin.Id, StringComparer.Ordinal)
             .ThenBy(p => p.Destination.Id, StringComparer.Ordinal)
             .FirstOrDefault();

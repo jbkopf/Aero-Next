@@ -154,23 +154,35 @@ public class DomesticProfitOptimizerStrategyTests
         // already directly connected to far via the existing elsewhere-far
         // route, so that demand is already nonstop-served and must be
         // skipped, not double-counted. Correct hub bonus = home-far demand
-        // only, giving hub-far a real value of $1,826,396.60 - below the
-        // home-decoy pair's $1,974,336.00, so home-decoy wins. If
-        // elsewhere-far's demand were wrongly double-counted too,
-        // hub-far's value would reach $2,110,988.04, wrongly beating the
-        // decoy instead. decoy sits at home's own coordinates offset by
-        // exactly what the original p2-p3 decoy pair (pre-M44) was offset
-        // from each other, at the same weight - preserves the exact
-        // dollar figures above while touching home directly, since M44's
-        // network-contiguity rule now correctly excludes a pair touching
-        // neither served city at all (what the original decoy pair was).
-        // A tight 500km aircraft range excludes every other candidate
-        // pair (all >500km apart) so only these two compete.
+        // only, giving hub-far a lower value than the decoy pair, so decoy
+        // wins; if elsewhere-far's demand were wrongly double-counted too,
+        // hub-far's value would be pushed high enough to wrongly beat the
+        // decoy instead.
+        //
+        // M64: decoy touches "elsewhere" (not "home", the pre-M64 fixture's
+        // own choice) specifically because elsewhere's own M64
+        // route-count-share (2 of 3 existing routes touch it, same as hub)
+        // exactly matches hub's - giving elsewhere-decoy and hub-far the
+        // *same* M64 consolidation multiplier, which cancels out of this
+        // comparison entirely and restores this test's original,
+        // M64-independent power to isolate the M40 double-counting
+        // invariant specifically (verified directly: an earlier version of
+        // this fixture using "home" - share 0.333, half of hub's - let
+        // M64's own bonus alone flip the winner to hub-far regardless of
+        // whether the M40 hub-bonus was computed correctly or double-counted,
+        // silently losing its ability to catch that regression).
+        // decoy sits offset from elsewhere by exactly what the original
+        // p2-p3 decoy pair (pre-M44) was offset from home, at the same
+        // weight - reproduces (not bit-for-bit, since elsewhere's own
+        // latitude differs slightly from home's, but comparably) the
+        // original fixture's own dollar-figure relationship. A tight
+        // 500km aircraft range excludes every other candidate pair (all
+        // >500km apart) so only these two compete.
         var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
         var hub = MakeCity("hub", Region.NorthAmerica, 5, 0, 100);
         var far = MakeCity("far", Region.NorthAmerica, 9, 0, 7);
         var elsewhere = MakeCity("elsewhere", Region.NorthAmerica, 5, -6, 60);
-        var decoy = MakeCity("decoy", Region.NorthAmerica, -0.9, -1.5, 100);
+        var decoy = MakeCity("decoy", Region.NorthAmerica, 5 - 0.9, -6 - 1.5, 100);
         var cities = new[] { home, hub, far, elsewhere, decoy };
         var wideAircraft = new AircraftType("wide", "Wide", Seats: 100, RangeKm: 2000); // flies the existing network's own legs
         var candidateAircraft = new AircraftType("t", "Test", Seats: 100, RangeKm: 500); // short enough to exclude every other candidate pair
@@ -187,7 +199,7 @@ public class DomesticProfitOptimizerStrategyTests
         var orders = Strategy.DecideOrders(context);
 
         var routeOrder = Assert.Single(orders.OfType<RouteOrder>());
-        Assert.Equal(new HashSet<string> { "home", "decoy" }, new HashSet<string> { routeOrder.Origin.Id, routeOrder.Destination.Id });
+        Assert.Equal(new HashSet<string> { "elsewhere", "decoy" }, new HashSet<string> { routeOrder.Origin.Id, routeOrder.Destination.Id });
     }
 
     [Fact]

@@ -432,4 +432,35 @@ public class NetworkPlannerTests
             original.RouteUsage.Select(u => (u.Route.Origin.Id, u.Route.Destination.Id, u.SeatsUsed)),
             shuffled.RouteUsage.Select(u => (u.Route.Origin.Id, u.Route.Destination.Id, u.SeatsUsed)));
     }
+
+    // --- M64: ComputeRouteShareByCityId, extracted from Plan()'s own M62 precompute as a shared, reusable helper ---
+
+    [Fact]
+    public void ComputeRouteShareByCityId_EmptyRoutes_ReturnsEmpty()
+    {
+        Assert.Empty(NetworkPlanner.ComputeRouteShareByCityId(Array.Empty<Route>()));
+    }
+
+    [Fact]
+    public void ComputeRouteShareByCityId_MatchesRouteCountShareOfTotal()
+    {
+        var a = MakeCity("a", 0, 0, 50);
+        var hub = MakeCity("hub", 0, 10, 50);
+        var b = MakeCity("b", 0, 20, 50);
+        var c = MakeCity("c", 5, 5, 50);
+        var aircraft = new AircraftType("t", "Test", Seats: 400);
+        var routes = new[]
+        {
+            new Route(a, hub, aircraft, 5),
+            new Route(hub, b, aircraft, 5),
+            new Route(hub, c, aircraft, 5),
+        };
+
+        var shareByCityId = NetworkPlanner.ComputeRouteShareByCityId(routes);
+
+        Assert.Equal(3.0 / 3.0, shareByCityId["hub"]); // touches all 3 routes
+        Assert.Equal(1.0 / 3.0, shareByCityId["a"]);
+        Assert.Equal(1.0 / 3.0, shareByCityId["b"]);
+        Assert.Equal(1.0 / 3.0, shareByCityId["c"]);
+    }
 }
