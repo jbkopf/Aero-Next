@@ -100,6 +100,39 @@ exists and is mostly fine; what's missing is a hub-*quality* concept that
 actually influences hub *selection* and, if wanted, how much a city's own
 "hub-ness" adds beyond what real O&D routing alone would carry.**
 
+### Follow-up refinement: two more specific requirements
+
+After reading a first draft of this document, the user sharpened the request
+into two concrete, separate requirements — both incorporated into Path B
+below rather than treated as new alternatives:
+
+1. **Hub cities need *innate* demand, not just better routing.** The
+   motivating example: someone in Buffalo who wants to fly to Miami has no
+   realistic nonstop option (Buffalo isn't, and shouldn't be, a modeled
+   city) — in reality they fly Buffalo→NYC→Miami, and that outward pressure
+   from the whole unmodeled catchment around NYC shows up as *extra volume
+   on NYC's own routes*, not as a separate Buffalo-Miami pair that doesn't
+   exist in this game. That's a real property of the city (NYC pulls this
+   demand whether or not any particular airline has built a Buffalo-shaped
+   route), not a property of one airline's network — so unlike the
+   NetworkPlanner-side ideas above, **this one has to live at the O&D level,
+   the same layer `ForPair` already operates at**, not purely inside
+   `NetworkPlanner`. See "Path B, revised" below for why that doesn't mean
+   repeating either of the two failed formula attempts.
+2. **An airline should favor hubs it already operates, and nearby hubs
+   should act as substitutes for each other, not stack.** New York and
+   Boston are close enough that a real airline builds around one of them,
+   not both — once NYC is established as a hub, Boston's marginal value as
+   a *second* hub for the same airline is low, even though Boston is a
+   perfectly good city in isolation. This is a network-topology question,
+   squarely inside `NetworkPlanner.FindBestHub`'s own selection logic (Path
+   B, item 1 above) — but it needs two new ingredients neither of the
+   document's original items had: **loyalty** (bias toward a hub the
+   airline already routes through) and **substitution** (a hub geographically
+   close to one the airline already uses is a worse pick than the same city
+   would be in isolation, precisely because it's not adding new
+   catchment coverage).
+
 ## What's already been tried, and why it's directly relevant here
 
 Two designs were attempted and measured against real data in this same
@@ -171,79 +204,125 @@ is a substantially larger change than either of the two failed attempts:
 Not recommended for this round. Worth revisiting only if the smaller path
 below is tried, measured, and found insufficient.
 
-### Path B — hub-quality as a real input to hub *selection* (recommended)
+### Path B, revised — hub-quality as an input to *selection*, *loyalty*, and a *bounded, additive* O&D bonus (recommended)
 
-Keep `ForPair`'s own O&D formula untouched. Add a new, genuinely small
+Still keeps `ForPair`'s core `weightA × weightB / distance^exponent` shape
+untouched — no exponent changes, no proportional-to-neighbor bonus, the two
+specific mechanisms already proven wrong. Adds a new, genuinely small
 concept: **hub quality**, distinct from `DemandWeight`, representing "how
 good a real connecting point this city is" — independent of whether many
 people actually want to visit it. Atlanta and Dubai can be modest
 destinations with excellent hub quality; a scenic but remote city can be
-the reverse.
-
-**Where it plugs in — the contained surface this whole document argues
-for:**
+the reverse. Hub quality now plugs in at three points instead of one:
 
 1. **`NetworkPlanner.FindBestHub`** (`NetworkPlanner.cs:80-110`) — today
    ranks candidate hubs purely by `detourKm`. Add hub quality as a real
    factor in that ranking (e.g., a candidate hub with meaningfully better
    quality wins even at a modest detour penalty, within a bounded
    tolerance — not "quality always wins regardless of geography," which
-   would produce absurd routings). This changes *which* connections form
-   when a real airline's network offers more than one path, and does
-   **not** touch `ForPair` at all — the O&D demand for the pair being
-   routed is exactly what it is today.
-2. **Optionally, a bounded connecting-capacity effect**: real hubs don't
-   just win the routing choice, they also handle *more* connecting volume
-   than their geography alone would suggest (this is the literal Atlanta/
-   Dubai point — the airport is *built* for it). If wanted, this could
-   show up as a capped, per-itinerary effective-capacity or
-   effective-demand bonus specifically for one-stop itineraries through a
-   high-hub-quality city — deliberately **capped at a fixed ceiling** (a
-   flat multiplier bound, e.g. never more than 1.5-2×), not an unbounded
-   formula term, precisely because an unbounded term is what broke both
-   earlier attempts. This half is a real design choice with its own risk,
-   and should be built and measured as a *second*, separable stage after
-   step 1 alone is shipped and measured — not bundled in from the start.
+   would produce absurd routings). Changes *which* connections form when a
+   real airline's network offers more than one path; doesn't touch
+   `ForPair`.
+2. **Hub loyalty + substitution, also inside `FindBestHub`'s ranking**
+   (the follow-up refinement's second point): add a bias toward a candidate
+   hub the airline *already* routes a meaningful share of its network
+   through (loyalty — reflects that a real airline consolidates around
+   sunk infrastructure rather than re-optimizing every quarter), and a
+   penalty when a candidate hub sits unusually close to a hub the airline
+   *already* uses (substitution — Boston loses appeal as a second hub once
+   NYC is established, not because Boston got worse, but because it isn't
+   adding new catchment). Both terms are airline-specific and itinerary-
+   selection-scoped, same contained surface as item 1 — still never touches
+   `ForPair` or any other airline's view of the same city. Precise metric
+   for "already a hub" (e.g. share of the airline's own routes touching
+   that city) and for "how close counts as substitutable" are implementation
+   questions, not resolved here.
+3. **A bounded, additive innate-hub-demand term inside `ForPair` itself**
+   (the follow-up refinement's first point — this is the one piece of Path
+   B that *does* touch the O&D layer, deliberately shaped to avoid both
+   ways the earlier attempts broke):
+   `effectiveWeight(city) = DemandWeight + HubQuality`, used in place of
+   `DemandWeight` on whichever side(s) of the product correspond to a city
+   with a nonzero `HubQuality`. This is structurally different from both
+   failed attempts, not just smaller:
+   - Unlike the **additive catchment bonus** (which computed a bonus
+     *proportional to the size of nearby cities, divided by the receiving
+     city's own distance* — the exact mechanism that made it a *larger
+     percentage* boost for small cities), this bonus is a single flat,
+     authored number per city, added once, with no dependency on which
+     partner city is on the other side of the pair or how far away it is.
+     A small city's own weight is never touched by a neighboring hub's
+     quality.
+   - Unlike the **exponent discount** (a change to the *shape* of distance
+     decay, which compounds multiplicatively and produced the measured
+     31× world-demand inflation), this is a linear addition to one input
+     of a product — its effect on any single pair's demand is bounded by
+     a simple ratio (`(weight + HubQuality) / weight`), directly
+     computable and boundable in advance by capping `HubQuality`'s own
+     authored range, with no power-law surprise.
+   - It is **not** a substitute for item 1/2's routing behavior — a hub
+     with high `HubQuality` gets a real, if modest, boost to its *own*
+     nonstop pairs (representing Buffalo-shaped catchment pressure baked
+     into NYC's own O&D numbers), independent of whether any specific
+     airline has built a network that routes through it. This is what
+     makes it match the Buffalo→NYC→Miami example: the pressure exists in
+     the world, not only inside one airline's already-built itineraries.
 
-**Data needed:** a new, real per-city field (own `HubQuality` or similar),
+   Still requires the same real-data magnitude verification this document's
+   own evidence insists on before it ever reaches a real call site — the
+   claim above is about *why this shape is safer in principle*, not a
+   substitute for measuring it. A reasonable starting cap: `HubQuality`
+   authored on roughly the same scale as `DemandWeight` (1-100) but with a
+   materially lower ceiling in practice (e.g. authored values clustering
+   10-30, reserving 100 for `DemandWeight` itself) so a hub's *innate* bonus
+   stays a fraction of, not comparable to, its own destination appeal.
+
+**Data needed:** a new, real per-city field (`HubQuality` or similar),
 authored the same way `AutoCapacity`/`GateCapacity` already are — not
 derived from `IsGateway` (that flag is about *intercontinental chokepoint*
 status, a different real concept — Atlanta isn't one) and not derived from
 `DemandWeight` (conflating "attractive to visit" with "good at connecting"
-is the exact problem being fixed). A reasonable starting scale: something
-comparable to `DemandWeight`'s own range (roughly 1-100), authored by
-inspection against real-world hub airports the same way every other city
-field in `data/cities.json` already was.
+is the exact problem being fixed). Authored by inspection against real-world
+hub airports the same way every other city field in `data/cities.json`
+already was — one field now serves all three plug-in points above (items
+1-2 read it as a ranking input, item 3 reads it as an additive bonus).
 
 ## Feasibility assessment
 
-**Path B, step 1 (hub-quality-aware selection only):**
+**Path B, step 1 (hub-quality-aware selection + loyalty/substitution,
+items 1-2 — no `ForPair` change):**
 - **Risk: low.** Touches one already-well-tested method
   (`NetworkPlanner.FindBestHubTests`-equivalent coverage already exists),
   never touches the demand baseline, and — because it only changes
   *routing choice* among itineraries that already need a connection — the
   blast radius is naturally bounded by how many real games actually have
-  more than one plausible hub candidate for a given pair.
+  more than one plausible hub candidate for a given pair. Loyalty and
+  substitution add two more inputs to the same ranking function, not a
+  new subsystem — same risk class as the base selection change.
 - **Effort: small-to-moderate.** New data field (with `CityCatalog`
   validation, matching every existing field's own pattern), one method's
-  own ranking logic reworked, new tests for the ranking change, a real
-  300-game sweep to confirm no regression — comparable in scope to a
-  single one of this session's own already-shipped milestones (M45/M46's
-  own scope is a reasonable reference point).
-- **Determinism:** clean — a pure function of already-loaded city data,
-  same pattern every other tunable constant in this codebase already
-  follows.
+  own ranking logic reworked (now three terms: detour, loyalty,
+  substitution), new tests for each, a real 300-game sweep to confirm no
+  regression — comparable in scope to a single one of this session's own
+  already-shipped milestones (M45/M46's own scope is a reasonable
+  reference point).
+- **Determinism:** clean — a pure function of already-loaded city data
+  plus the airline's own already-committed route set, same pattern every
+  other tunable constant in this codebase already follows.
 
-**Path B, step 2 (bounded connecting-capacity/demand bonus), if pursued
-after step 1 is measured:**
-- **Risk: moderate.** Any new multiplicative term needs the same
-  "absolute magnitude" scrutiny that caught both earlier failures — a
-  *capped* bonus is far safer than an unbounded formula change, but still
-  needs real verification (both relative ranking *and* absolute scale)
-  before it ever reaches a real call site, exactly the gap that let the
-  exponent-discount attempt ship to a real sweep before its magnitude
-  problem was caught.
-- **Effort: small**, additive to step 1's own infrastructure.
+**Path B, step 2 (bounded, additive innate-hub-demand term inside
+`ForPair`, item 3), if pursued after step 1 is measured:**
+- **Risk: moderate, not low** — this is the one piece that touches the
+  demand baseline, so it inherits real scrutiny from both earlier
+  failures even though its shape (flat additive bonus, not proportional-
+  to-neighbor, not exponent-based) avoids the *specific* mechanisms that
+  broke each of them. "Structurally safer" is an argument for trying this
+  shape, not a substitute for verifying it — needs both relative-ranking
+  and absolute-magnitude checks against real data before it reaches a
+  real call site, exactly the step that was skipped for the exponent
+  attempt until the sweep itself caught it.
+- **Effort: small**, additive to step 1's own `HubQuality` field — no new
+  data needed, just a new read site inside `ForPair`.
 
 **Path A (full trip-generation/distribution replacement):**
 - **Risk: high.** Full model replacement, fresh calibration, real
@@ -255,13 +334,17 @@ after step 1 is measured:**
 
 ## Recommendation
 
-Build Path B, step 1 alone first: a new `HubQuality` city field, wired only
-into `NetworkPlanner.FindBestHub`'s own hub-selection ranking, with its own
-real 300-game sweep before anything else changes. Measure whether that
-alone produces the kind of network topology the user is after (real hubs
-attracting real connecting traffic through better routing choices) before
-deciding whether step 2's bounded capacity bonus, or Path A's much larger
-rearchitecture, is actually needed.
+Build Path B, step 1 alone first: a new `HubQuality` city field, wired into
+`NetworkPlanner.FindBestHub`'s ranking for detour, loyalty, and
+substitution (items 1-2) — no `ForPair` change yet — with its own real
+300-game sweep before anything else changes. Measure whether that alone
+produces the kind of network topology the user is after (real hubs
+attracting real connecting traffic, airlines consolidating around one hub
+per catchment region instead of stacking adjacent cities) before adding
+step 2's innate-demand bonus inside `ForPair`, which needs its own separate
+measurement precisely because it's the one piece touching the layer that
+broke twice already. Path A stays off the table unless step 1 and step 2
+together are measured and still found insufficient.
 
 ## Open questions for the user
 
@@ -271,10 +354,17 @@ rearchitecture, is actually needed.
    e.g., deriving it from `DemandWeight` with a manually-authored
    *override list* for the real Atlanta/Dubai-style exceptions (cities
    whose real-world hub role doesn't match their `DemandWeight`)?
-2. Should step 1 (routing choice only) ship and be measured on its own
-   before step 2 (the bounded capacity bonus) is even designed, as
-   recommended above — or is the capacity-bonus half the actually
-   important part to the user, worth designing together now?
-3. Is Path A (the full trip-generation/distribution rearchitecture) worth
+2. Should step 1 (selection + loyalty + substitution, no `ForPair` change)
+   ship and be measured on its own before step 2 (the innate-demand bonus
+   inside `ForPair`) is even designed, as recommended above — or is the
+   innate-demand half the actually important part to the user (it's the
+   piece that directly represents the Buffalo→NYC→Miami pressure), worth
+   designing together now rather than deferring?
+3. For loyalty/substitution: is "share of the airline's own existing
+   routes touching this city" a reasonable proxy for "already treats this
+   as a hub," or does the user have a more specific real-world definition
+   in mind (e.g. a minimum route count, or an explicit hub designation the
+   player/AI sets rather than one inferred from route counts)?
+4. Is Path A (the full trip-generation/distribution rearchitecture) worth
    keeping on the table for later, or should this document's own
    recommendation against it for now be treated as settled?
