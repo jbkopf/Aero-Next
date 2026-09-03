@@ -195,6 +195,72 @@ tested.
 **Done.** Branch `m62-network-planner-hub-selection`, to be merged to
 `main`.
 
-## M63 — `GravityDemandModel.ForPair`: bounded, additive, off-by-default hub bonus
+## M63 — `GravityDemandModel.ForPair`: bounded, additive, off-by-default hub bonus ⚠️ implemented, real call sites left disabled
 
-Not yet started.
+The design doc's literal recommended formula, following the exact
+`schedule`/`year` off-by-default convention `GravityDemandModel` already
+established: a new optional `enableHubDemandBonus = false` constructor
+parameter, resolved once into `_hubDemandBonusEnabled`; `ForPair` swaps in
+a new `EffectiveWeight(city) = DemandWeight + HubQuality` (when enabled)
+for the raw `DemandWeight` on each side of the gravity product. Default-off
+proof: every pre-existing call site (all of `GravityDemandModelTests.cs`
+included) omits the new param, so `HubQuality` is never read — confirmed
+byte-identical, all 822 pre-M63 tests passing unmodified.
+
+**Tests** (7 new, `GravityDemandModelTests.cs`):
+`ForPair_HubDemandBonusDisabledByDefault_MatchesPreExistingFormula_ByteIdentical`,
+`ForPair_HubDemandBonusEnabled_ButHubQualityZero_MatchesDisabledOutput_ByteIdentical`,
+`ForPair_HubDemandBonusEnabled_BoostsPassengersOnHighHubQualitySide`,
+`ForPair_HubDemandBonusEnabled_BothSidesHaveHubQuality_MultipliesBothRatios`,
+`RealDataset_HubDemandBonus_NeverExceedsBoundedRatio`,
+`RealDataset_AllPairs_HubDemandBonus_TotalWorldDemandStaysWithinBoundedMultiplier`,
+`RealDataset_HubDemandBonusEnabled_MajorMarketStillDwarfsChokepointPair`.
+
+**Mandatory pre-sweep static verification** (a scratchpad tool, matching
+the `m59analysis`/`m62check` pattern) found everything bounded and sane
+against the real dataset: max per-pair ratio 2.218 (theoretical cap 2.56,
+confirming `CityCatalog`'s own ratio-cap validation), total world demand
+inflation 1.157x (a sane, modest figure — contrast M60's reverted
+exponent-discount attempt, which measured 31x on the same kind of check).
+The MIA/HAV-vs-JFK/MIA relationship the original M60 investigation started
+from is **unchanged** by design — M63 was never meant to re-rank
+close-pair-vs-hub dominance (that's `NetworkPlanner`'s job, M62).
+
+**A real, serious finding when actually enabled**: `dotnet test`,
+coverage (100% line+branch on `GravityDemandModel.cs`), and every static
+check all passed — but flipping the 5 real call sites to
+`enableHubDemandBonus: true` and running a real 300-game sweep collapsed
+the win rate from 39.0% (117/300) to **7.0% (21/300)**, avg win quarter
+83.5→59.0, and completely inverted regional dominance (NorthAmerica
+88.9%→9.5% win share, EastAsia 6.8%→85.7%). A follow-up 40-game topology
+diagnostic (temporary instrumentation on `FullGameRunner`, since reverted)
+found the real cause: **hub-and-spoke topology does not emerge** — the
+clearest concentration signal (an airline's max route count at any single
+city) stayed essentially flat in every region, on or off. What changes is
+that AI strategies open far more routes *touching* a hub-quality city
+(EastAsia's hub-touching route share: 0.21→0.69) without that translating
+into consolidated network structure — confirmed by reading the real
+ranking code: `BaselineAi.FindBestUnservedPair` and its live-strategy
+equivalents rank every unserved pair in the world by raw
+`PassengersPerQuarter`, with zero concept of "prefer a pair that
+reinforces a city I already operate from." M62's own loyalty concept only
+affects itinerary *routing* through an existing connection, not which
+*new* direct route gets opened — a completely different decision point.
+EastAsia benefits disproportionately from the reshuffling because it sits
+geographically next to several boosted hubs (its own HKG/ICN plus
+SouthWestAsia's DXB and AustralAsia's SIN).
+
+**Status: implemented, tested, verified safe in isolation, but the 5 real
+call sites are left disabled (`main`'s exact pre-M63 form) pending the
+real fix — M64.** This is a genuine, honest interim state, not a silent
+regression: shipping M63's code without enabling it costs nothing (it's
+provably inert, same guarantee M61 gave `HubQuality` itself) and keeps the
+tested, bounded formula on `main` ready for M64 to build on.
+
+**Done, in this qualified sense.** Branch `m63-forpair-hub-demand-bonus`,
+merged to `main`.
+
+## M64 — route-opening consolidation bonus: the real fix
+
+See `docs/HUB_DEMAND_DESIGN.md`'s Decisions and the M63 section above for
+full context. Not yet started.

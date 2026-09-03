@@ -998,4 +998,146 @@ public class GravityDemandModelTests
             Assert.True(during > after, $"{hostCityId} {hostYear}: host year should exceed the year after reversion");
         }
     }
+
+    // --- M63: hub-and-spoke demand, step 2 - bounded, additive, off-by-default HubQuality bonus ---
+
+    [Fact]
+    public void ForPair_HubDemandBonusDisabledByDefault_MatchesPreExistingFormula_ByteIdentical()
+    {
+        // Every pre-M63 call site (and any new one that doesn't opt in)
+        // omits enableHubDemandBonus - HubQuality must never be read, and
+        // output must be exactly what it always was, even for a city that
+        // carries a nonzero HubQuality.
+        var a = MakeCity("a", 0, 0, 50);
+        var b = new City("hub", "HUB", Region.EastAsia, 0, 10, 50, false, null, AutoCapacity: null, HubQuality: 40);
+        var withoutHubQualityField = MakeCity("hub_noquality", 0, 10, 50);
+
+        var model = new GravityDemandModel();
+
+        Assert.Equal(
+            model.ForPair(a, withoutHubQualityField).PassengersPerQuarter,
+            model.ForPair(a, b).PassengersPerQuarter);
+    }
+
+    [Fact]
+    public void ForPair_HubDemandBonusEnabled_ButHubQualityZero_MatchesDisabledOutput_ByteIdentical()
+    {
+        var a = MakeCity("a", 0, 0, 50);
+        var b = MakeCity("b", 0, 10, 50); // HubQuality defaults to 0
+
+        var disabled = new GravityDemandModel();
+        var enabled = new GravityDemandModel(enableHubDemandBonus: true);
+
+        Assert.Equal(disabled.ForPair(a, b).PassengersPerQuarter, enabled.ForPair(a, b).PassengersPerQuarter);
+    }
+
+    [Fact]
+    public void ForPair_HubDemandBonusEnabled_BoostsPassengersOnHighHubQualitySide()
+    {
+        // weight=50, HubQuality=20 -> effective weight 70, a 1.4x factor on
+        // that side of the product alone (the other side, a, is unchanged).
+        // Compared with a tolerance, not exact equality: enabledDemand and
+        // disabledDemand are each independently rounded from their own raw
+        // (unrounded) figure, and 1.4x the already-rounded disabled value
+        // can legitimately land 1 passenger off from the true (pre-rounding)
+        // 1.4x relationship - confirmed empirically before writing this
+        // assertion, not assumed.
+        var a = MakeCity("a", 0, 0, 50);
+        var hub = new City("hub", "HUB", Region.EastAsia, 0, 10, 50, false, null, AutoCapacity: null, HubQuality: 20);
+
+        var disabled = new GravityDemandModel();
+        var enabled = new GravityDemandModel(enableHubDemandBonus: true);
+
+        var disabledDemand = disabled.ForPair(a, hub).PassengersPerQuarter;
+        var enabledDemand = enabled.ForPair(a, hub).PassengersPerQuarter;
+        var expected = disabledDemand * 1.4;
+
+        Assert.InRange(enabledDemand, expected - 2, expected + 2);
+    }
+
+    [Fact]
+    public void ForPair_HubDemandBonusEnabled_BothSidesHaveHubQuality_MultipliesBothRatios()
+    {
+        // a: weight 40 + HubQuality 10 -> 1.25x. b: weight 50 + HubQuality
+        // 20 -> 1.4x. Combined effect on the pair should be 1.25 * 1.4 = 1.75x.
+        // Tolerance for the same double-rounding reason as the single-side
+        // test above.
+        var a = new City("a", "A", Region.EastAsia, 0, 0, 40, false, null, AutoCapacity: null, HubQuality: 10);
+        var b = new City("b", "B", Region.EastAsia, 0, 10, 50, false, null, AutoCapacity: null, HubQuality: 20);
+
+        var disabled = new GravityDemandModel();
+        var enabled = new GravityDemandModel(enableHubDemandBonus: true);
+
+        var disabledDemand = disabled.ForPair(a, b).PassengersPerQuarter;
+        var enabledDemand = enabled.ForPair(a, b).PassengersPerQuarter;
+        var expected = disabledDemand * 1.75;
+
+        Assert.InRange(enabledDemand, expected - 2, expected + 2);
+    }
+
+    [Fact]
+    public void RealDataset_HubDemandBonus_NeverExceedsBoundedRatio()
+    {
+        // The exact check that would have caught the earlier, reverted M60
+        // exponent-discount attempt's 31x world-demand inflation on its
+        // first run - now a permanent regression test. Every real pair's
+        // enabled/disabled ratio is bounded in advance by
+        // CityCatalog's own ratio cap on each side of the pair: at most
+        // (1 + MaxHubQualityToDemandWeightRatio)^2.
+        var cities = CityCatalog.LoadFile(Path.Combine(AppContext.BaseDirectory, "data", "cities.json"));
+        var disabled = new GravityDemandModel();
+        var enabled = new GravityDemandModel(enableHubDemandBonus: true);
+        var maxPossibleRatio = Math.Pow(1 + CityCatalog.MaxHubQualityToDemandWeightRatio, 2);
+
+        foreach (var pairDisabled in disabled.AllPairs(cities))
+        {
+            var a = pairDisabled.Origin;
+            var b = pairDisabled.Destination;
+            var pairEnabled = enabled.ForPair(a, b);
+
+            if (pairDisabled.PassengersPerQuarter == 0) continue;
+
+            var ratio = (double)pairEnabled.PassengersPerQuarter / pairDisabled.PassengersPerQuarter;
+            Assert.True(ratio <= maxPossibleRatio + 0.01,
+                $"{a.Id}-{b.Id}: ratio {ratio:N3} exceeds the theoretical max {maxPossibleRatio:N3}.");
+        }
+    }
+
+    [Fact]
+    public void RealDataset_AllPairs_HubDemandBonus_TotalWorldDemandStaysWithinBoundedMultiplier()
+    {
+        // The exact aggregate-magnitude check the M60 exponent-discount
+        // attempt skipped before shipping to a real 300-game sweep (which
+        // caught a 31x inflation only after the fact). Measured directly
+        // against the real dataset before this test was written: 1.157x -
+        // asserting a generous 1.5x ceiling here, comfortably above the
+        // measured figure but nowhere near the earlier failure's scale.
+        var cities = CityCatalog.LoadFile(Path.Combine(AppContext.BaseDirectory, "data", "cities.json"));
+        var disabled = new GravityDemandModel();
+        var enabled = new GravityDemandModel(enableHubDemandBonus: true);
+
+        var totalDisabled = disabled.AllPairs(cities).Sum(p => p.PassengersPerQuarter);
+        var totalEnabled = enabled.AllPairs(cities).Sum(p => p.PassengersPerQuarter);
+
+        Assert.True(totalEnabled < totalDisabled * 1.5,
+            $"Total world demand inflated {totalEnabled / (double)totalDisabled:N3}x - should stay well under 1.5x.");
+    }
+
+    [Fact]
+    public void RealDataset_HubDemandBonusEnabled_MajorMarketStillDwarfsChokepointPair()
+    {
+        // The same ranking-preservation property RealDataset_MajorMarketDwarfsChokepointPair
+        // already proves for the disabled model - confirms enabling the
+        // bonus doesn't disturb it (neither JFK/LHR nor Gander/Azores
+        // carry meaningful HubQuality, so this should hold essentially
+        // unchanged).
+        var cities = CityCatalog.LoadFile(Path.Combine(AppContext.BaseDirectory, "data", "cities.json"));
+        var byId = cities.ToDictionary(c => c.Id);
+        var model = new GravityDemandModel(enableHubDemandBonus: true);
+
+        var jfkLhr = model.ForPair(byId["jfk"], byId["lhr"]);
+        var yqxTer = model.ForPair(byId["yqx"], byId["ter"]);
+
+        Assert.True(jfkLhr.PassengersPerQuarter > yqxTer.PassengersPerQuarter * 100);
+    }
 }

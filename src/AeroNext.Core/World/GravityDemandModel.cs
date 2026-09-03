@@ -79,6 +79,40 @@ namespace AeroNext.Core.World;
 /// resolution-logic change — every intermediate value and fallback rule
 /// above is identical, only *when* it's computed differs, confirmed by
 /// the full existing test suite passing unchanged.
+///
+/// M63 (hub-and-spoke demand, step 2 of docs/HUB_DEMAND_DESIGN.md's
+/// recommended Path B): a real, if modest, per-city innate demand bonus
+/// for cities with a nonzero <see cref="City.HubQuality"/> — representing
+/// the outward demand pressure of unmodeled small cities that really
+/// travel via a hub (the Buffalo-flies-via-NYC-to-Miami example the
+/// feature was built around), a fact about the city itself, not about any
+/// one airline's built network (unlike M62's <see cref="Airlines.NetworkPlanner"/>
+/// changes, which are airline-specific and never touch this class).
+/// `enableHubDemandBonus` follows the exact `schedule`/`year` convention
+/// already established above: optional, defaults `false`, resolved once
+/// at construction into <see cref="_hubDemandBonusEnabled"/>; `ForPair`
+/// stays a pure lookup, swapping in <see cref="EffectiveWeight"/> for the
+/// raw `DemandWeight` on each side of the product. When disabled (every
+/// pre-M63 call site, and any new one that doesn't opt in) `HubQuality` is
+/// never read and output is byte-identical to pre-M63 behavior — the same
+/// "off is exactly old behavior" guarantee this class already gives
+/// `schedule`/`year`.
+///
+/// Deliberately a flat additive term (`DemandWeight + HubQuality`), not
+/// proportional to a neighboring city's weight and not a change to
+/// `exponent` — the two specific mechanisms an earlier M60 attempt at
+/// this same idea tried and measured wrong (see docs/HUB_DEMAND_ROADMAP.md
+/// and the now-reverted M60 history in docs/OPEN_WORK.md): an additive
+/// *catchment* bonus scaled to nearby cities' weight structurally favored
+/// small cities more (a bigger percentage of their own small base); an
+/// exponent discount compounds multiplicatively over real-world distances
+/// and measured a 31x world-demand inflation at the strength needed to
+/// flip any real ranking. `HubQuality` is a flat, authored-per-city,
+/// <see cref="CityCatalog.MaxHubQualityToDemandWeightRatio"/>-capped
+/// number with no dependency on which partner city is on the other side
+/// of a pair or how far away it is — bounded in advance, verified against
+/// the real dataset before any real call site enables it (see the
+/// `RealDataset_*` tests in this class's own test file).
 /// </summary>
 public sealed class GravityDemandModel
 {
@@ -102,6 +136,9 @@ public sealed class GravityDemandModel
     /// <summary>Trend x Event per city, populated only for cities that actually have a schedule entry - same "absent = 1.0" convention as the region dictionary.</summary>
     private readonly IReadOnlyDictionary<string, double> _cityMultiplierByCityId;
 
+    /// <summary>M63: resolved once at construction from the constructor's own `enableHubDemandBonus` parameter - see this class's own M63 doc comment above.</summary>
+    private readonly bool _hubDemandBonusEnabled;
+
     /// <summary>
     /// globalMultiplier is M13's historical growth knob — the campaign
     /// constructs a new model each year with the era's multiplier from
@@ -109,7 +146,8 @@ public sealed class GravityDemandModel
     /// exponent, and cross-region multiplier throughout. M20:
     /// schedule/year supersede globalMultiplier entirely when both are
     /// provided (the richer, scope-aware path); leave them null to keep
-    /// today's exact flat-multiplier behavior.
+    /// today's exact flat-multiplier behavior. M63: enableHubDemandBonus
+    /// defaults false, same "off is exactly old behavior" guarantee.
     /// </summary>
     public GravityDemandModel(
         double scale = DefaultScale,
@@ -117,12 +155,14 @@ public sealed class GravityDemandModel
         double crossRegionMultiplier = DefaultCrossRegionMultiplier,
         double globalMultiplier = DefaultGlobalMultiplier,
         IReadOnlyList<DemandGrowthPoint>? schedule = null,
-        int? year = null)
+        int? year = null,
+        bool enableHubDemandBonus = false)
     {
         _scale = scale;
         _exponent = exponent;
         _crossRegionMultiplier = crossRegionMultiplier;
         _globalMultiplier = globalMultiplier;
+        _hubDemandBonusEnabled = enableHubDemandBonus;
 
         if (schedule is null || year is null)
         {
@@ -159,7 +199,7 @@ public sealed class GravityDemandModel
     public PairDemand ForPair(City a, City b)
     {
         var distanceKm = Math.Max(MinDistanceKm, GreatCircle.DistanceKm(a, b));
-        var raw = _scale * (a.DemandWeight * (double)b.DemandWeight) / Math.Pow(distanceKm, _exponent);
+        var raw = _scale * (EffectiveWeight(a) * EffectiveWeight(b)) / Math.Pow(distanceKm, _exponent);
 
         if (a.Region != b.Region)
         {
@@ -177,6 +217,16 @@ public sealed class GravityDemandModel
     /// <summary>M20/M21: the region/city-scoped portion, resolved per city from the precomputed dictionaries - a plain dictionary lookup, 1.0 when the city (or its region) has no schedule entry at all.</summary>
     private double EffectiveMultiplier(City city) =>
         _regionMultiplierByRegion.GetValueOrDefault(city.Region, 1.0) * _cityMultiplierByCityId.GetValueOrDefault(city.Id, 1.0);
+
+    /// <summary>
+    /// M63: DemandWeight plus a bounded, flat HubQuality addition when the
+    /// hub-demand bonus is enabled - see this class's own M63 doc comment
+    /// above for why this shape (not proportional, not exponent-based).
+    /// When disabled, reduces to exactly city.DemandWeight, so HubQuality
+    /// is never read at all.
+    /// </summary>
+    private double EffectiveWeight(City city) =>
+        _hubDemandBonusEnabled ? city.DemandWeight + city.HubQuality : city.DemandWeight;
 
     /// <summary>The Trend portion only, for a given already-scope-filtered candidate set — falls back to neutral 1.0 when that scope has no trend entry at all (matches EffectiveMultiplier's own pre-existing region/city fallback).</summary>
     private static double ResolveTrend(IEnumerable<DemandGrowthPoint> candidates, int year) =>
