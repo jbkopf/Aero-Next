@@ -459,8 +459,12 @@ public static class AiToolkit
     /// route since there's no rival to split demand with). Shared by
     /// every profitability check in this file so they never disagree on
     /// which number is "real."
+    ///
+    /// M58: internal, not private - NetworkOptimizerStrategy's own
+    /// Suitability needs the exact same "real profit" figure everything
+    /// else in this file already agrees on.
     /// </summary>
-    private static long BestAvailableCarried(Route route, long soloCarried, StrategyContext context)
+    internal static long BestAvailableCarried(Route route, long soloCarried, StrategyContext context)
     {
         if (context.LastQuarterSeatsCarriedByRoute is null)
         {

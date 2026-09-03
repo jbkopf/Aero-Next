@@ -43,6 +43,15 @@ public static class FullGameRunner
     /// <summary>Anything past this is almost certainly a sign-flip/overflow bug, not a plausible airline balance.</summary>
     private static readonly Money SaneMagnitudeBound = Money.FromDollars(1_000_000_000_000);
 
+    // TEMP diagnostic - remove before shipping
+    public static readonly Dictionary<int, int?> FirstQuarterAbove90PctCityCapacityByGame = new();
+    public static readonly List<(int Quarter, double UtilizationFraction)> UtilizationSamplesEveryTenQuarters = new();
+    public static readonly Dictionary<string, int> PerCitySaturatedSampleCount = new();
+    public static readonly Dictionary<string, int> PerCityTotalSampleCount = new();
+    public static readonly Dictionary<string, double> PerCityUtilizationSum = new();
+    public static readonly Dictionary<string, int> PerGatewaySaturatedSampleCount = new();
+    public static readonly Dictionary<string, int> PerGatewayTotalSampleCount = new();
+
     /// <param name="seats">
     /// The 4 finalized airline seats to run. Normally built via
     /// GameConfigGenerator + GameSetup.CreateSeats; the unconstrained-regions
@@ -154,6 +163,63 @@ public static class FullGameRunner
             // decisions the same quarter it lands.
             capacityBoard = capacityBoard.AdvanceQuarter(q, cities, yearDemandModel);
 
+            // TEMP diagnostic - remove before shipping
+            {
+                var autoCapacityCities = cities.Where(c => c.AutoCapacity is not null).ToList();
+                var totalCapacity = autoCapacityCities.Sum(c => c.AutoCapacity!.Value + capacityBoard.CapacityBonusByCity.GetValueOrDefault(c.Id));
+                var usedByCity = new Dictionary<string, int>(StringComparer.Ordinal);
+                foreach (var rts in routesAtQuarterStart.Values)
+                {
+                    foreach (var r in rts)
+                    {
+                        usedByCity[r.Origin.Id] = usedByCity.GetValueOrDefault(r.Origin.Id) + r.AircraftCount;
+                        usedByCity[r.Destination.Id] = usedByCity.GetValueOrDefault(r.Destination.Id) + r.AircraftCount;
+                    }
+                }
+                var totalUsed = autoCapacityCities.Sum(c => usedByCity.GetValueOrDefault(c.Id));
+                var utilization = totalCapacity > 0 ? totalUsed / (double)totalCapacity : 0.0;
+
+                if (!FirstQuarterAbove90PctCityCapacityByGame.ContainsKey(gameIndex))
+                {
+                    FirstQuarterAbove90PctCityCapacityByGame[gameIndex] = null;
+                }
+                if (utilization >= 0.9 && FirstQuarterAbove90PctCityCapacityByGame[gameIndex] is null)
+                {
+                    FirstQuarterAbove90PctCityCapacityByGame[gameIndex] = q;
+                }
+                if (q % 10 == 0)
+                {
+                    lock (UtilizationSamplesEveryTenQuarters)
+                    {
+                        UtilizationSamplesEveryTenQuarters.Add((q, utilization));
+
+                        foreach (var c in autoCapacityCities)
+                        {
+                            var cap = c.AutoCapacity!.Value + capacityBoard.CapacityBonusByCity.GetValueOrDefault(c.Id);
+                            var used = usedByCity.GetValueOrDefault(c.Id);
+                            var cityUtilization = cap > 0 ? used / (double)cap : 0.0;
+
+                            PerCityTotalSampleCount[c.Id] = PerCityTotalSampleCount.GetValueOrDefault(c.Id) + 1;
+                            PerCityUtilizationSum[c.Id] = PerCityUtilizationSum.GetValueOrDefault(c.Id) + cityUtilization;
+                            if (used >= cap)
+                            {
+                                PerCitySaturatedSampleCount[c.Id] = PerCitySaturatedSampleCount.GetValueOrDefault(c.Id) + 1;
+                            }
+                        }
+
+                        foreach (var g in cities.Where(c => c.IsGateway))
+                        {
+                            var remaining = landingBoard.SlotsRemaining(g, capacityBoard.CapacityBonusByCity.GetValueOrDefault(g.Id));
+                            PerGatewayTotalSampleCount[g.Id] = PerGatewayTotalSampleCount.GetValueOrDefault(g.Id) + 1;
+                            if (remaining <= 0)
+                            {
+                                PerGatewaySaturatedSampleCount[g.Id] = PerGatewaySaturatedSampleCount.GetValueOrDefault(g.Id) + 1;
+                            }
+                        }
+                    }
+                }
+            }
+
             // M45: which gateways currently carry idle-expired, contestable
             // inventory - computed once per quarter from state entering it
             // (last quarter's own AdvanceIdleTracking call, below), so
@@ -248,6 +314,15 @@ public static class FullGameRunner
                         r => QuarterEngine.NormalizedPairKey(r.Origin, r.Destination),
                         r => servingAirlineNamesByPairKey[QuarterEngine.NormalizedPairKey(r.Origin, r.Destination)].Count - 1);
 
+                    // M58: this airline's own current leadership streak per
+                    // region, from the *previous* quarter's dominanceState -
+                    // RegionalDominanceTracker.Advance for THIS quarter
+                    // doesn't run until after every airline's own turn below,
+                    // so only last quarter's state is available here, the
+                    // same one-quarter-lag convention
+                    // LastQuarterSeatsCarriedByRoute already follows.
+                    var ownRegionStreaks = HomeRegions.All.ToDictionary(r => r, r => dominanceState.StreakFor(name, r));
+
                     var strategyContext = new StrategyContext(
                         routes[name], caps[name], cities, yearDemandModel, availableFleet, fleets[name], homeRegionByName[name],
                         HomeCity: seatByName[name].StartingCity,
@@ -258,7 +333,8 @@ public static class FullGameRunner
                         RivalCountByServedRoute: rivalCountByServedRoute,
                         LastQuarterSeatsCarriedByRoute: lastQuarterSeatsCarriedByRouteByName[name],
                         QuarterNumber: q,
-                        RouteHistoryByPair: routeHistoryByAirlineName[name]);
+                        RouteHistoryByPair: routeHistoryByAirlineName[name],
+                        OwnRegionStreaks: ownRegionStreaks);
                     var strategy = BaselineAi.SelectStrategy(currentStrategyByName[name], q, strategyContext);
                     currentStrategyByName[name] = strategy;
                     orders = strategy.DecideOrders(strategyContext);

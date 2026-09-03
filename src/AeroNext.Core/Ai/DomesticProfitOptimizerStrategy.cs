@@ -86,6 +86,9 @@ public sealed class DomesticProfitOptimizerStrategy : IAiStrategy
     /// </summary>
     public double Suitability(StrategyContext context) => 1 - AiSuitability.CashRatio(context);
 
+    // TEMP diagnostic - remove before shipping
+    public static readonly Dictionary<string, int> NewPairOutcomes = new();
+
     public IReadOnlyList<QuarterOrder> DecideOrders(StrategyContext context)
     {
         var orders = new List<QuarterOrder>();
@@ -98,9 +101,41 @@ public sealed class DomesticProfitOptimizerStrategy : IAiStrategy
         var domesticRouteCount = context.CurrentRoutes
             .Count(r => r.Origin.Region == context.HomeRegion && r.Destination.Region == context.HomeRegion);
 
+        // TEMP diagnostic - remove before shipping
+        if (domesticRouteCount >= MaxDomesticRoutes)
+        {
+            NewPairOutcomes["at-cap"] = NewPairOutcomes.GetValueOrDefault("at-cap") + 1;
+        }
+
         if (domesticRouteCount < MaxDomesticRoutes && spent + 1 <= context.ActionCap)
         {
             var idleBest = FindMostProfitableDomesticPairUsingIdleFleet(context, reservedUnitIds, validOriginCityIds);
+
+            // TEMP diagnostic - remove before shipping
+            {
+                string outcome;
+                if (idleBest is null)
+                {
+                    outcome = "idle-path-no-candidate";
+                }
+                else if (!AiToolkit.TryOrientFromValidOrigin(idleBest.Value.Pair, validOriginCityIds, out var dOrigin, out var dDestination))
+                {
+                    outcome = "idle-path-orient-failed";
+                }
+                else if (!BaselineAi.HasSlotAtEveryGateway(dOrigin, dDestination, context.AvailableSlotsByCity, slotsReservedByCity))
+                {
+                    outcome = "idle-path-no-gateway-slot";
+                }
+                else if (!AiToolkit.HasRoomAtEveryCity(dOrigin, dDestination, context.CityWideSlotsRemaining, citySpendReservedByCity))
+                {
+                    outcome = "idle-path-no-city-room";
+                }
+                else
+                {
+                    outcome = "idle-path-opened";
+                }
+                NewPairOutcomes[outcome] = NewPairOutcomes.GetValueOrDefault(outcome) + 1;
+            }
 
             if (idleBest is not null && AiToolkit.TryOrientFromValidOrigin(idleBest.Value.Pair, validOriginCityIds, out var origin, out var destination)
                 && BaselineAi.HasSlotAtEveryGateway(origin, destination, context.AvailableSlotsByCity, slotsReservedByCity)
@@ -132,6 +167,8 @@ public sealed class DomesticProfitOptimizerStrategy : IAiStrategy
                 {
                     orders.Add(new AircraftOrder(bestOrdered.Value.Aircraft, Quantity: 1));
                     spent += 1;
+                    // TEMP diagnostic - remove before shipping
+                    NewPairOutcomes["fallback-ordered"] = NewPairOutcomes.GetValueOrDefault("fallback-ordered") + 1;
                 }
                 else if (bestOrdered is not null && oriented is not null && spent + 2 <= context.ActionCap
                     && BaselineAi.HasSlotAtEveryGateway(oriented.Value.Origin, oriented.Value.Destination, context.AvailableSlotsByCity, slotsReservedByCity)
@@ -142,6 +179,29 @@ public sealed class DomesticProfitOptimizerStrategy : IAiStrategy
                     BaselineAi.ReserveSlots(oriented.Value.Origin, oriented.Value.Destination, slotsReservedByCity);
                     AiToolkit.ReserveCityWideSlots(oriented.Value.Origin, oriented.Value.Destination, citySpendReservedByCity);
                     spent += 2;
+                    // TEMP diagnostic - remove before shipping
+                    NewPairOutcomes["fallback-leased"] = NewPairOutcomes.GetValueOrDefault("fallback-leased") + 1;
+                }
+                // TEMP diagnostic - remove before shipping
+                else if (bestOrdered is null)
+                {
+                    NewPairOutcomes["fallback-no-candidate"] = NewPairOutcomes.GetValueOrDefault("fallback-no-candidate") + 1;
+                }
+                else if (oriented is null)
+                {
+                    NewPairOutcomes["fallback-orient-failed"] = NewPairOutcomes.GetValueOrDefault("fallback-orient-failed") + 1;
+                }
+                else if (spent + 2 > context.ActionCap)
+                {
+                    NewPairOutcomes["fallback-cap-exhausted"] = NewPairOutcomes.GetValueOrDefault("fallback-cap-exhausted") + 1;
+                }
+                else if (!BaselineAi.HasSlotAtEveryGateway(oriented.Value.Origin, oriented.Value.Destination, context.AvailableSlotsByCity, slotsReservedByCity))
+                {
+                    NewPairOutcomes["fallback-no-gateway-slot"] = NewPairOutcomes.GetValueOrDefault("fallback-no-gateway-slot") + 1;
+                }
+                else
+                {
+                    NewPairOutcomes["fallback-no-city-room"] = NewPairOutcomes.GetValueOrDefault("fallback-no-city-room") + 1;
                 }
             }
         }
@@ -169,7 +229,8 @@ public sealed class DomesticProfitOptimizerStrategy : IAiStrategy
         return orders;
     }
 
-    private static City? FindBestUnservedDomesticGateway(StrategyContext context)
+    /// <summary>M58: internal, not private - NetworkOptimizerStrategy reuses this directly rather than re-deriving the same domestic-gateway search.</summary>
+    internal static City? FindBestUnservedDomesticGateway(StrategyContext context)
     {
         var touchedCityIds = context.CurrentRoutes
             .SelectMany(r => new[] { r.Origin.Id, r.Destination.Id })
@@ -183,8 +244,11 @@ public sealed class DomesticProfitOptimizerStrategy : IAiStrategy
             .FirstOrDefault();
     }
 
-    /// <summary>M45: the region-restricted sibling of AiToolkit.FindBestIdleContestableGateway - "never cross-region" (the class doc comment) covers this too.</summary>
-    private static City? FindBestIdleContestableDomesticGateway(StrategyContext context)
+    /// <summary>
+    /// M45: the region-restricted sibling of AiToolkit.FindBestIdleContestableGateway - "never cross-region" (the class doc comment) covers this too.
+    /// M58: internal, not private - NetworkOptimizerStrategy reuses this directly.
+    /// </summary>
+    internal static City? FindBestIdleContestableDomesticGateway(StrategyContext context)
     {
         if (context.IdleContestableSlotsByCity is null)
         {
@@ -203,8 +267,11 @@ public sealed class DomesticProfitOptimizerStrategy : IAiStrategy
             .FirstOrDefault();
     }
 
-    /// <summary>Mirrors BaselineAi.FindBestUnservedPairUsingIdleFleet's shape, but region-filtered and profitability-ranked instead of demand-ranked.</summary>
-    private static (PairDemand Pair, AircraftType Aircraft)? FindMostProfitableDomesticPairUsingIdleFleet(StrategyContext context, IReadOnlySet<int> reservedUnitIds, IReadOnlySet<string> validOriginCityIds)
+    /// <summary>
+    /// Mirrors BaselineAi.FindBestUnservedPairUsingIdleFleet's shape, but region-filtered and profitability-ranked instead of demand-ranked.
+    /// M58: internal, not private - NetworkOptimizerStrategy reuses this directly (same domestic-only, profit-aware search it wants too, unmodified).
+    /// </summary>
+    internal static (PairDemand Pair, AircraftType Aircraft)? FindMostProfitableDomesticPairUsingIdleFleet(StrategyContext context, IReadOnlySet<int> reservedUnitIds, IReadOnlySet<string> validOriginCityIds)
     {
         var candidateTypes = context.OwnFleet.Idle
             .Where(u => !reservedUnitIds.Contains(u.Id))
@@ -223,9 +290,12 @@ public sealed class DomesticProfitOptimizerStrategy : IAiStrategy
     /// - this strategy's own profit-based ranking already makes this a
     /// smaller real risk than RapidExpansionStrategy's own demand-only
     /// search (M54's named risk), but the same rule applies regardless of
-    /// which strategy is looking, for one consistent contract.
+    /// which strategy is looking, for one consistent contract. M58:
+    /// internal, not private - NetworkOptimizerStrategy calls this
+    /// directly for its own (much lower-priority) new-pair search rather
+    /// than re-deriving the same already-proven, already-measured logic.
     /// </summary>
-    private static (PairDemand Pair, AircraftType Aircraft)? FindMostProfitableDomesticPairAcrossTypes(StrategyContext context, IReadOnlyList<AircraftType> candidateTypes, IReadOnlySet<string> validOriginCityIds)
+    internal static (PairDemand Pair, AircraftType Aircraft)? FindMostProfitableDomesticPairAcrossTypes(StrategyContext context, IReadOnlyList<AircraftType> candidateTypes, IReadOnlySet<string> validOriginCityIds)
     {
         var served = context.CurrentRoutes
             .SelectMany(r => new[] { (r.Origin.Id, r.Destination.Id), (r.Destination.Id, r.Origin.Id) })

@@ -1,0 +1,25 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git commit -m ' *)",
+      "Bash(dotnet run *)",
+      "Bash(sed -n '/=== M17/,/=== M18/p' /tmp/aero_sameregion_demo.txt)",
+      "Bash(tee /tmp/qa_sameregion_full.txt)",
+      "Bash(tee /tmp/qa_configgen_full.txt)",
+      "Bash(tee /tmp/qa_win_full.txt)",
+      "Bash(sed -n '/M13: full campaign/,/M15: Home regions/p' /tmp/aero_win_demo.txt)",
+      "Bash(echo \"exit: $?\")",
+      "Bash(sed -n '/M13: full campaign/,/M15: Home regions/p' /tmp/aero_fleet_demo.txt)",
+      "Bash(sed -n '/M18: Starting conditions/,/M19: Full setup/p' /tmp/aero_fleet_final.txt)",
+      "Bash(sed -n '/M19: Full setup/,/^$/p' /tmp/aero_fleet_final.txt)",
+      "Bash(tee /tmp/qa_fleet_full.txt)",
+      "Bash(grep -n \"^## M2\\\\|^---$\" docs/FINANCIAL_MODEL_ROADMAP.md)",
+      "Bash(awk -F'[\\(\\):]' '{print $1}' /tmp/build_errors.txt)",
+      "Bash(python -c ' *)",
+      "Bash(/c/Users/harm9/AppData/Local/Programs/Python/Python310/python -c ' *)"
+    ],
+    "additionalDirectories": [
+      "\\tmp"
+    ]
+  }
+}

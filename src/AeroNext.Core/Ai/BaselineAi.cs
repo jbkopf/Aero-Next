@@ -422,15 +422,17 @@ public static class BaselineAi
     }
 
     /// <summary>
-    /// M39 (docs/BASELINE_AI_ROADMAP.md): the fixed 2-item strategy
-    /// roster. Order doesn't matter — Strategies() is only ever consulted
-    /// through SelectStrategy, which sorts by Suitability with a
-    /// deterministic Name tie-break, never by roster position.
+    /// M39 (docs/BASELINE_AI_ROADMAP.md): the strategy roster. Order
+    /// doesn't matter — Strategies() is only ever consulted through
+    /// SelectStrategy, which sorts by Suitability with a deterministic
+    /// Name tie-break, never by roster position. M58: NetworkOptimizerStrategy
+    /// added, the first strategy to cover GameEra.LateGame at all.
     /// </summary>
     public static IReadOnlyList<IAiStrategy> Strategies { get; } = new IAiStrategy[]
     {
         new DomesticProfitOptimizerStrategy(),
         new RapidExpansionStrategy(),
+        new NetworkOptimizerStrategy(),
     };
 
     /// <summary>

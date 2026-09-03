@@ -88,22 +88,33 @@ public class SelectStrategyTests
     }
 
     [Fact]
-    public void SelectStrategy_LateGame_NoEligibleStrategy_KeepsCurrentRatherThanThrowing()
+    public void SelectStrategy_LateGame_MidCycle_KeepsCurrentRegardlessOfEraEligibility()
     {
-        var current = new RapidExpansionStrategy(); // Starting-only, not itself LateGame-eligible
+        // Quarter 200 isn't a year boundary ((200-1)%4 != 0), so this
+        // never even reaches the era/eligibility check - current is kept
+        // unconditionally, same as SelectStrategy_MidCycle_... above,
+        // just deeper into the campaign (LateGame) where, since M58,
+        // RapidExpansionStrategy (Starting-only) would no longer be
+        // era-eligible if this WERE a re-evaluation point.
+        var current = new RapidExpansionStrategy();
         var context = MakeContext(Money.FromDollars(20_000_000));
 
-        var chosen = BaselineAi.SelectStrategy(current, quarterNumber: 200, context); // LateGame
+        var chosen = BaselineAi.SelectStrategy(current, quarterNumber: 200, context);
 
         Assert.Same(current, chosen);
     }
 
     [Fact]
-    public void SelectStrategy_LateGame_NoCurrentAndNoEligibleStrategy_Throws()
+    public void SelectStrategy_LateGame_NoCurrent_PicksNetworkOptimizer()
     {
+        // M58: NetworkOptimizerStrategy is the first strategy to cover
+        // LateGame at all - this used to throw (no eligible strategy and
+        // no current to fall back to); now it resolves for real.
         var context = MakeContext(Money.FromDollars(20_000_000));
 
-        Assert.Throws<InvalidOperationException>(() => BaselineAi.SelectStrategy(null, quarterNumber: 200, context));
+        var chosen = BaselineAi.SelectStrategy(null, quarterNumber: 200, context);
+
+        Assert.IsType<NetworkOptimizerStrategy>(chosen);
     }
 
     [Fact]
@@ -129,10 +140,11 @@ public class SelectStrategyTests
     }
 
     [Fact]
-    public void Strategies_ContainsExactlyTheTwoBuiltStrategies()
+    public void Strategies_ContainsExactlyTheThreeBuiltStrategies()
     {
-        Assert.Equal(2, BaselineAi.Strategies.Count);
+        Assert.Equal(3, BaselineAi.Strategies.Count);
         Assert.Contains(BaselineAi.Strategies, s => s is DomesticProfitOptimizerStrategy);
         Assert.Contains(BaselineAi.Strategies, s => s is RapidExpansionStrategy);
+        Assert.Contains(BaselineAi.Strategies, s => s is NetworkOptimizerStrategy);
     }
 }
