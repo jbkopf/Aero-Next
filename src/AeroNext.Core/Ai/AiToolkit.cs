@@ -614,6 +614,29 @@ public static class AiToolkit
     internal const int ExecutiveHireCashComfortMultiplier = 3;
 
     /// <summary>
+    /// NetworkOptimizerStrategy follow-up (proposed, tunable) - a real
+    /// per-quarter/per-line-item diagnostic found a plateaued, no-longer-
+    /// growing network running a small but *structurally flat* net loss
+    /// (-$3.0M to -$3.7M/quarter, barely moving) for 30+ consecutive
+    /// quarters before finally exhausting cash - Revenue and OperatingCost
+    /// nearly perfectly balanced, the entire deficit just SalaryCost with
+    /// nothing ever removing the dead weight. A persistently-unprofitable
+    /// multi-aircraft route already shrinks to exactly 1 aircraft via the
+    /// existing logic below, then becomes permanently un-fixable under
+    /// the pre-this-fix toolkit (only ever a fare cut, forever). 8
+    /// quarters (2 years) is deliberately more patient than M55's own
+    /// 6-quarter attempt, which "improved but didn't fix" a *different*
+    /// failure mode (a fast-growing, still-thrashing network where
+    /// closures chased opens) - this strategy's own plateaued state has
+    /// no more opens happening to thrash against by the time this would
+    /// ever fire, and DomesticProfitOptimizerStrategy.FindMostProfitableDomesticPairAcrossTypes's
+    /// own RecentlyClosedPairKeys cooldown (already wired in, reused
+    /// unmodified by this same strategy's own new-pair search) guards
+    /// against an immediate re-open regardless.
+    /// </summary>
+    private const int SustainedSingleAircraftClosureThreshold = 8;
+
+    /// <summary>
     /// Applies BaselineAi's M31/M35/M36/M37 passive toolkit against
     /// whatever this strategy already holds, unconditionally and
     /// unfiltered by region — a route/unit is a route/unit regardless of
@@ -626,7 +649,17 @@ public static class AiToolkit
     /// this toolkit's own free (Private, per CLAUDE.md) actions run. Used
     /// only to gate hiring — see the hire check below.
     /// </param>
-    public static void ApplyManagementToolkit(StrategyContext context, List<QuarterOrder> orders, HashSet<int> reservedUnitIds, int spentBeforeToolkit)
+    /// <param name="enableSustainedSingleAircraftClosure">
+    /// NetworkOptimizerStrategy follow-up (default false, same
+    /// "ablation lever, off is exactly old behavior" guarantee
+    /// GravityDemandModel's own enableHubDemandBonus already established)
+    /// - see SustainedSingleAircraftClosureThreshold's own doc comment
+    /// for the real evidence this exists for. Only NetworkOptimizerStrategy
+    /// passes true; RapidExpansionStrategy and DomesticProfitOptimizerStrategy
+    /// are unaffected, unchanged, byte-identical to before this parameter
+    /// existed.
+    /// </param>
+    public static void ApplyManagementToolkit(StrategyContext context, List<QuarterOrder> orders, HashSet<int> reservedUnitIds, int spentBeforeToolkit, bool enableSustainedSingleAircraftClosure = false)
     {
         var routeLoads = RouteEvaluator.EvaluateNetwork(context.CurrentRoutes, context.DemandModel);
 
@@ -662,6 +695,54 @@ public static class AiToolkit
                 continue;
             }
 
+            if (enableSustainedSingleAircraftClosure && load.Route.AircraftCount == 1)
+            {
+                var pairKey = QuarterEngine.NormalizedPairKey(load.Route.Origin, load.Route.Destination);
+                var rawSustainedQuarters = context.RouteHistoryByPair?.GetValueOrDefault(pairKey)?.ConsecutiveUnprofitableQuarters ?? 0;
+
+                // Zero credit - not capped/partial credit - whenever the
+                // raw streak is older than MidGame itself. A real 100-game
+                // measurement found the raw, uncapped streak (which keeps
+                // accumulating under Starting-era strategies that never
+                // once check it) averaging 34 quarters the very first time
+                // this branch ever runs, at quarter GameEras.MidGameStartQuarter
+                // exactly, for every airline simultaneously - a
+                // synchronized "backlog dump" collapsing the real win rate
+                // 7.3%→4.0%. A first fix attempt (Math.Min-style capping to
+                // quarters-since-MidGame) measured *no better* - every
+                // route with a long enough backlog still hits the exact
+                // same capped value on the exact same calendar quarter
+                // (quartersSinceMidGameStart, identical for every route in
+                // the world that quarter), just delaying the identical
+                // synchronized dump from quarter 41 to quarter 48
+                // (MidGameStartQuarter + SustainedSingleAircraftClosureThreshold
+                // - 1) instead of removing it. The real fix: a route whose
+                // raw streak *exceeds* how long MidGame has existed
+                // necessarily includes at least one pre-MidGame quarter -
+                // it gets zero credit, full stop, until it actually
+                // improves (streak resets to 0 on a real profitable
+                // quarter) and goes bad again for real, genuinely fresh,
+                // entirely within the MidGame/LateGame window - which
+                // happens at a different real quarter for each
+                // independent route, the real desynchronization a shared
+                // global cap can never provide.
+                var quartersSinceMidGameStart = Math.Max(0, context.QuarterNumber - GameEras.MidGameStartQuarter + 1);
+                var sustainedQuarters = rawSustainedQuarters > quartersSinceMidGameStart ? 0 : rawSustainedQuarters;
+                var isUncontested = (context.RivalCountByServedRoute?.GetValueOrDefault(pairKey) ?? 0) == 0;
+
+                if (sustainedQuarters >= SustainedSingleAircraftClosureThreshold && isUncontested)
+                {
+                    // Real, permanent closure - see SustainedSingleAircraftClosureThreshold's
+                    // own doc comment for why this route, specifically, is
+                    // never coming back regardless of how many more fare
+                    // cuts it gets. A close instead of (not alongside) a
+                    // cut - no point discounting a fare on a route about
+                    // to disappear this same quarter.
+                    orders.Add(new CloseRouteOrder(load.Route.Origin, load.Route.Destination));
+                    continue;
+                }
+            }
+
             // Cut the fare - universal, works whether or not the route
             // is contested, same target BaselineAi.CutFare has always
             // used. Can coexist with a same-quarter shrink below, or with
@@ -681,32 +762,34 @@ public static class AiToolkit
                 orders.Add(new CloseRouteOrder(load.Route.Origin, load.Route.Destination));
             }
 
-            // A single-aircraft route just gets the cut above. M54 tried
-            // full closure gated on a same-quarter profit read alone and
-            // measured it firing on nearly as many routes as were ever
-            // opened (19,679 closures against 25,722 opens) - pulled
-            // entirely. M55 tried again with the real fix that finding
-            // called for - requiring ConsecutiveUnprofitableQuarters
-            // sustained for real, not just a same-quarter snapshot - plus
-            // the same uncontested-only and contiguity-bridge safety
-            // checks M54 already reasoned through. It didn't help the way
-            // hypothesized: at a 2-quarter confirmation window, closures
-            // still ran 12,997 against 19,044 opens (68%) and win rate
-            // fell to 12.0% (from 41.3% with closure disabled); a much
-            // more patient 6-quarter window improved but didn't fix it
-            // (58% closure ratio, 24.7% win rate, still well below
-            // 41.3%). The real signal: this AI's own route-opening
-            // heuristics send a large, persistent fraction of new routes
-            // into genuine, sustained unprofitability - not a timing
-            // artifact cross-quarter memory can filter out, but a route-
-            // selection quality problem. Punishing that with closure,
-            // however patiently confirmed, cost more than it saved.
-            // AiRouteHistory.ConsecutiveUnprofitableQuarters is still
-            // tracked (FullGameRunner.cs) - real, working infrastructure
-            // for whoever next improves route-opening quality and wants
-            // to reattempt closure once fewer opens are the reason
-            // closure would ever trigger in the first place. See
-            // docs/BASELINE_AI_ROADMAP.md's M55 for the full numbers.
+            // A single-aircraft route just gets the cut above, unless the
+            // closure branch near the top of this loop already handled it
+            // and continue'd past here. M54 tried full closure gated on a
+            // same-quarter profit read alone and measured it firing on
+            // nearly as many routes as were ever opened (19,679 closures
+            // against 25,722 opens) - pulled entirely. M55 tried again
+            // with the real fix that finding called for - requiring
+            // ConsecutiveUnprofitableQuarters sustained for real, not just
+            // a same-quarter snapshot - plus the same uncontested-only and
+            // contiguity-bridge safety checks M54 already reasoned
+            // through. It didn't help the way hypothesized: at a
+            // 2-quarter confirmation window, closures still ran 12,997
+            // against 19,044 opens (68%) and win rate fell to 12.0% (from
+            // 41.3% with closure disabled); a much more patient 6-quarter
+            // window improved but didn't fix it (58% closure ratio, 24.7%
+            // win rate, still well below 41.3%). The real signal at the
+            // time: this AI's own route-opening heuristics sent a large,
+            // persistent fraction of new routes into genuine, sustained
+            // unprofitability in a still-growing, still-thrashing network
+            // - punishing that with closure cost more than it saved.
+            // NetworkOptimizerStrategy's own follow-up round found real,
+            // different territory once a network stops growing at all -
+            // see enableSustainedSingleAircraftClosure/
+            // SustainedSingleAircraftClosureThreshold above for the
+            // evidence and the narrow, patient closure path this class
+            // now offers for exactly that plateaued case. See
+            // docs/BASELINE_AI_ROADMAP.md's M55 and NetworkOptimizerStrategy
+            // follow-up sections for the full numbers both ways.
         }
 
         var validOriginCityIds = ValidOriginCityIds(context);

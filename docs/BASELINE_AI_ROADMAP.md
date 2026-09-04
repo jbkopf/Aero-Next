@@ -2037,6 +2037,102 @@ follow-up round, rather than block shipping on it.
 
 ---
 
+## M58 follow-up, round 2 — NetworkOptimizerStrategy: patient closure for a permanently-dead single-aircraft route ✅
+
+**Origin:** the user's own direct follow-up — dig into the year-33-35
+bankruptcy wave the round above left open.
+
+**Root cause, confirmed with real per-quarter and per-line-item
+instrumentation:** not a shock, not a growth spree - a plateaued
+NorthAmerica network runs Revenue (~$82.4M/quarter) almost perfectly
+balanced against OperatingCost (~$82.4M/quarter); the entire deficit is
+SalaryCost (~$2.77M/quarter) tipping an otherwise-breakeven network into
+a small, **structurally flat** net loss sustained for 30+ consecutive
+quarters before cash runs out. Confirmed directly in
+`AiToolkit.ApplyManagementToolkit`'s own prior code: a persistently-
+unprofitable multi-aircraft route already shrinks to exactly 1 aircraft
+via existing logic, at which point it could only ever get a fare cut,
+permanently - no closure path existed for one at all. Different
+territory than M54/M55's own two failed closure attempts, both measured
+in a fast-growing, thrashing network; `NetworkOptimizerStrategy`'s own
+plateaued state (no more opens happening to thrash against, post M58
+follow-up round 1) never reaches that failure mode.
+
+**Shipped:** a new, opt-in `enableSustainedSingleAircraftClosure`
+parameter on the shared `AiToolkit.ApplyManagementToolkit` (default
+`false` - `RapidExpansionStrategy`/`DomesticProfitOptimizerStrategy`
+byte-identical to before this existed). `NetworkOptimizerStrategy` is the
+only strategy passing `true`: a single-aircraft, uncontested route
+sustained-unprofitable for `SustainedSingleAircraftClosureThreshold` (8
+quarters, 2 years - deliberately more patient than M55's own 6-quarter
+attempt) gets a real `CloseRouteOrder` instead of a fare cut.
+
+**A real bug found and fixed before this could ship at all: a
+synchronized "backlog dump."** `AiRouteHistory.ConsecutiveUnprofitableQuarters`
+keeps accumulating under Starting-era strategies that never once check
+it, so the very first time this new branch ever runs (at
+`GameEras.MidGameStartQuarter`, identical for every airline in the
+world), the raw streak already averaged 34 quarters - 108 routes closed
+in that single quarter across a 100-game sample, collapsing the real win
+rate 7.3%→4.0% by disrupting every region's passenger share at once,
+right as `WinConditionChecker`'s own dominance streak starts being
+measured. **A first attempted fix (capping credit to quarters-since-
+MidGame-began via `Math.Min`) measured no better** - every route with a
+long enough backlog still lands on the *exact same* capped value on the
+*exact same* calendar quarter (the cap term depends only on the current
+quarter, identical for every route in the world), merely delaying the
+synchronized dump from quarter 41 to quarter 48. **The real fix: zero
+credit, not partial credit**, whenever a route's raw streak is older than
+MidGame itself - it must actually improve (streak resets to 0 on a real
+profitable quarter) and go bad again for real, entirely within the
+MidGame/LateGame window, before it can ever count - which happens at a
+genuinely different real quarter per independent route, not a shared
+global clock. Confirmed directly: closures at the MidGame transition
+dropped from 107-127 in a single quarter to a natural, spread 20 total
+across quarters 41-50.
+
+**Measured: substantial, broad bankruptcy improvement, plus a real,
+understood (not a bug) win-rate side effect.** 300-game sweep against the
+round-1 baseline (NorthAmerica 80.7% bankrupt, win rate 7.3%):
+NorthAmerica 80.7%→**75.2%**, Europe 93.4%→**50.8%**, SouthWestAsia
+89.5%→**62.9%**, AustralAsia 74.2%→**52.6%**, SouthAmerica
+77.6%→**38.0%** - every region survives meaningfully longer. But overall
+win rate dropped 7.3%→**5.3%** (16/300) and average win quarter dropped
+69.3→**56.4**. Root-caused, not left unexplained:
+`RegionalDominanceTracker.Advance` excludes a bankrupt airline from a
+region's leadership calculation **entirely**, not just with a shrinking
+share (`eligibleAirlineNames` gate) - so under the old, higher-bankruptcy
+baseline, a survivor frequently became the *sole remaining eligible
+carrier* in a region once its rivals died, "leading" it by default rather
+than by genuinely outcompeting a live rival. More survivors (this fix's
+own real effect) means more genuine, contested competition and fewer
+wins by attrition - confirmed directly: the stalemate rate (no winner
+within 244 quarters) rose from 93.0% (279/300) to 94.7% (284/300),
+exactly consistent with "harder to win by default once rivals actually
+survive." Matches this project's own design pillar directly (CLAUDE.md:
+"any feature that makes this feel more like a spreadsheet and less like
+a territorial fight is suspect") - a win rate propped up by silent rival
+bankruptcy is closer to the spreadsheet failure mode than to real
+territorial competition. **Shipped by explicit user decision**, this
+reframing in hand, not as an unexplained regression.
+
+**What this doesn't close:** the year-33-35 cluster from round 1 is
+gone, but a **new, still-real** NorthAmerica bankruptcy concentration
+appeared at years 23-25 (Q91-100, 161/206 = 78% of all its bankruptcies)
+- confirmed via the same closure-timing diagnostic to be genuine
+(organic ~8-quarter-fresh streaks, not a backlog artifact), very
+plausibly the 1973 oil crisis (Q73-85, years 19-22) pushing many
+independent routes into unprofitability at the same real time, with the
+matching wave of 8-quarters-later closures landing in the same narrow
+window as a direct, unavoidable consequence - a uniform patience
+threshold can't desynchronize a genuinely shared external shock. A
+separate, harder problem than the one this round fixed, not chased
+further here. The very low overall win rate/high stalemate rate, while
+understood, wasn't itself judged a problem to fix this round -
+`WinConditionChecker`'s own design is out of this round's scope.
+
+---
+
 ## Kept in mind, not scheduled
 
 - **`AllianceCourtOrder`** — deliberately excluded from every milestone

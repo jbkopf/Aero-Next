@@ -33,14 +33,21 @@ Suitability comparison that structurally disqualified
 `DomesticProfitOptimizerStrategy` for 90.3% of mid/late-game selections —
 see `BASELINE_AI_ROADMAP.md`'s own M58 section for the full evidence
 chain). NorthAmerica's own bankruptcy rate improved only marginally
-(85.0%→83.9%) even after the real fix landed. **A follow-up round dug
-into why and found a real, distinct defect** (not the regional-demand-shock
-issue it was first assumed to be): `NetworkOptimizerStrategy`'s own
-new-pair opening had no real cash discipline, letting NorthAmerica's
+(85.0%→83.9%) even after the real fix landed. **Two follow-up rounds dug
+deeper and found two real, distinct defects** (not the regional-demand-shock
+issue it was first assumed to be): round 1 found `NetworkOptimizerStrategy`'s
+own new-pair opening had no real cash discipline, letting NorthAmerica's
 dense city pool drive its network to more than double in size right
-before the 1979 oil shock. Fixed (83.9%→80.7%) — see the Active priority
-section below for the full evidence chain and the new, later bankruptcy
-cluster (years 33-35) this surfaced as the next lead. **M61-M64 shipped
+before the 1979 oil shock (fixed, 83.9%→80.7%, but the bankruptcy wave
+shifted to years 33-35 rather than disappearing); round 2 found a
+plateaued network runs a small, permanently-un-fixable structural deficit
+once a route shrinks to 1 aircraft (no closure path existed for one),
+fixed via a new, opt-in, patient closure path — substantial, broad
+bankruptcy improvement (NorthAmerica 80.7%→75.2%, every other region down
+20-40+ points) alongside a real, root-caused (not a bug) win-rate
+side effect. See the Active priority section below for the full evidence
+chain both rounds, and the still-open, different (1973-oil-crisis-driven)
+NorthAmerica cluster round 2 surfaced. **M61-M64 shipped
 a real, active, known regression** — see the Active priority section
 below for the full picture; this is not the same kind of "clean and done"
 as the other ranges listed here. Update this line the moment a new
@@ -338,12 +345,62 @@ eliminates the collapse-exactly-at-the-shock pattern — but only moves the
 aggregate number 83.9%→**80.7%**, because the bankruptcy wave **shifted
 later** rather than disappearing: 55.7% of all NorthAmerica bankruptcies
 (123/221) now cluster at years 33-35, a window with **no authored
-historical shock at all**. **This new cluster is the live follow-up
-target** — concrete next step: the same per-quarter fleet/route/cash
-diagnostic approach (years 30-40 this time), to find what NorthAmerica's
-network is doing differently there without an external shock forcing it.
-By explicit user decision, the fix shipped now rather than blocking on
-this next round.
+historical shock at all**.
+
+**A ninth round (M58 follow-up, round 2) traced that new cluster and
+fixed a real, different defect - substantial, broad improvement, plus a
+real, understood (not a bug) win-rate side effect worth knowing about.**
+Root cause: a plateaued network runs a small but *structurally flat* net
+loss (Revenue and OperatingCost nearly perfectly balanced; the entire
+deficit is SalaryCost) for 30+ consecutive quarters before cash runs
+out - because a persistently-unprofitable route, once shrunk to 1
+aircraft by existing logic, had **no closure path at all** in the
+then-current toolkit, only ever a fare cut, forever. Fixed via a new,
+opt-in `AiToolkit.ApplyManagementToolkit` parameter
+(`enableSustainedSingleAircraftClosure`, default false - only
+`NetworkOptimizerStrategy` passes true), with a real bug found and fixed
+*before* this could ship: the underlying unprofitable-streak counter
+keeps accumulating under Starting-era strategies that never check it, so
+the very first time this branch ever ran, a synchronized "backlog dump"
+(108 routes closing in a single quarter across a 100-game sample)
+collapsed the win rate 7.3%→4.0% - a naive fix (capping credit to
+quarters-since-MidGame) measured no better, since every route with a
+long backlog still landed on the same calendar quarter; the real fix
+gives *zero* credit (not partial) to a streak older than MidGame itself,
+confirmed to genuinely desynchronize the dump (`BASELINE_AI_ROADMAP.md`'s
+own M58-follow-up-round-2 section has the full evidence chain).
+**Measured: NorthAmerica 80.7%→75.2% bankrupt, and every other region
+down 20-40+ points** (Europe 93.4%→50.8%, SouthWestAsia 89.5%→62.9%,
+AustralAsia 74.2%→52.6%, SouthAmerica 77.6%→38.0%) - real, broad
+survival improvement. Overall win rate also dropped (7.3%→5.3%) and
+average win quarter dropped (69.3→56.4) - root-caused, not left
+unexplained: `RegionalDominanceTracker.Advance` excludes a bankrupt
+airline from a region's leadership calculation *entirely*, so the old,
+higher-bankruptcy baseline let a survivor frequently become the *sole
+remaining eligible carrier* in a region once rivals died, "winning" by
+attrition rather than genuine competition - more survivors means more
+real contested competition and fewer wins by default (stalemate rate
+rose 93.0%→94.7%, exactly consistent with this). Matches this project's
+own design pillar directly (CLAUDE.md: "any feature that makes this feel
+more like a spreadsheet and less like a territorial fight is suspect") -
+shipped with this understanding in hand, by explicit user decision.
+
+**A new, still-real NorthAmerica cluster remains, at years 23-25 this
+time (Q91-100, 78% of its bankruptcies) - the live follow-up target.**
+Confirmed genuine (not a bug) via the same closure-timing diagnostic:
+organic, freshly-started ~8-quarter streaks, not a backlog artifact.
+Very plausibly the 1973 oil crisis (years 19-22) pushing many
+independent routes into unprofitability at the same real time, with the
+matching 8-quarters-later closure wave landing in the same narrow
+window - a genuinely harder problem than a synchronization bug, since a
+uniform patience threshold can't desynchronize a real, shared external
+shock. Concrete next step for whoever picks this up: either a
+per-route-timing-aware threshold (harder, no obvious design yet) or
+accepting this as an inherent, authored-history-driven pattern rather
+than something to eliminate. The low overall win rate/high stalemate
+rate (94.7%), while now understood, was not itself judged a problem to
+fix this round - `WinConditionChecker`'s own design is a separate,
+un-scoped question if it's ever revisited.
 
 ---
 

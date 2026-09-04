@@ -20,9 +20,10 @@ public class NetworkOptimizerStrategyTests
         IReadOnlyList<Route> routes, IReadOnlyList<City> cities, IReadOnlyList<AircraftType> eraTypes, Region homeRegion,
         AirlineFleet? fleet = null, int actionCap = 3, Money? cash = null, City? homeCity = null,
         System.Collections.Generic.IReadOnlyDictionary<(string OriginId, string DestinationId), int>? rivalCountByServedRoute = null,
-        System.Collections.Generic.IReadOnlyDictionary<(string OriginId, string DestinationId), AiRouteHistory>? routeHistoryByPair = null) =>
+        System.Collections.Generic.IReadOnlyDictionary<(string OriginId, string DestinationId), AiRouteHistory>? routeHistoryByPair = null,
+        int quarterNumber = 1) =>
         new(routes, actionCap, cities, DemandModel, eraTypes, fleet ?? AirlineFleet.Empty, homeRegion, HomeCity: homeCity ?? cities[0], AvailableCash: cash,
-            RivalCountByServedRoute: rivalCountByServedRoute, RouteHistoryByPair: routeHistoryByPair);
+            RivalCountByServedRoute: rivalCountByServedRoute, RouteHistoryByPair: routeHistoryByPair, QuarterNumber: quarterNumber);
 
     /// <summary>Shorthand for a RouteHistoryByPair entry with only ConsecutiveUnprofitableQuarters set - the only field this strategy's own Suitability reads.</summary>
     private static AiRouteHistory Sustained(int consecutiveUnprofitableQuarters) =>
@@ -382,5 +383,34 @@ public class NetworkOptimizerStrategyTests
 
         var fareOrder = Assert.Single(orders.OfType<SetFareOrder>());
         Assert.Equal(new HashSet<string> { "home", "near" }, new HashSet<string> { fareOrder.Origin.Id, fareOrder.Destination.Id });
+    }
+
+    [Fact]
+    public void DecideOrders_SustainedUncontestedSingleAircraftRoute_ClosesIt()
+    {
+        // NetworkOptimizerStrategy follow-up: confirms
+        // enableSustainedSingleAircraftClosure: true actually reaches
+        // ApplyManagementToolkit through a real DecideOrders call, not
+        // just a direct unit test of that method in isolation.
+        // BigAircraft's huge capacity against tiny real demand guarantees
+        // a real negative FareCalculator.EstimatedProfit reading.
+        // quarterNumber: 100 - well past GameEras.MidGameStartQuarter (41)
+        // + the 8-quarter threshold, so AiToolkit's own quarters-since-
+        // MidGame cap (see its doc comment) doesn't defeat this case.
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
+        var route = new Route(home, b, BigAircraft, AircraftCount: 1);
+        var rivalCount = new System.Collections.Generic.Dictionary<(string, string), int> { [QuarterEngine.NormalizedPairKey(home, b)] = 0 };
+        var history = new System.Collections.Generic.Dictionary<(string, string), AiRouteHistory>
+        {
+            [QuarterEngine.NormalizedPairKey(home, b)] = Sustained(20),
+        };
+        var context = MakeContext(new[] { route }, new[] { home, b }, new[] { BigAircraft }, Region.NorthAmerica,
+            actionCap: 0, rivalCountByServedRoute: rivalCount, routeHistoryByPair: history, quarterNumber: 100);
+
+        var orders = Strategy.DecideOrders(context);
+
+        var closeOrder = Assert.Single(orders.OfType<CloseRouteOrder>());
+        Assert.Equal(new HashSet<string> { "home", "b" }, new HashSet<string> { closeOrder.Origin.Id, closeOrder.Destination.Id });
     }
 }

@@ -493,6 +493,182 @@ public class AiToolkitTests
         Assert.Single(orders.OfType<SetFareOrder>()); // the cut still applies
     }
 
+    // --- NetworkOptimizerStrategy follow-up: enableSustainedSingleAircraftClosure (default false, opt-in) ---
+
+    [Fact]
+    public void ApplyManagementToolkit_EnabledClosure_NoRouteHistoryAtAll_TreatedAsZeroQuarters_StillOnlyCuts()
+    {
+        // RouteHistoryByPair null (permissive-default convention, same as
+        // every other nullable StrategyContext field) - sustainedQuarters
+        // defaults to 0, well below the threshold, so this is really just
+        // exercising the null-RouteHistoryByPair branch specifically, not
+        // a new behavior.
+        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
+        var route = new Route(a, b, BigAircraft, AircraftCount: 1);
+        var rivalCount = new System.Collections.Generic.Dictionary<(string, string), int> { [QuarterEngine.NormalizedPairKey(a, b)] = 0 };
+        var context = MakeContext(new[] { a, b }, a, routes: new[] { route }, rivalCountByServedRoute: rivalCount, routeHistoryByPair: null);
+        var orders = new System.Collections.Generic.List<QuarterOrder>();
+
+        AiToolkit.ApplyManagementToolkit(context, orders, new System.Collections.Generic.HashSet<int>(), spentBeforeToolkit: 0, enableSustainedSingleAircraftClosure: true);
+
+        Assert.Empty(orders.OfType<CloseRouteOrder>());
+        Assert.Single(orders.OfType<SetFareOrder>());
+    }
+
+    [Fact]
+    public void ApplyManagementToolkit_EnabledClosure_RouteHistoryPresentButNoEntryForThisPair_TreatedAsZeroQuarters_StillOnlyCuts()
+    {
+        // Distinct from the null-dictionary case above: RouteHistoryByPair
+        // itself is real and non-null, just has no entry for this specific
+        // pair (a route this airline only just started flying, say) -
+        // GetValueOrDefault's own null result, not the dictionary's.
+        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
+        var route = new Route(a, b, BigAircraft, AircraftCount: 1);
+        var rivalCount = new System.Collections.Generic.Dictionary<(string, string), int> { [QuarterEngine.NormalizedPairKey(a, b)] = 0 };
+        var history = new System.Collections.Generic.Dictionary<(string, string), AiRouteHistory>();
+        var context = MakeContext(new[] { a, b }, a, routes: new[] { route }, rivalCountByServedRoute: rivalCount, routeHistoryByPair: history);
+        var orders = new System.Collections.Generic.List<QuarterOrder>();
+
+        AiToolkit.ApplyManagementToolkit(context, orders, new System.Collections.Generic.HashSet<int>(), spentBeforeToolkit: 0, enableSustainedSingleAircraftClosure: true);
+
+        Assert.Empty(orders.OfType<CloseRouteOrder>());
+        Assert.Single(orders.OfType<SetFareOrder>());
+    }
+
+    [Fact]
+    public void ApplyManagementToolkit_EnabledClosure_NullRivalCountByServedRoute_TreatedAsUncontested_Closes()
+    {
+        // RivalCountByServedRoute null (permissive-default convention) -
+        // treated the same as zero rivals (uncontested), so a sustained
+        // single-aircraft route still closes even when this specific
+        // field is entirely absent, not just present-and-zero.
+        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
+        var route = new Route(a, b, BigAircraft, AircraftCount: 1);
+        var history = new System.Collections.Generic.Dictionary<(string, string), AiRouteHistory>
+        {
+            [QuarterEngine.NormalizedPairKey(a, b)] = new(LastShrunkQuarter: null, LastClosedQuarter: null, ConsecutiveUnprofitableQuarters: 20),
+        };
+        // quarterNumber: 100 - well past GameEras.MidGameStartQuarter (41)
+        // + the 8-quarter threshold, so the real quarters-since-MidGame
+        // cap (see AiToolkit's own doc comment) doesn't defeat this case.
+        var context = MakeContext(new[] { a, b }, a, routes: new[] { route }, rivalCountByServedRoute: null, routeHistoryByPair: history, quarterNumber: 100);
+        var orders = new System.Collections.Generic.List<QuarterOrder>();
+
+        AiToolkit.ApplyManagementToolkit(context, orders, new System.Collections.Generic.HashSet<int>(), spentBeforeToolkit: 0, enableSustainedSingleAircraftClosure: true);
+
+        Assert.Single(orders.OfType<CloseRouteOrder>());
+        Assert.Empty(orders.OfType<SetFareOrder>());
+    }
+
+    [Fact]
+    public void ApplyManagementToolkit_EnabledClosure_SustainedUncontestedSingleAircraft_Closes()
+    {
+        // Same exact fixture as the test above (20 consecutive unprofitable
+        // quarters, well past the 8-quarter threshold, uncontested) - only
+        // difference is enableSustainedSingleAircraftClosure: true. This is
+        // the real, new protective behavior. quarterNumber: 100 for the
+        // same reason as the test above - past the quarters-since-MidGame cap.
+        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
+        var route = new Route(a, b, BigAircraft, AircraftCount: 1);
+        var rivalCount = new System.Collections.Generic.Dictionary<(string, string), int> { [QuarterEngine.NormalizedPairKey(a, b)] = 0 };
+        var history = new System.Collections.Generic.Dictionary<(string, string), AiRouteHistory>
+        {
+            [QuarterEngine.NormalizedPairKey(a, b)] = new(LastShrunkQuarter: null, LastClosedQuarter: null, ConsecutiveUnprofitableQuarters: 20),
+        };
+        var context = MakeContext(new[] { a, b }, a, routes: new[] { route }, rivalCountByServedRoute: rivalCount, routeHistoryByPair: history, quarterNumber: 100);
+        var orders = new System.Collections.Generic.List<QuarterOrder>();
+
+        AiToolkit.ApplyManagementToolkit(context, orders, new System.Collections.Generic.HashSet<int>(), spentBeforeToolkit: 0, enableSustainedSingleAircraftClosure: true);
+
+        Assert.Single(orders.OfType<CloseRouteOrder>());
+        Assert.Empty(orders.OfType<SetFareOrder>()); // close instead of a wasted cut, not alongside one
+    }
+
+    [Fact]
+    public void ApplyManagementToolkit_EnabledClosure_RawStreakOlderThanMidGame_GetsZeroCredit_StillOnlyCuts()
+    {
+        // The real bug this fixes: a route's raw ConsecutiveUnprofitableQuarters
+        // (20) clears the threshold on its own, but MidGame only just
+        // began 3 quarters ago (quarterNumber 43, 2 past GameEras.MidGameStartQuarter
+        // 41) - the streak necessarily includes pre-MidGame quarters, so
+        // it gets zero credit (not partial/capped credit - an earlier
+        // attempt at this exact fix used Math.Min-style capping instead,
+        // measured to still synchronize every long-backlog route onto the
+        // exact same calendar quarter, just delayed - see the class doc
+        // comment's own evidence chain) until it actually improves and
+        // goes bad again for real, entirely within MidGame.
+        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
+        var route = new Route(a, b, BigAircraft, AircraftCount: 1);
+        var rivalCount = new System.Collections.Generic.Dictionary<(string, string), int> { [QuarterEngine.NormalizedPairKey(a, b)] = 0 };
+        var history = new System.Collections.Generic.Dictionary<(string, string), AiRouteHistory>
+        {
+            [QuarterEngine.NormalizedPairKey(a, b)] = new(LastShrunkQuarter: null, LastClosedQuarter: null, ConsecutiveUnprofitableQuarters: 20),
+        };
+        var context = MakeContext(new[] { a, b }, a, routes: new[] { route }, rivalCountByServedRoute: rivalCount, routeHistoryByPair: history, quarterNumber: 43);
+        var orders = new System.Collections.Generic.List<QuarterOrder>();
+
+        AiToolkit.ApplyManagementToolkit(context, orders, new System.Collections.Generic.HashSet<int>(), spentBeforeToolkit: 0, enableSustainedSingleAircraftClosure: true);
+
+        Assert.Empty(orders.OfType<CloseRouteOrder>());
+        Assert.Single(orders.OfType<SetFareOrder>());
+    }
+
+    [Fact]
+    public void ApplyManagementToolkit_EnabledClosure_BelowThreshold_StillOnlyCuts()
+    {
+        // 7 consecutive quarters - one short of SustainedSingleAircraftClosureThreshold
+        // (8) - locks in the exact boundary. quarterNumber: 100, well past
+        // the quarters-since-MidGame cap, so this genuinely tests the
+        // threshold itself, not an incidental cap-to-zero.
+        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
+        var route = new Route(a, b, BigAircraft, AircraftCount: 1);
+        var rivalCount = new System.Collections.Generic.Dictionary<(string, string), int> { [QuarterEngine.NormalizedPairKey(a, b)] = 0 };
+        var history = new System.Collections.Generic.Dictionary<(string, string), AiRouteHistory>
+        {
+            [QuarterEngine.NormalizedPairKey(a, b)] = new(LastShrunkQuarter: null, LastClosedQuarter: null, ConsecutiveUnprofitableQuarters: 7),
+        };
+        var context = MakeContext(new[] { a, b }, a, routes: new[] { route }, rivalCountByServedRoute: rivalCount, routeHistoryByPair: history, quarterNumber: 100);
+        var orders = new System.Collections.Generic.List<QuarterOrder>();
+
+        AiToolkit.ApplyManagementToolkit(context, orders, new System.Collections.Generic.HashSet<int>(), spentBeforeToolkit: 0, enableSustainedSingleAircraftClosure: true);
+
+        Assert.Empty(orders.OfType<CloseRouteOrder>());
+        Assert.Single(orders.OfType<SetFareOrder>());
+    }
+
+    [Fact]
+    public void ApplyManagementToolkit_EnabledClosure_Contested_StillOnlyCutsRegardlessOfHowLongSustained()
+    {
+        // Same 20-quarter streak as the "closes" test above, but contested
+        // (a real rival present) - uncontested-only is a deliberate scope
+        // limit (M54's own original reasoning, kept: a contested route's
+        // unprofitability reading carries real volatility a rival exiting
+        // could resolve on its own). quarterNumber: 100, well past the
+        // quarters-since-MidGame cap, so contestedness is genuinely what's
+        // under test here.
+        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
+        var route = new Route(a, b, BigAircraft, AircraftCount: 1);
+        var rivalCount = new System.Collections.Generic.Dictionary<(string, string), int> { [QuarterEngine.NormalizedPairKey(a, b)] = 1 };
+        var history = new System.Collections.Generic.Dictionary<(string, string), AiRouteHistory>
+        {
+            [QuarterEngine.NormalizedPairKey(a, b)] = new(LastShrunkQuarter: null, LastClosedQuarter: null, ConsecutiveUnprofitableQuarters: 20),
+        };
+        var context = MakeContext(new[] { a, b }, a, routes: new[] { route }, rivalCountByServedRoute: rivalCount, routeHistoryByPair: history, quarterNumber: 100);
+        var orders = new System.Collections.Generic.List<QuarterOrder>();
+
+        AiToolkit.ApplyManagementToolkit(context, orders, new System.Collections.Generic.HashSet<int>(), spentBeforeToolkit: 0, enableSustainedSingleAircraftClosure: true);
+
+        Assert.Empty(orders.OfType<CloseRouteOrder>());
+        Assert.Single(orders.OfType<SetFareOrder>());
+    }
+
     [Fact]
     public void ApplyManagementToolkit_RealCarriedData_OverridesSoloEstimate()
     {

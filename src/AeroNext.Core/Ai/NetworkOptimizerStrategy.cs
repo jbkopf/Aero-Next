@@ -103,6 +103,29 @@ namespace AeroNext.Core.Ai;
 /// already-flying route, including its own lease fallback) is
 /// deliberately untouched throughout - a lower-risk action reinforcing
 /// proven demand, not an open bet on a new one.
+///
+/// NetworkOptimizerStrategy follow-up, round 2: the cash-discipline fix
+/// above genuinely stopped NorthAmerica's growth-driven collapse, but
+/// only moved its bankruptcy rate 83.9%→80.7% - the wave shifted later
+/// (years 33-35) rather than disappearing. Real per-quarter,
+/// per-line-item instrumentation found a completely different mechanism
+/// this time: once a network plateaus, Revenue and OperatingCost stay
+/// almost perfectly balanced, but SalaryCost tips it into a small,
+/// *structurally flat* net loss (-$3.0M to -$3.7M/quarter, barely
+/// moving) sustained for 30+ consecutive quarters before cash runs out -
+/// the flatness itself is diagnostic of the same routes staying bad
+/// forever, not routine churn. Root cause, confirmed directly in
+/// AiToolkit.ApplyManagementToolkit's own prior code: a persistently-
+/// unprofitable multi-aircraft route already shrinks to exactly 1
+/// aircraft via existing logic, at which point - before this round - it
+/// could only ever get a fare cut, permanently, no matter how long it
+/// stayed bad. Fixed via AiToolkit's own new, opt-in
+/// enableSustainedSingleAircraftClosure parameter (this is the only
+/// strategy that passes true) - see its own
+/// SustainedSingleAircraftClosureThreshold doc comment for why this is
+/// real, different territory from M54/M55's own two failed closure
+/// attempts (both measured in a fast-growing, thrashing network this
+/// strategy's own plateaued state never reaches).
 /// </summary>
 public sealed class NetworkOptimizerStrategy : IAiStrategy
 {
@@ -327,7 +350,11 @@ public sealed class NetworkOptimizerStrategy : IAiStrategy
         AiToolkit.NegotiateOrBorrow(context, bestDomesticGateway, orders, ref spent);
 
         // 5. Shared toolkit - free, always last, same as every strategy.
-        AiToolkit.ApplyManagementToolkit(context, orders, reservedUnitIds, spent);
+        // Follow-up: this is the one strategy passing
+        // enableSustainedSingleAircraftClosure: true - see AiToolkit's own
+        // SustainedSingleAircraftClosureThreshold doc comment for why, and
+        // this class's own doc comment for the real evidence chain.
+        AiToolkit.ApplyManagementToolkit(context, orders, reservedUnitIds, spent, enableSustainedSingleAircraftClosure: true);
 
         return orders;
     }

@@ -18,10 +18,20 @@ public enum GameEra
 /// <summary>Naming mirrors AeroNext.Core.World.HomeRegions — a small static helper alongside its own enum, not an extension method.</summary>
 public static class GameEras
 {
+    /// <summary>
+    /// The first quarter of MidGame - a single source of truth for the
+    /// boundary ForQuarter itself checks below, also referenced directly
+    /// by AiToolkit's own sustained-single-aircraft-closure logic (see
+    /// its doc comment) to avoid crediting a route with unprofitable
+    /// history from before any MidGame-eligible strategy could ever act
+    /// on it.
+    /// </summary>
+    public const int MidGameStartQuarter = 41;
+
     /// <summary>Quarters 1-40 (1955-1964), 41-160 (1965-1994), 161+ (1995-2015) — a 244-quarter campaign never exceeds LateGame.</summary>
     public static GameEra ForQuarter(int quarterNumber)
     {
-        if (quarterNumber <= 40)
+        if (quarterNumber < MidGameStartQuarter)
         {
             return GameEra.Starting;
         }
