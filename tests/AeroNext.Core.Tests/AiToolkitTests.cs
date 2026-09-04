@@ -556,13 +556,14 @@ public class AiToolkitTests
     private static StrategyContext MakeMarketingContext(
         IReadOnlyList<Route> routes,
         System.Collections.Generic.IReadOnlyDictionary<(string OriginId, string DestinationId), int>? rivalCountByServedRoute,
-        Money? availableCash = null, int actionCap = 3)
+        Money? availableCash = null, int actionCap = 3,
+        System.Collections.Generic.IReadOnlyDictionary<(string OriginId, string DestinationId), AiRouteHistory>? routeHistoryByPair = null)
     {
         var home = routes.Count > 0 ? routes[0].Origin : MakeCity("home", Region.NorthAmerica, 0, 0, 50);
         var cities = routes.SelectMany(r => new[] { r.Origin, r.Destination }).Distinct().DefaultIfEmpty(home).ToList();
 
         return new(routes, actionCap, cities, DemandModel, new[] { Aircraft }, AirlineFleet.Empty, home.Region, home,
-            AvailableCash: availableCash, RivalCountByServedRoute: rivalCountByServedRoute);
+            AvailableCash: availableCash, RivalCountByServedRoute: rivalCountByServedRoute, RouteHistoryByPair: routeHistoryByPair);
     }
 
     [Fact]
@@ -616,6 +617,63 @@ public class AiToolkitTests
         var order = Assert.Single(orders.OfType<RouteMarketingOrder>());
         Assert.Equal(new HashSet<string> { "a", "b" }, new HashSet<string> { order.Origin.Id, order.Destination.Id });
         Assert.Empty(orders.OfType<NetworkMarketingOrder>());
+        Assert.Equal(1, spent);
+    }
+
+    // --- M58 resume: give up on marketing a route that's been unprofitable too long ---
+
+    [Fact]
+    public void ApplyMarketingCampaign_RouteSustainedUnprofitableTooLong_NoOp()
+    {
+        // M58 resume: real 300-game evidence found this method repeatedly
+        // re-spending cash on a route whose real problem (a permanent
+        // demand shock) marketing can't fix, since the triggering
+        // condition never clears. Same fixture as the "proposes an
+        // order" test above, except the route's own history already
+        // shows MaximumConsecutiveUnprofitableQuartersForMarketing (4)
+        // consecutive bad quarters - genuinely persistent, not merely
+        // newly-struggling.
+        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
+        var route = new Route(a, b, BigAircraft, AircraftCount: 1);
+        var key = QuarterEngine.NormalizedPairKey(a, b);
+        var rivalCount = new System.Collections.Generic.Dictionary<(string, string), int> { [key] = 1 };
+        var history = new System.Collections.Generic.Dictionary<(string, string), AiRouteHistory>
+        {
+            [key] = new(LastShrunkQuarter: null, LastClosedQuarter: null, ConsecutiveUnprofitableQuarters: 4),
+        };
+        var context = MakeMarketingContext(new[] { route }, rivalCount, availableCash: Money.FromDollars(50_000_000), routeHistoryByPair: history);
+        var orders = new System.Collections.Generic.List<QuarterOrder>();
+        var spent = 0;
+
+        AiToolkit.ApplyMarketingCampaign(context, orders, ref spent);
+
+        Assert.Empty(orders);
+        Assert.Equal(0, spent);
+    }
+
+    [Fact]
+    public void ApplyMarketingCampaign_RouteNewlyStruggling_BelowGiveUpThreshold_StillProposesOrder()
+    {
+        // One quarter short of the give-up threshold - still a real,
+        // worthwhile target, proving this isn't an overcorrection to
+        // "never market anything."
+        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
+        var route = new Route(a, b, BigAircraft, AircraftCount: 1);
+        var key = QuarterEngine.NormalizedPairKey(a, b);
+        var rivalCount = new System.Collections.Generic.Dictionary<(string, string), int> { [key] = 1 };
+        var history = new System.Collections.Generic.Dictionary<(string, string), AiRouteHistory>
+        {
+            [key] = new(LastShrunkQuarter: null, LastClosedQuarter: null, ConsecutiveUnprofitableQuarters: 3),
+        };
+        var context = MakeMarketingContext(new[] { route }, rivalCount, availableCash: Money.FromDollars(50_000_000), routeHistoryByPair: history);
+        var orders = new System.Collections.Generic.List<QuarterOrder>();
+        var spent = 0;
+
+        AiToolkit.ApplyMarketingCampaign(context, orders, ref spent);
+
+        Assert.Single(orders.OfType<RouteMarketingOrder>());
         Assert.Equal(1, spent);
     }
 

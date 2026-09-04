@@ -741,17 +741,10 @@ for (var q = 1; q <= campaignQuarters; q++)
         // same boat, though — this loop already tracks real per-airline
         // cash, so BaselineAi's negotiation step becomes genuinely
         // cash-aware here too.
-        // M58: same one-quarter-lagged own-region-streak convention as
-        // FullGameRunner.cs - campaignDominance here is still last
-        // quarter's own state, since RegionalDominanceTracker.Advance for
-        // this quarter runs later, after every airline's own turn below.
-        var campaignOwnRegionStreaks = HomeRegions.All.ToDictionary(r => r, r => campaignDominance.StreakFor(name, r));
-
         var campaignStrategyContext = new StrategyContext(
             campaignRoutes[name], campaignCaps[name], cities, yearDemandModel, availableFleet, campaignFleets[name], campaignHomeRegionByName[name],
             HomeCity: campaignSeats[name].StartingCity,
-            AvailableSlotsByCity: null, AvailableCash: campaignFinances[name].CashBalance, CurrentDebtBalance: campaignFinances[name].DebtBalance,
-            OwnRegionStreaks: campaignOwnRegionStreaks);
+            AvailableSlotsByCity: null, AvailableCash: campaignFinances[name].CashBalance, CurrentDebtBalance: campaignFinances[name].DebtBalance);
         var campaignStrategy = BaselineAi.SelectStrategy(campaignCurrentStrategyByName[name], q, campaignStrategyContext);
         campaignCurrentStrategyByName[name] = campaignStrategy;
         var orders = campaignStrategy.DecideOrders(campaignStrategyContext);

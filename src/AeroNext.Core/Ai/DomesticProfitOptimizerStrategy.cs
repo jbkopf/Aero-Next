@@ -67,6 +67,23 @@ namespace AeroNext.Core.Ai;
 /// at all — and unlike the floor design, it substitutes a better fit
 /// rather than rejecting, so there's no "opens nothing" failure mode.
 /// See FindMostProfitableDomesticPairAcrossTypes for the exact mechanism.
+///
+/// M58 resume (round 3): ApplicableEras narrowed from { Starting,
+/// MidGame } to { Starting } only. Real 60-game diagnostic data found
+/// this strategy's own Suitability (1 - CashRatio, calibrated in M39
+/// against a $20M quarter-1 reference) pinned at exactly 0.0 for 90.3% of
+/// all MidGame/LateGame SelectStrategy comparisons - any airline that
+/// outgrows the quarter-1 reference (nearly all of them, by year 11)
+/// permanently loses the comparison to NetworkOptimizerStrategy
+/// regardless of real need, measured as NetworkOptimizerStrategy being
+/// chosen at an average $596.1M cash versus $286.5M when this strategy
+/// was chosen - backwards from either strategy's intent. Rather than
+/// rescale a cash reference that was only ever meant to differentiate at
+/// quarter 1, the eras are now exclusive: this strategy owns the
+/// early-game job it actually describes above (build cash and a
+/// home-region network), and NetworkOptimizerStrategy owns everything
+/// from year 11 on (see that class's own doc comment). See
+/// docs/BASELINE_AI_ROADMAP.md's M58 section for the full evidence chain.
 /// </summary>
 public sealed class DomesticProfitOptimizerStrategy : IAiStrategy
 {
@@ -75,7 +92,7 @@ public sealed class DomesticProfitOptimizerStrategy : IAiStrategy
 
     public string Name => "Domestic Profit Optimizer";
 
-    public IReadOnlySet<GameEra> ApplicableEras { get; } = new HashSet<GameEra> { GameEra.Starting, GameEra.MidGame };
+    public IReadOnlySet<GameEra> ApplicableEras { get; } = new HashSet<GameEra> { GameEra.Starting };
 
     /// <summary>
     /// (Proposed, tunable) — tighter cash favors the cautious
@@ -85,9 +102,6 @@ public sealed class DomesticProfitOptimizerStrategy : IAiStrategy
     /// count is identically zero.
     /// </summary>
     public double Suitability(StrategyContext context) => 1 - AiSuitability.CashRatio(context);
-
-    // TEMP diagnostic - remove before shipping
-    public static readonly Dictionary<string, int> NewPairOutcomes = new();
 
     public IReadOnlyList<QuarterOrder> DecideOrders(StrategyContext context)
     {
@@ -101,41 +115,9 @@ public sealed class DomesticProfitOptimizerStrategy : IAiStrategy
         var domesticRouteCount = context.CurrentRoutes
             .Count(r => r.Origin.Region == context.HomeRegion && r.Destination.Region == context.HomeRegion);
 
-        // TEMP diagnostic - remove before shipping
-        if (domesticRouteCount >= MaxDomesticRoutes)
-        {
-            NewPairOutcomes["at-cap"] = NewPairOutcomes.GetValueOrDefault("at-cap") + 1;
-        }
-
         if (domesticRouteCount < MaxDomesticRoutes && spent + 1 <= context.ActionCap)
         {
             var idleBest = FindMostProfitableDomesticPairUsingIdleFleet(context, reservedUnitIds, validOriginCityIds);
-
-            // TEMP diagnostic - remove before shipping
-            {
-                string outcome;
-                if (idleBest is null)
-                {
-                    outcome = "idle-path-no-candidate";
-                }
-                else if (!AiToolkit.TryOrientFromValidOrigin(idleBest.Value.Pair, validOriginCityIds, out var dOrigin, out var dDestination))
-                {
-                    outcome = "idle-path-orient-failed";
-                }
-                else if (!BaselineAi.HasSlotAtEveryGateway(dOrigin, dDestination, context.AvailableSlotsByCity, slotsReservedByCity))
-                {
-                    outcome = "idle-path-no-gateway-slot";
-                }
-                else if (!AiToolkit.HasRoomAtEveryCity(dOrigin, dDestination, context.CityWideSlotsRemaining, citySpendReservedByCity))
-                {
-                    outcome = "idle-path-no-city-room";
-                }
-                else
-                {
-                    outcome = "idle-path-opened";
-                }
-                NewPairOutcomes[outcome] = NewPairOutcomes.GetValueOrDefault(outcome) + 1;
-            }
 
             if (idleBest is not null && AiToolkit.TryOrientFromValidOrigin(idleBest.Value.Pair, validOriginCityIds, out var origin, out var destination)
                 && BaselineAi.HasSlotAtEveryGateway(origin, destination, context.AvailableSlotsByCity, slotsReservedByCity)
@@ -167,8 +149,6 @@ public sealed class DomesticProfitOptimizerStrategy : IAiStrategy
                 {
                     orders.Add(new AircraftOrder(bestOrdered.Value.Aircraft, Quantity: 1));
                     spent += 1;
-                    // TEMP diagnostic - remove before shipping
-                    NewPairOutcomes["fallback-ordered"] = NewPairOutcomes.GetValueOrDefault("fallback-ordered") + 1;
                 }
                 else if (bestOrdered is not null && oriented is not null && spent + 2 <= context.ActionCap
                     && BaselineAi.HasSlotAtEveryGateway(oriented.Value.Origin, oriented.Value.Destination, context.AvailableSlotsByCity, slotsReservedByCity)
@@ -179,29 +159,6 @@ public sealed class DomesticProfitOptimizerStrategy : IAiStrategy
                     BaselineAi.ReserveSlots(oriented.Value.Origin, oriented.Value.Destination, slotsReservedByCity);
                     AiToolkit.ReserveCityWideSlots(oriented.Value.Origin, oriented.Value.Destination, citySpendReservedByCity);
                     spent += 2;
-                    // TEMP diagnostic - remove before shipping
-                    NewPairOutcomes["fallback-leased"] = NewPairOutcomes.GetValueOrDefault("fallback-leased") + 1;
-                }
-                // TEMP diagnostic - remove before shipping
-                else if (bestOrdered is null)
-                {
-                    NewPairOutcomes["fallback-no-candidate"] = NewPairOutcomes.GetValueOrDefault("fallback-no-candidate") + 1;
-                }
-                else if (oriented is null)
-                {
-                    NewPairOutcomes["fallback-orient-failed"] = NewPairOutcomes.GetValueOrDefault("fallback-orient-failed") + 1;
-                }
-                else if (spent + 2 > context.ActionCap)
-                {
-                    NewPairOutcomes["fallback-cap-exhausted"] = NewPairOutcomes.GetValueOrDefault("fallback-cap-exhausted") + 1;
-                }
-                else if (!BaselineAi.HasSlotAtEveryGateway(oriented.Value.Origin, oriented.Value.Destination, context.AvailableSlotsByCity, slotsReservedByCity))
-                {
-                    NewPairOutcomes["fallback-no-gateway-slot"] = NewPairOutcomes.GetValueOrDefault("fallback-no-gateway-slot") + 1;
-                }
-                else
-                {
-                    NewPairOutcomes["fallback-no-city-room"] = NewPairOutcomes.GetValueOrDefault("fallback-no-city-room") + 1;
                 }
             }
         }

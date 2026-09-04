@@ -476,6 +476,29 @@ public static class AiToolkit
     }
 
     /// <summary>
+    /// M58 resume (proposed, tunable): a route this far into a sustained
+    /// unprofitable streak (AiRouteHistory.ConsecutiveUnprofitableQuarters)
+    /// is excluded from marketing entirely - real 300-game evidence found
+    /// NetworkOptimizerStrategy (which runs this method first, every
+    /// quarter it's selected) repeatedly re-spending real cash on a route
+    /// whose real problem was a permanent demand shock (the 1973 oil
+    /// crisis), not low visibility - marketing genuinely can't fix that,
+    /// and since the triggering condition never clears, the campaign just
+    /// re-fires forever. Measured: NorthAmerica's own bankruptcy rate
+    /// under NetworkOptimizerStrategy rose from 65.0% to 85.0% once its
+    /// own Suitability signal was fixed to trigger correctly on real,
+    /// sustained trouble - it was the marketing spend itself doing the
+    /// damage once selection worked as intended, confirmed by cash
+    /// trajectory (airlines switching to it collapsed toward zero cash by
+    /// year 30, while ones that stayed on DomesticProfitOptimizerStrategy
+    /// kept growing steadily despite the exact same underlying route
+    /// trouble). A route that's merely newly-struggling (few consecutive
+    /// bad quarters) is still a real, worthwhile marketing target - this
+    /// only gives up once the pattern is genuinely persistent.
+    /// </summary>
+    private const int MaximumConsecutiveUnprofitableQuartersForMarketing = 4;
+
+    /// <summary>
     /// M52, retargeted by M53 (load factor) then M54 (real profit):
     /// proposes a marketing campaign to help a genuinely unprofitable
     /// contested route recover, not to squeeze more out of one already
@@ -500,6 +523,13 @@ public static class AiToolkit
     /// weighing route-cost-per-pair against network-cost-per-route - kept
     /// deliberately simple like every other "single best candidate, no
     /// deeper search" method in this file.
+    ///
+    /// M58 resume: also excludes a route whose own sustained-unprofitable
+    /// streak has already passed MaximumConsecutiveUnprofitableQuartersForMarketing
+    /// - see that constant's own doc comment. A route with no history yet
+    /// (RouteHistoryByPair null, or no entry for this pair) is treated as
+    /// a fresh 0-quarter streak, same permissive-default convention as
+    /// everything else here - never excluded on that basis alone.
     /// </summary>
     public static void ApplyMarketingCampaign(StrategyContext context, List<QuarterOrder> orders, ref int spent)
     {
@@ -514,6 +544,8 @@ public static class AiToolkit
             .Select(load => (load.Route, Profit: FareCalculator.EstimatedProfit(load.Route, BestAvailableCarried(load.Route, load.PassengersCarried, context))))
             .Where(x => x.Profit < Money.Zero)
             .Where(x => context.RivalCountByServedRoute.GetValueOrDefault(QuarterEngine.NormalizedPairKey(x.Route.Origin, x.Route.Destination)) > 0)
+            .Where(x => (context.RouteHistoryByPair?.GetValueOrDefault(QuarterEngine.NormalizedPairKey(x.Route.Origin, x.Route.Destination))?.ConsecutiveUnprofitableQuarters ?? 0)
+                < MaximumConsecutiveUnprofitableQuartersForMarketing)
             .OrderBy(x => x.Profit.Cents)
             .ThenBy(x => x.Route.Origin.Id, StringComparer.Ordinal)
             .ThenBy(x => x.Route.Destination.Id, StringComparer.Ordinal)

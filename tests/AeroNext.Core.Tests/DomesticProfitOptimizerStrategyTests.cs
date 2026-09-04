@@ -330,10 +330,15 @@ public class DomesticProfitOptimizerStrategyTests
     }
 
     [Fact]
-    public void ApplicableEras_CoversStartingAndMidGame_NotLateGame()
+    public void ApplicableEras_CoversOnlyStarting()
     {
+        // M58 resume (round 3): narrowed from { Starting, MidGame } -
+        // see the class doc comment for the real evidence this strategy's
+        // own cash-based Suitability was structurally disqualified for
+        // 90.3% of MidGame/LateGame comparisons against
+        // NetworkOptimizerStrategy, which now owns both eras exclusively.
         Assert.Contains(GameEra.Starting, Strategy.ApplicableEras);
-        Assert.Contains(GameEra.MidGame, Strategy.ApplicableEras);
+        Assert.DoesNotContain(GameEra.MidGame, Strategy.ApplicableEras);
         Assert.DoesNotContain(GameEra.LateGame, Strategy.ApplicableEras);
     }
 

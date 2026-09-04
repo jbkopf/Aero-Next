@@ -1849,6 +1849,126 @@ own check-in first, per the plan's own scoping.
 
 ---
 
+## M58 — NetworkOptimizerStrategy: a third roster strategy, and the real fix for why it didn't work ✅
+
+**Origin:** real, committed work first built on its own branch
+(`m58a-win-condition-plumbing`), paused mid-investigation after a
+persistent sweep regression traced to the same shared city-capacity
+mechanic M59 later addressed independently. Resumed after M59-M64 had
+all shipped, rebasing cleanly onto current `main`, to re-measure with the
+mechanic that originally blocked it now fixed.
+
+**Shipped:** a third strategy, `NetworkOptimizerStrategy`
+(`ApplicableEras = { MidGame, LateGame }`, years 11-61) — the user's own
+stated intent: consolidate and optimize an already-mature network rather
+than keep expanding, stepping back from growth to shore up or trim
+unprofitable routes when needed, or grow more slowly toward a win when
+the network is healthy. `DecideOrders` priority is inverted from both
+existing strategies: `AiToolkit.ApplyMarketingCampaign` (fix contested,
+unprofitable routes) gets first claim on the action budget, then growing
+the best-performing existing route (a real capability neither existing
+strategy has), then a new domestic pair reusing
+`DomesticProfitOptimizerStrategy`'s own proven search, then domestic
+gateway negotiation, then the shared management toolkit.
+
+**Three real regressions found and fixed in sequence, all on a real
+300-game sweep, none papered over:**
+
+1. **Win-proximity dominance.** The strategy's original third
+   `Suitability` trigger ("fairly close to winning, get conservative")
+   fired 9-30x more often than its own unprofitable-route signal (2,779
+   vs. 318 evaluations for NorthAmerica), pulling healthy airlines out of
+   active growth as early as year 11. NorthAmerica bankruptcy
+   20.8%→65.0%. Per the user's own direct correction — "the intent of
+   NetworkOptimizerStrategy is to prevent bankruptcy... shoring up, or
+   even trimming routes that are unprofitable" — win proximity was
+   removed entirely rather than retuned, and the unprofitable-route
+   signal itself was fixed to require *sustained* trouble
+   (`AiRouteHistory.ConsecutiveUnprofitableQuarters >= 2`, reusing M55's
+   own real, previously-unconsumed tracking) rather than a same-quarter
+   snapshot, with its count floor lowered from 3 to 1 to match. Verified
+   correct (850/850 tests, 100%/clean coverage on both touched files) —
+   but NorthAmerica bankruptcy still measured 85.0%, *worse* than before
+   this fix.
+2. **`ApplyMarketingCampaign` repeatedly spending real cash on a route
+   with no real recovery prospect.** Once the Suitability signal
+   correctly triggered on genuine sustained trouble, real diagnostic
+   evidence showed the strategy repeatedly re-marketing a route whose
+   actual problem was a permanent demand shock (the 1973 oil crisis) —
+   marketing can't fix that, and since the triggering condition never
+   clears, the campaign just re-fires forever. Fixed: a route past
+   `MaximumConsecutiveUnprofitableQuartersForMarketing` (4) consecutive
+   bad quarters is excluded from marketing entirely. Confirmed working
+   exactly as designed (326 real exclusions across a 60-game diagnostic
+   run, every single one changing the actual order issued) — but the
+   300-game sweep result was **bit-for-bit identical**, still 85.0%. The
+   scenario it targets occurs too rarely (~1.2 times per NorthAmerica
+   airline's entire 61-year campaign) to move an 85% bankruptcy rate,
+   even though the fix itself is real and correctly implemented.
+3. **The real defect: a broken cross-strategy comparison, not the
+   strategy's own logic.** Per the user's own direction to step back and
+   check whether the strategy was even being *used* appropriately: a
+   60-game diagnostic (5,100 captured year-boundary selections) found
+   `DomesticProfitOptimizerStrategy.Suitability` (`1 - CashRatio`, a cash
+   signal calibrated in M39 for quarter-1 differentiation only) pinned at
+   exactly `0.0` for **90.3%** of all MidGame/LateGame comparisons — any
+   airline that outgrows the $20M quarter-1 reference (nearly all of
+   them, by year 11) permanently loses the comparison to
+   `NetworkOptimizerStrategy` regardless of real need. Measured directly:
+   average cash when `NetworkOptimizerStrategy` was chosen was **$596.1M
+   — richer than the $286.5M average when `DomesticProfitOptimizerStrategy`
+   was chosen** — backwards from either strategy's own purpose, and the
+   real reason the first two fixes above changed nothing: both tuned the
+   winning side of a comparison whose losing side was structurally
+   disqualified. **Fixed by making the eras exclusive rather than
+   patching the comparison**, per the user's own framing —
+   `DomesticProfitOptimizerStrategy` is an early-game strategy (build
+   cash and a home-region network) and belongs to `{ Starting }` only,
+   narrowed from `{ Starting, MidGame }`; `NetworkOptimizerStrategy`
+   (unchanged `{ MidGame, LateGame }`) is now the sole eligible strategy
+   for both eras, so the broken comparison never happens again by
+   construction. Every airline now transitions uniformly at the
+   Starting→MidGame boundary (year 11), regardless of cash or trouble
+   level.
+
+**Measured, round 3 (the shipped state):** 300-game sweep, win rate 7.0%
+(21/300, avg quarter 66.7) against the M59/M62 baseline (39.0%,
+117/300). Region-by-region against the pre-fix (round 2) state:
+NorthAmerica 85.0%→**83.9%** bankrupt (barely moved), Europe
+96.4%→**93.4%**, SouthWestAsia 96.2%→**89.5%**, AustralAsia
+93.8%→**74.2%**, SouthAmerica 89.5%→**74.3%**, EastAsia unchanged at
+~15%. The fix is real and correctly diagnosed — it meaningfully recovers
+four of five affected regions — but NorthAmerica specifically did not
+recover. Root-caused, not left a mystery: NorthAmerica's own
+bankruptcy-quarter distribution in this same sweep shows 51.7% of all its
+230 bankruptcies (119) landing in a single 10-quarter window, Q101-110
+(years 26-28, 1980-82) — immediately after the 1979 second oil shock
+(Q97) — plus a secondary 17.8% (41) at Q131-140 (years 33-35). This
+matches this same investigation's very first finding (before this
+strategy-selection work began): NorthAmerica's own unprofitable-route
+share jumps permanently after each oil-shock event and never recovers,
+while EastAsia stays comparatively immune due to M63's uneven regional
+`HubQuality`-driven demand buffer. This is the same regional-demand-shock
+asymmetry `docs/OPEN_WORK.md`'s Active priority section already tracks —
+not a new strategy-selection defect, and not chased further in this
+round. **Shipped anyway, by explicit user decision**: the fix is a real,
+verified improvement to the actual defect this investigation targeted, on
+its own merits, independent of NorthAmerica's separate, already-tracked
+issue. See `docs/OPEN_WORK.md`'s Active priority section for the
+concrete NorthAmerica follow-up lead this round surfaced.
+
+**What this doesn't close:** `NetworkOptimizerStrategy.Suitability`'s own
+carefully-tuned ratio logic (win-proximity removal, sustained-unprofitable
+threshold) is now uncontested in practice — `SelectStrategy`'s eligible
+list is always length 1 for MidGame/LateGame today, so this value is
+never actually compared against a rival's. Kept exactly as measured and
+tested, not simplified away, as a forward-compatible hook for if a future
+roster edit ever gives either era a second eligible strategy again.
+NorthAmerica's oil-shock vulnerability itself remains open, filed under
+the regional-balance effort in `docs/OPEN_WORK.md`, not this file.
+
+---
+
 ## Kept in mind, not scheduled
 
 - **`AllianceCourtOrder`** — deliberately excluded from every milestone

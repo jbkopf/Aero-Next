@@ -14,27 +14,32 @@ Compiled 2026-08-31, cross-referencing every `docs/*_ROADMAP.md`'s own
 
 ## Milestone status
 
-**Every milestone across all 10 roadmap docs is complete**, with one
-open exception, as of this writing: M0–M14 (`SIM_CORE_ROADMAP.md`),
+**Every milestone across all 10 roadmap docs is complete**, as of this
+writing: M0–M14 (`SIM_CORE_ROADMAP.md`),
 M15–M19 (`GAME_SETUP_ROADMAP.md`), M20–M22 (`HISTORICAL_DYNAMICS_ROADMAP.md`),
 M23–M24 (`WIN_CONDITIONS_ROADMAP.md`), M25–M30/M34
-(`FINANCIAL_MODEL_ROADMAP.md`, M31 retired), M31/M35–M44/M49–M57
+(`FINANCIAL_MODEL_ROADMAP.md`, M31 retired), M31/M35–M44/M49–M58
 (`BASELINE_AI_ROADMAP.md`), M32–M33/M45–M46/M59 (`ROUTE_CAPACITY_ROADMAP.md`),
 M47–M48 (`MARKETING_ROADMAP.md`), M61-M64 (`HUB_DEMAND_ROADMAP.md`). M64 is
 the current highest *shipped* number (M60 was attempted, measured, and
 fully reverted — see below, not a shipped number). M56 shipped no code
 change (four route-opening-quality designs tried and reverted); M57
-followed with a real, contained fix. **M58 (`NetworkOptimizerStrategy` +
-win-condition plumbing) is real, committed work that is *not* merged to
-`main`** — it sits on its own branch (`m58a-win-condition-plumbing`),
-paused mid-investigation after a persistent sweep regression traced back
-to the same shared city-capacity mechanic M59 then addressed; whether
-M58's own strategy recovers now that M59 has shipped is unconfirmed, not
-assumed. **M61-M64 shipped a real, active, known regression** — see the
-Active priority section below for the full picture; this is not the same
-kind of "clean and done" as the other ranges listed here. Update this
-line the moment a new milestone is opened, or M58/the M61-M64 regression
-is resolved, anywhere.
+followed with a real, contained fix. **M58 (`NetworkOptimizerStrategy`, a
+third roster strategy) is now merged to `main`** — resumed from its
+paused `m58a-win-condition-plumbing` branch after M59-M64 shipped, found
+and fixed three real regressions in sequence (win-proximity dominance,
+futile marketing spend, and the real root cause: a broken cross-strategy
+Suitability comparison that structurally disqualified
+`DomesticProfitOptimizerStrategy` for 90.3% of mid/late-game selections —
+see `BASELINE_AI_ROADMAP.md`'s own M58 section for the full evidence
+chain). NorthAmerica's own bankruptcy rate improved only marginally
+(85.0%→83.9%) even after the real fix landed — traced to a *separate*,
+already-tracked regional-demand-shock issue, not a remaining defect in
+this milestone; see the Active priority section below. **M61-M64 shipped
+a real, active, known regression** — see the Active priority section
+below for the full picture; this is not the same kind of "clean and done"
+as the other ranges listed here. Update this line the moment a new
+milestone is opened, or the M61-M64 regression is resolved.
 
 **M60 (hub-and-spoke demand, the first attempt) was tried, measured, and
 reverted — not shipped, superseded by M61-M64's later, different
@@ -303,6 +308,34 @@ M64's own write-up for the full evidence chain), a genuinely new design
 question. The smaller, still-unexplained EastAsia regional shift (present
 even in the healthy `RapidExpansionStrategy`-only state) is a real,
 separate follow-up once the primary collapse is fixed.
+
+**A seventh round, `BASELINE_AI_ROADMAP.md`'s M58, surfaces a concrete new
+lead for NorthAmerica specifically — a live follow-up target, not a
+mystery.** M58 (`NetworkOptimizerStrategy`, resumed and fixed through
+three real regression rounds — see its own write-up) recovered
+Europe/SouthWestAsia/AustralAsia/SouthAmerica meaningfully but left
+NorthAmerica's bankruptcy rate almost unchanged (85.0%→83.9%). Direct
+measurement in the same 300-game sweep: **51.7% of all 230 NorthAmerica
+bankruptcies (119) land in a single 10-quarter window, Q101-110 (years
+26-28, 1980-82) — immediately after the 1979 second oil shock (Q97)** —
+plus a secondary 17.8% (41) at Q131-140 (years 33-35). This is the same
+pattern this session's very first investigation already found (before
+M58's own strategy-selection work began): NorthAmerica's own
+unprofitable-route share jumps permanently after each authored oil-shock
+event and never recovers, while EastAsia stays comparatively immune,
+attributed to M63's uneven regional `HubQuality`-driven demand buffer.
+**This is squarely the same regional-demand-shock imbalance this whole
+section already tracks** (see the sequencing note at the bottom of this
+document — the old "wait for dynamic demand" deferral was lifted
+2026-08-31, so this is unblocked, active work, not gated on anything).
+Concrete next step for whoever picks this up: trace why NorthAmerica's
+own network specifically fails to absorb the 1979 shock's demand
+contraction where other regions do — candidates include M63's
+`HubQuality` asymmetry (already suspected for EastAsia's own immunity),
+NorthAmerica's own dense-network profile interacting badly with a
+global demand multiplier drop, or something route-opening-side not yet
+isolated. Not chased further in M58 itself, which correctly stayed
+scoped to the strategy-selection defect it was fixing.
 
 ---
 

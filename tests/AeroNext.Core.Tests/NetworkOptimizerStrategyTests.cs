@@ -20,9 +20,13 @@ public class NetworkOptimizerStrategyTests
         IReadOnlyList<Route> routes, IReadOnlyList<City> cities, IReadOnlyList<AircraftType> eraTypes, Region homeRegion,
         AirlineFleet? fleet = null, int actionCap = 3, Money? cash = null, City? homeCity = null,
         System.Collections.Generic.IReadOnlyDictionary<(string OriginId, string DestinationId), int>? rivalCountByServedRoute = null,
-        System.Collections.Generic.IReadOnlyDictionary<Region, int>? ownRegionStreaks = null) =>
+        System.Collections.Generic.IReadOnlyDictionary<(string OriginId, string DestinationId), AiRouteHistory>? routeHistoryByPair = null) =>
         new(routes, actionCap, cities, DemandModel, eraTypes, fleet ?? AirlineFleet.Empty, homeRegion, HomeCity: homeCity ?? cities[0], AvailableCash: cash,
-            RivalCountByServedRoute: rivalCountByServedRoute, OwnRegionStreaks: ownRegionStreaks);
+            RivalCountByServedRoute: rivalCountByServedRoute, RouteHistoryByPair: routeHistoryByPair);
+
+    /// <summary>Shorthand for a RouteHistoryByPair entry with only ConsecutiveUnprofitableQuarters set - the only field this strategy's own Suitability reads.</summary>
+    private static AiRouteHistory Sustained(int consecutiveUnprofitableQuarters) =>
+        new(LastShrunkQuarter: null, LastClosedQuarter: null, consecutiveUnprofitableQuarters);
 
     [Fact]
     public void ApplicableEras_CoversMidGameAndLateGame_NeverStarting()
@@ -42,35 +46,36 @@ public class NetworkOptimizerStrategyTests
     }
 
     [Fact]
-    public void Suitability_ThreeOrMoreUnprofitableRoutes_IsOne()
+    public void Suitability_OneRouteSustainedUnprofitable_OutOfThree_IsOneThird()
     {
-        // MinimumTroubledRouteCountForSignal (3) reached exactly - a real
-        // 300-game sweep measured the earlier, floor-less version of this
-        // formula picking this strategy at an average of just 3.7 routes,
-        // crowding out early growth (win rate 41.3%->29.7%). Three
-        // routes, all unprofitable, all sharing "home" so the network
-        // stays contiguous.
+        // MinimumTroubledRouteCountForSignal is 1 (post-M58-resume) - a
+        // single genuinely-sustained-bad route is enough to register,
+        // scaled by ratio. "home"-"b" has 2 consecutive unprofitable
+        // quarters (>= MinimumSustainedUnprofitableQuarters); the other
+        // two routes have no history at all (never served long enough to
+        // build one, or always profitable) and don't count.
         var home = MakeCity("home", Region.NorthAmerica, 0, 0, 50);
         var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
         var c = MakeCity("c", Region.NorthAmerica, 2, 2, 50);
         var d = MakeCity("d", Region.NorthAmerica, 3, 3, 50);
         var routes = new[]
         {
-            new Route(home, b, BigAircraft, AircraftCount: 1), // huge capacity against real demand - unprofitable, same fixture ApplyMarketingCampaign's own tests use
+            new Route(home, b, BigAircraft, AircraftCount: 1),
             new Route(home, c, BigAircraft, AircraftCount: 1),
             new Route(home, d, BigAircraft, AircraftCount: 1),
         };
-        var context = MakeContext(routes, new[] { home, b, c, d }, new[] { BigAircraft }, Region.NorthAmerica);
+        var history = new System.Collections.Generic.Dictionary<(string, string), AiRouteHistory>
+        {
+            [QuarterEngine.NormalizedPairKey(home, b)] = Sustained(2),
+        };
+        var context = MakeContext(routes, new[] { home, b, c, d }, new[] { BigAircraft }, Region.NorthAmerica, routeHistoryByPair: history);
 
-        Assert.Equal(1.0, Strategy.Suitability(context));
+        Assert.Equal(1.0 / 3.0, Strategy.Suitability(context));
     }
 
     [Fact]
-    public void Suitability_OnlyTwoUnprofitableRoutes_IsZero()
+    public void Suitability_AllRoutesSustainedUnprofitable_IsOne()
     {
-        // Below MinimumTroubledRouteCountForSignal - the exact regression
-        // this floor fixes: "multiple" (the user's own word) means more
-        // than one or two, not any nonzero ratio.
         var home = MakeCity("home", Region.NorthAmerica, 0, 0, 50);
         var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
         var c = MakeCity("c", Region.NorthAmerica, 2, 2, 50);
@@ -79,9 +84,47 @@ public class NetworkOptimizerStrategyTests
             new Route(home, b, BigAircraft, AircraftCount: 1),
             new Route(home, c, BigAircraft, AircraftCount: 1),
         };
-        var context = MakeContext(routes, new[] { home, b, c }, new[] { BigAircraft }, Region.NorthAmerica);
+        var history = new System.Collections.Generic.Dictionary<(string, string), AiRouteHistory>
+        {
+            [QuarterEngine.NormalizedPairKey(home, b)] = Sustained(2),
+            [QuarterEngine.NormalizedPairKey(home, c)] = Sustained(5), // well past the threshold - still just counts once
+        };
+        var context = MakeContext(routes, new[] { home, b, c }, new[] { BigAircraft }, Region.NorthAmerica, routeHistoryByPair: history);
+
+        Assert.Equal(1.0, Strategy.Suitability(context));
+    }
+
+    [Fact]
+    public void Suitability_RouteUnprofitableOnlyThisQuarter_NoSustainedHistoryYet_DoesNotCount()
+    {
+        // The concrete regression-lock for the M58-resume fix itself: the
+        // OLD same-quarter check (RouteEvaluator.EvaluateNetwork +
+        // FareCalculator.EstimatedProfit, recomputed fresh every call)
+        // would have counted this route - it's the exact same
+        // huge-capacity-vs-real-demand fixture the other tests in this
+        // file use to build an unprofitable route. The NEW check reads
+        // ONLY RouteHistoryByPair's own ConsecutiveUnprofitableQuarters,
+        // which is either absent (no history entry) or below
+        // MinimumSustainedUnprofitableQuarters (2) here - a single bad
+        // quarter with no sustained record yet must not trigger this
+        // strategy's own selection, the literal fix for "the floor of 3
+        // never fired for a real, persistently-bad ~1-route-out-of-5-8
+        // pattern because it was never sustained-aware in the first
+        // place."
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
+        var route = new Route(home, b, BigAircraft, AircraftCount: 1); // unprofitable this quarter, if read fresh
+        var history = new System.Collections.Generic.Dictionary<(string, string), AiRouteHistory>
+        {
+            [QuarterEngine.NormalizedPairKey(home, b)] = Sustained(1), // one bad quarter so far - below the sustained threshold
+        };
+        var context = MakeContext(new[] { route }, new[] { home, b }, new[] { BigAircraft }, Region.NorthAmerica, routeHistoryByPair: history);
 
         Assert.Equal(0.0, Strategy.Suitability(context));
+
+        // No history entry at all (e.g. this quarter is the route's first) behaves the same way.
+        var contextNoHistory = MakeContext(new[] { route }, new[] { home, b }, new[] { BigAircraft }, Region.NorthAmerica);
+        Assert.Equal(0.0, Strategy.Suitability(contextNoHistory));
     }
 
     [Fact]
@@ -105,62 +148,7 @@ public class NetworkOptimizerStrategyTests
     }
 
     [Fact]
-    public void Suitability_TwoRegionsWithinOneQuarterOfClinching_IsTwoThirds()
-    {
-        // A real 300-game sweep measured the first version of this
-        // signal (any region led at all, streak >= 1) driving this
-        // strategy's own selection in 13,104 of ~14,300 evaluations -
-        // leading even one region, often just the easy, early home-region
-        // edge, was already enough (win rate 41.3%->29.7%). Fixed the
-        // same way "multiple unprofitable routes" was: requires >= 2
-        // regions, each genuinely close to clinched (streak within one
-        // quarter of WinConditionChecker.RequiredStreakQuarters), not
-        // merely led at all. NorthAmerica (3) and EastAsia (3) qualify;
-        // Europe (1) does not.
-        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
-        var streaks = new System.Collections.Generic.Dictionary<Region, int>
-        {
-            [Region.NorthAmerica] = 3, [Region.Europe] = 1, [Region.EastAsia] = 3,
-            [Region.SouthWestAsia] = 0, [Region.AustralAsia] = 0, [Region.SouthAmerica] = 0,
-        };
-        var context = MakeContext(Array.Empty<Route>(), new[] { home }, Array.Empty<AircraftType>(), Region.NorthAmerica, ownRegionStreaks: streaks);
-
-        // Suitability is still 0 with no routes at all - win proximity
-        // alone doesn't override the "nothing to optimize" empty-network
-        // guard. Give it one healthy, uncontested route so the network
-        // isn't literally empty, and confirm win proximity alone (not
-        // unprofitable/contested) drives the score to 2/3 (2 of the 3
-        // required regions deeply led).
-        var a = MakeCity("a", Region.NorthAmerica, 5, 5, 50);
-        var aircraft = new AircraftType("t", "Test", Seats: 5, RangeKm: 2000);
-        var route = new Route(home, a, aircraft, AircraftCount: 1);
-        var contextWithRoute = MakeContext(new[] { route }, new[] { home, a }, new[] { aircraft }, Region.NorthAmerica, ownRegionStreaks: streaks);
-
-        Assert.Equal(2.0 / 3.0, Strategy.Suitability(contextWithRoute));
-    }
-
-    [Fact]
-    public void Suitability_OnlyOneRegionNearClinched_IsZero()
-    {
-        // Below the >= 2 regions floor - the exact regression this fixed:
-        // leading just the easy home-region edge (even deeply, streak 3)
-        // isn't "fairly close to achieving the win condition" on its own.
-        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
-        var a = MakeCity("a", Region.NorthAmerica, 5, 5, 50);
-        var aircraft = new AircraftType("t", "Test", Seats: 5, RangeKm: 2000);
-        var route = new Route(home, a, aircraft, AircraftCount: 1);
-        var streaks = new System.Collections.Generic.Dictionary<Region, int>
-        {
-            [Region.NorthAmerica] = 3, [Region.Europe] = 0, [Region.EastAsia] = 0,
-            [Region.SouthWestAsia] = 0, [Region.AustralAsia] = 0, [Region.SouthAmerica] = 0,
-        };
-        var context = MakeContext(new[] { route }, new[] { home, a }, new[] { aircraft }, Region.NorthAmerica, ownRegionStreaks: streaks);
-
-        Assert.Equal(0.0, Strategy.Suitability(context));
-    }
-
-    [Fact]
-    public void Suitability_HealthyUncontestedFarFromWinning_IsZero()
+    public void Suitability_HealthyUncontestedNetwork_IsZero()
     {
         var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
         var a = MakeCity("a", Region.NorthAmerica, 5, 5, 50);

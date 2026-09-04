@@ -118,13 +118,24 @@ public class SelectStrategyTests
     }
 
     [Fact]
-    public void SelectStrategy_MidGame_DomesticOptimizerRemainsEligible()
+    public void SelectStrategy_MidGame_PicksNetworkOptimizer_RegardlessOfCash()
     {
-        var context = MakeContext(Money.FromDollars(2_000_000)); // favors DomesticProfitOptimizer
+        // M58 resume (round 3): DomesticProfitOptimizerStrategy is no
+        // longer MidGame-eligible at all (see its own class doc comment
+        // for why - its cash signal was structurally disqualified for
+        // 90.3% of real MidGame/LateGame comparisons), so
+        // NetworkOptimizerStrategy is the sole eligible strategy there
+        // now - picked unconditionally, not because it happens to win a
+        // cash comparison. Poor cash used to favor
+        // DomesticProfitOptimizerStrategy outright; it no longer matters.
+        var poorContext = MakeContext(Money.FromDollars(2_000_000));
+        var richContext = MakeContext(Money.FromDollars(20_000_000));
 
-        var chosen = BaselineAi.SelectStrategy(null, quarterNumber: 100, context); // MidGame
+        var chosenPoor = BaselineAi.SelectStrategy(null, quarterNumber: 100, poorContext);
+        var chosenRich = BaselineAi.SelectStrategy(null, quarterNumber: 100, richContext);
 
-        Assert.IsType<DomesticProfitOptimizerStrategy>(chosen);
+        Assert.IsType<NetworkOptimizerStrategy>(chosenPoor);
+        Assert.IsType<NetworkOptimizerStrategy>(chosenRich);
     }
 
     [Fact]

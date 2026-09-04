@@ -35,6 +35,35 @@ namespace AeroNext.Core.Ai;
 /// proven and already measured. Like that strategy, never proposes a
 /// cross-region RouteOrder or NegotiationOrder — "optimize what's
 /// already there," not expand into new territory.
+///
+/// M58 resume: the intent, restated directly by the user - this strategy
+/// exists to *prevent bankruptcy*, stepping back from growth to shore up
+/// or trim unprofitable routes. It originally also had a third trigger,
+/// "fairly close to achieving the win condition" - measured, and removed
+/// entirely: even after one real fix (requiring >= 2 regions deeply led,
+/// not just one led at all), it still fired 9-30x more often than the
+/// unprofitable-route signal (2,779 vs. 318 evaluations for NorthAmerica,
+/// 9,037 vs. 87 for EastAsia), pulling healthy airlines out of active
+/// growth as early as year 11 and driving NorthAmerica's bankruptcy rate
+/// from 20.8% to 65.0% in a real 300-game sweep - the opposite of this
+/// strategy's own purpose.
+///
+/// M58 resume (round 3): the deeper fix landed one level up, not in this
+/// file. A real 60-game diagnostic found DomesticProfitOptimizerStrategy's
+/// own Suitability pinned at exactly 0.0 for 90.3% of MidGame/LateGame
+/// comparisons (its cash signal was calibrated for quarter-1
+/// differentiation and never scales past it), so this strategy was
+/// winning the comparison by default on almost any nonzero signal -
+/// average cash at selection was $596.1M, richer than when
+/// DomesticProfitOptimizerStrategy itself was chosen. The bankruptcy
+/// number didn't move even after the win-proximity removal and the
+/// ApplyMarketingCampaign exclusion below, both confirmed working
+/// correctly, because neither touched the actual defect: the comparison
+/// itself. Fixed by making the eras exclusive instead -
+/// DomesticProfitOptimizerStrategy.ApplicableEras narrowed to { Starting
+/// } only - so this strategy is now the sole eligible one for MidGame and
+/// LateGame, chosen unconditionally at the year-11 boundary. See
+/// docs/BASELINE_AI_ROADMAP.md's M58 section for the full evidence chain.
 /// </summary>
 public sealed class NetworkOptimizerStrategy : IAiStrategy
 {
@@ -53,22 +82,62 @@ public sealed class NetworkOptimizerStrategy : IAiStrategy
     /// bare ratio - so an absolute-count floor is the direct fix, not a
     /// guess: below this many, the signal contributes nothing at all,
     /// however high the ratio.
+    ///
+    /// M58 resume: lowered 3 → 1, together with the new
+    /// MinimumSustainedUnprofitableQuarters requirement below - the
+    /// original floor of 3 was sized against a *same-quarter* snapshot
+    /// (any one bad quarter counted), but the real damage this strategy
+    /// exists to catch (NorthAmerica's own permanent ~12-14%
+    /// unprofitable-route share after the 1973 oil-shock event) is
+    /// roughly one persistently-bad route out of 5-8 - it never crossed a
+    /// same-quarter floor of 3 at all, which is the literal mechanism by
+    /// which this signal almost never fired for the real problem
+    /// (measured: only 318 of ~59,000 NorthAmerica evaluations). Once
+    /// "sustained 2+ quarters" is doing the real noise-filtering a
+    /// same-quarter count floor was originally built for, a floor this
+    /// strict is provably too strict for the real pattern.
     /// </summary>
-    private const int MinimumTroubledRouteCountForSignal = 3;
+    private const int MinimumTroubledRouteCountForSignal = 1;
 
     /// <summary>
-    /// The user's own three conditions are explicitly an "or" — combined
-    /// via Math.Max, not a weighted sum, so any single strong signal
-    /// alone is enough to make this strategy the best choice, each term
-    /// a natural 0..1 ratio comparable to AiSuitability.CashRatio's own
-    /// scale (what the other two strategies' Suitability is built from).
-    /// unprofitableRatio/contestedRatio reuse the exact same "real
-    /// profit"/"contested" definitions ApplyMarketingCampaign and
-    /// ApplyManagementToolkit already act on, so this strategy gets
-    /// picked by the same signal it will then go fix — each gated by
-    /// MinimumTroubledRouteCountForSignal so a tiny, young network with
-    /// one struggling route doesn't register as "the network is in
-    /// trouble" the same way a mature one with several genuinely does.
+    /// M58 resume (proposed, tunable): a route only counts toward
+    /// unprofitableRatio once it's read unprofitable for this many
+    /// quarters *in a row*, ending with the most recent one - reuses
+    /// AiRouteHistory.ConsecutiveUnprofitableQuarters (real, already
+    /// tracked every quarter by FullGameRunner.cs, previously unconsumed
+    /// by anything). Same principle docs/BASELINE_AI_ROADMAP.md's M55
+    /// already established for route *closure* specifically ("a route
+    /// needs to remember it was just bad, not just prove itself bad in
+    /// this one isolated quarter") - now applied to this strategy's own
+    /// selection signal too, closing the gap that let a one-off bad
+    /// quarter on a young network read the same as genuine, sustained
+    /// trouble under the old same-quarter check.
+    /// </summary>
+    private const int MinimumSustainedUnprofitableQuarters = 2;
+
+    /// <summary>
+    /// Combined via Math.Max, not a weighted sum - either signal alone is
+    /// enough to make this strategy the best choice. unprofitableRatio
+    /// reuses AiRouteHistory.ConsecutiveUnprofitableQuarters (see
+    /// MinimumSustainedUnprofitableQuarters); contestedRatio reuses the
+    /// exact same "contested" definition ApplyMarketingCampaign already
+    /// acts on, so this strategy gets picked by the same signal it will
+    /// then go fix. Both gated by MinimumTroubledRouteCountForSignal so a
+    /// tiny, young network with one struggling route doesn't register as
+    /// "the network is in trouble" the same way a mature one genuinely
+    /// does.
+    ///
+    /// M58 resume (round 3): with DomesticProfitOptimizerStrategy no
+    /// longer eligible for MidGame or LateGame (see the class doc comment
+    /// above), this strategy is currently the sole occupant of both
+    /// eras - SelectStrategy's own eligible list is always length 1
+    /// there, so this exact value is never actually compared against a
+    /// rival's in practice today. Kept exactly as measured and tested
+    /// anyway, not simplified to a constant: it's correct, it's already
+    /// exercised directly by this class's own unit tests (not just
+    /// through reachability), and it's the real signal this strategy
+    /// should keep using if a future roster edit ever gives MidGame or
+    /// LateGame a second eligible strategy again.
     /// </summary>
     public double Suitability(StrategyContext context)
     {
@@ -79,33 +148,16 @@ public sealed class NetworkOptimizerStrategy : IAiStrategy
             return 0.0;
         }
 
-        var routeLoads = RouteEvaluator.EvaluateNetwork(routes, context.DemandModel);
-        var unprofitableCount = routeLoads.Count(load =>
-            FareCalculator.EstimatedProfit(load.Route, AiToolkit.BestAvailableCarried(load.Route, load.PassengersCarried, context)) < Money.Zero);
-        var unprofitableRatio = unprofitableCount < MinimumTroubledRouteCountForSignal ? 0.0 : unprofitableCount / (double)routes.Count;
+        var sustainedUnprofitableCount = routes.Count(r =>
+            (context.RouteHistoryByPair?.GetValueOrDefault(QuarterEngine.NormalizedPairKey(r.Origin, r.Destination))?.ConsecutiveUnprofitableQuarters ?? 0)
+                >= MinimumSustainedUnprofitableQuarters);
+        var unprofitableRatio = sustainedUnprofitableCount < MinimumTroubledRouteCountForSignal ? 0.0 : sustainedUnprofitableCount / (double)routes.Count;
 
         var contestedCount = routes.Count(r =>
             (context.RivalCountByServedRoute?.GetValueOrDefault(QuarterEngine.NormalizedPairKey(r.Origin, r.Destination)) ?? 0) > 0);
         var contestedRatio = contestedCount < MinimumTroubledRouteCountForSignal ? 0.0 : contestedCount / (double)routes.Count;
 
-        // "Fairly close to achieving the win condition" needs to mean
-        // genuinely close - a real 300-game sweep measured the first
-        // version of this signal (any region led at all, streak >= 1)
-        // driving this strategy's own selection in 13,104 of ~14,300
-        // evaluations, because leading even one region - often just the
-        // home region, an easy, early, unremarkable edge per M43/M44's
-        // own findings - was already enough to beat the other two
-        // strategies' cash-based scores almost every time (win rate
-        // 41.3%->29.7%, virtually unchanged by the unprofitable/contested
-        // count-floor fix above, which barely moved the needle). Fixed
-        // the same way "multiple unprofitable routes" was: require
-        // multiple regions (>= 2, not any single one) AND require each
-        // to be genuinely close to clinched (streak within one quarter
-        // of RequiredStreakQuarters), not merely led at all.
-        var deepLeadRegionCount = context.OwnRegionStreaks?.Values.Count(s => s >= WinConditionChecker.RequiredStreakQuarters - 1) ?? 0;
-        var winProximityRatio = deepLeadRegionCount < 2 ? 0.0 : Math.Min(1.0, deepLeadRegionCount / (double)WinConditionChecker.RequiredRegionCount);
-
-        return Math.Max(unprofitableRatio, Math.Max(contestedRatio, winProximityRatio));
+        return Math.Max(unprofitableRatio, contestedRatio);
     }
 
     public IReadOnlyList<QuarterOrder> DecideOrders(StrategyContext context)

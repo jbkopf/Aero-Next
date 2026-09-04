@@ -85,18 +85,16 @@ namespace AeroNext.Core.Ai;
 /// M54 each separately diagnosed and deferred — see AiRouteHistory's own
 /// doc comment for the full reasoning.
 ///
-/// M58: OwnRegionStreaks, one more one-quarter-lagged field (same
-/// convention as LastQuarterSeatsCarriedByRoute) — this airline's own
-/// current consecutive-quarter leadership streak
-/// (RegionalDominanceState.StreakFor) for each of HomeRegions.All,
-/// computed from the *previous* quarter's RegionalDominanceState (the
-/// only one available before this quarter's own per-airline loop runs
-/// — RegionalDominanceTracker.Advance itself only runs after every
-/// airline's StrategyContext this quarter has already been built). The
-/// missing win-condition-proximity signal no prior strategy has had
-/// access to; see WinConditionChecker for the real thresholds
-/// (RequiredRegionCount, RequiredStreakQuarters) a caller would compare
-/// this against.
+/// M58 (added, then removed): OwnRegionStreaks briefly existed here to
+/// back a "close to winning" strategy-selection signal
+/// (NetworkOptimizerStrategy's own original third Suitability trigger).
+/// A real 300-game sweep found that signal dominated the strategy's own
+/// selection 9-30x over the "network has real trouble" signal it was
+/// meant to complement, and drove NorthAmerica's bankruptcy rate from
+/// 20.8% to 65.0% — the opposite of the strategy's actual purpose. Removed
+/// entirely, confirmed via direct grep to have zero other consumers
+/// anywhere in the codebase before deletion — see
+/// docs/BASELINE_AI_ROADMAP.md's M58 section for the full evidence chain.
 /// </summary>
 public sealed record StrategyContext(
     IReadOnlyList<Route> CurrentRoutes,
@@ -116,5 +114,4 @@ public sealed record StrategyContext(
     IReadOnlyDictionary<(string OriginId, string DestinationId), int>? RivalCountByServedRoute = null,
     IReadOnlyDictionary<(string OriginId, string DestinationId), long>? LastQuarterSeatsCarriedByRoute = null,
     int QuarterNumber = 1,
-    IReadOnlyDictionary<(string OriginId, string DestinationId), AiRouteHistory>? RouteHistoryByPair = null,
-    IReadOnlyDictionary<Region, int>? OwnRegionStreaks = null);
+    IReadOnlyDictionary<(string OriginId, string DestinationId), AiRouteHistory>? RouteHistoryByPair = null);
