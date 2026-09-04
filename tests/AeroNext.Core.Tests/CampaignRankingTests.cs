@@ -83,4 +83,40 @@ public class CampaignRankingTests
         Assert.All(ranked, r => Assert.Equal(0, r.RegionsLed));
         Assert.All(ranked, r => Assert.Equal(0, r.TotalPassengersCarried));
     }
+
+    // --- M23 follow-up: DeclareWinner ---
+
+    [Fact]
+    public void DeclareWinner_PicksTopRankedEligibleAirline_SkippingAHigherRankedBankruptOne()
+    {
+        // "D" ranks first overall (richest), but it's bankrupt (not in
+        // eligibleAirlineNames) - the declared winner has to be an
+        // actual survivor, not just whoever ranks highest on paper.
+        var netWorth = new Dictionary<string, Money>
+        {
+            ["D"] = Money.FromDollars(1_000_000),
+            ["A"] = Money.FromDollars(500_000),
+            ["B"] = Money.FromDollars(100_000),
+        };
+        var ranked = CampaignRanking.Rank(RegionalDominanceState.Empty, EmptyMarket, netWorth);
+
+        var winner = CampaignRanking.DeclareWinner(ranked, new HashSet<string> { "A", "B" });
+
+        Assert.Equal("A", winner);
+    }
+
+    [Fact]
+    public void DeclareWinner_NoRankedAirlineIsEligible_ReturnsNull()
+    {
+        // Defensive - the real quarter loops never reach this method with
+        // an empty eligible set (that's WinConditionChecker's own
+        // mutual-elimination stalemate, handled earlier), but the method
+        // itself stays correct if ever called that way directly.
+        var netWorth = new Dictionary<string, Money> { ["A"] = Money.Zero, ["B"] = Money.Zero };
+        var ranked = CampaignRanking.Rank(RegionalDominanceState.Empty, EmptyMarket, netWorth);
+
+        var winner = CampaignRanking.DeclareWinner(ranked, new HashSet<string>());
+
+        Assert.Null(winner);
+    }
 }

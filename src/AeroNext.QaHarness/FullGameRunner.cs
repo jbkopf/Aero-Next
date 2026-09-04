@@ -118,6 +118,7 @@ public static class FullGameRunner
         string? winner = null;
         int? winQuarter = null;
         CompetitiveMarketResult? lastMarket = null;
+        IReadOnlySet<string> lastEligibleNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         for (var q = 1; q <= quarters; q++)
         {
@@ -433,20 +434,42 @@ public static class FullGameRunner
 
             lastMarket = market;
 
-            var eligibleNames = names.Where(n => !finances[n].IsBankrupt).ToHashSet(StringComparer.OrdinalIgnoreCase);
-            dominanceState = RegionalDominanceTracker.Advance(dominanceState, market, eligibleNames);
+            lastEligibleNames = names.Where(n => !finances[n].IsBankrupt).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            dominanceState = RegionalDominanceTracker.Advance(dominanceState, market, lastEligibleNames);
 
-            var checkedWinner = WinConditionChecker.CheckWinner(dominanceState);
+            var checkedWinner = WinConditionChecker.CheckWinner(dominanceState, lastEligibleNames);
             if (checkedWinner is not null)
             {
                 winner = checkedWinner;
                 winQuarter = q;
                 break;
             }
+
+            if (lastEligibleNames.Count == 0)
+            {
+                // Every remaining airline went bankrupt this exact
+                // quarter - a real stalemate, nobody left to declare a
+                // winner from. See WinConditionChecker's own doc comment.
+                break;
+            }
         }
 
         var finalCash = names.ToDictionary(n => n, n => finances[n].CashBalance);
         var netWorth = names.ToDictionary(n => n, n => finances[n].CashBalance - finances[n].DebtBalance);
+
+        if (winner is null && lastEligibleNames.Count > 0)
+        {
+            // The campaign ran its full course (or ended on mutual
+            // elimination, in which case lastEligibleNames is empty and
+            // this is correctly skipped) with 2+ solvent airlines and no
+            // dominance/sole-survivor winner - declare one from the same
+            // ranking CampaignRanking already produces, per the user's
+            // own direction. See CampaignRanking.DeclareWinner.
+            var ranking = CampaignRanking.Rank(dominanceState, lastMarket!, netWorth);
+            winner = CampaignRanking.DeclareWinner(ranking, lastEligibleNames);
+            winQuarter = winner is not null ? quarters : null;
+        }
+
         var finalRanking = winner is null
             ? CampaignRanking.Rank(dominanceState, lastMarket!, netWorth).Select(r => r.AirlineName).ToList()
             : new List<string> { winner };

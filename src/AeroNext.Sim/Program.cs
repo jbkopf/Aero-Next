@@ -702,6 +702,7 @@ var campaignDominance = RegionalDominanceState.Empty;
 string? campaignWinner = null;
 int? campaignWinQuarter = null;
 CompetitiveMarketResult? campaignLastMarket = null;
+IReadOnlySet<string> campaignLastEligible = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
 for (var q = 1; q <= campaignQuarters; q++)
 {
@@ -773,17 +774,22 @@ for (var q = 1; q <= campaignQuarters; q++)
 
     campaignLastMarket = campaignMarket;
 
-    var campaignEligible = campaignAirlineNames.Where(n => !campaignFinances[n].IsBankrupt).ToHashSet(StringComparer.OrdinalIgnoreCase);
-    campaignDominance = RegionalDominanceTracker.Advance(campaignDominance, campaignMarket, campaignEligible);
+    campaignLastEligible = campaignAirlineNames.Where(n => !campaignFinances[n].IsBankrupt).ToHashSet(StringComparer.OrdinalIgnoreCase);
+    campaignDominance = RegionalDominanceTracker.Advance(campaignDominance, campaignMarket, campaignLastEligible);
 
-    var checkedCampaignWinner = WinConditionChecker.CheckWinner(campaignDominance);
+    var checkedCampaignWinner = WinConditionChecker.CheckWinner(campaignDominance, campaignLastEligible);
     if (checkedCampaignWinner is not null)
     {
         campaignWinner = checkedCampaignWinner;
         campaignWinQuarter = q;
     }
 
-    if (!checkpoints.Contains(q) && campaignWinner is null)
+    // Every remaining airline going bankrupt the same quarter is a real
+    // stalemate (nobody left to declare a winner from) - a deciding
+    // quarter worth printing, same as a real win, not silently skipped.
+    var isMutualElimination = campaignWinner is null && campaignLastEligible.Count == 0;
+
+    if (!checkpoints.Contains(q) && campaignWinner is null && !isMutualElimination)
     {
         continue;
     }
@@ -802,6 +808,12 @@ for (var q = 1; q <= campaignQuarters; q++)
         Console.WriteLine($"  *** {campaignWinner} WINS: led {WinConditionChecker.RequiredRegionCount}+ regions for {WinConditionChecker.RequiredStreakQuarters}+ consecutive quarters, as of quarter {campaignWinQuarter} ***");
         break;
     }
+
+    if (isMutualElimination)
+    {
+        Console.WriteLine("  *** Every remaining airline is bankrupt - true stalemate, nobody left to declare a winner from ***");
+        break;
+    }
 }
 
 if (campaignWinner is null)
@@ -809,8 +821,24 @@ if (campaignWinner is null)
     var campaignNetWorth = campaignAirlineNames.ToDictionary(n => n, n => campaignFinances[n].CashBalance - campaignFinances[n].DebtBalance);
     var campaignRanking = CampaignRanking.Rank(campaignDominance, campaignLastMarket!, campaignNetWorth);
 
-    Console.WriteLine();
-    Console.WriteLine("Timeline ended with no win-condition winner - final ranking:");
+    // The timeline ran its full course (or ended on mutual elimination,
+    // in which case campaignLastEligible is empty and this correctly
+    // stays null) with 2+ solvent airlines and no dominance/sole-survivor
+    // winner - declare one from the same ranking, per the user's own
+    // direction. See CampaignRanking.DeclareWinner.
+    campaignWinner = CampaignRanking.DeclareWinner(campaignRanking, campaignLastEligible);
+
+    if (campaignWinner is not null)
+    {
+        Console.WriteLine();
+        Console.WriteLine($"  *** {campaignWinner} WINS by final ranking: timeline ended with no dominance winner, but led on regions/passengers/net worth among the {campaignLastEligible.Count} still-solvent airlines ***");
+    }
+    else
+    {
+        Console.WriteLine();
+        Console.WriteLine("Timeline ended in a true stalemate (every remaining airline bankrupt) - final ranking:");
+    }
+
     for (var i = 0; i < campaignRanking.Count; i++)
     {
         var r = campaignRanking[i];

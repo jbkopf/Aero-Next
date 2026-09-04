@@ -39,4 +39,21 @@ public static class CampaignRanking
             .ThenBy(r => r.AirlineName, StringComparer.Ordinal)
             .ToList();
     }
+
+    /// <summary>
+    /// M23 follow-up: converts this informational, everyone-included
+    /// ranking into an actual declared winner — the highest-ranked
+    /// airline that's still actually eligible (not bankrupt). By the
+    /// time either real quarter loop reaches this (post-loop, no
+    /// dominance/sole-survivor winner was ever found —
+    /// see WinConditionChecker.CheckWinner), eligibleAirlineNames.Count
+    /// is guaranteed >= 2 (0 or 1 would already have ended the campaign
+    /// earlier) — filtered explicitly anyway rather than relying on that
+    /// invariant alone, since Rank's own output always includes every
+    /// airline in netWorthByName regardless of bankruptcy (its own
+    /// existing, tested, informational contract — deliberately untouched
+    /// by this method).
+    /// </summary>
+    public static string? DeclareWinner(IReadOnlyList<RankedAirline> ranking, IReadOnlySet<string> eligibleAirlineNames) =>
+        ranking.FirstOrDefault(r => eligibleAirlineNames.Contains(r.AirlineName))?.AirlineName;
 }

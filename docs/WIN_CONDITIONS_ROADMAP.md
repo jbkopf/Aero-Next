@@ -172,6 +172,67 @@ invariant violations from the new mechanism.
 
 ---
 
+## M23 follow-up — declare a real winner instead of a stalemate whenever possible ✅
+
+**Origin:** the user's own direct request, surfaced from a real
+observation: a 300-game sweep during unrelated `BaselineAi` work found
+94.7% of games ran the full 244 quarters and ended as a pure stalemate
+(`Winner` staying `null`) even with 2+ solvent airlines still genuinely
+contesting the game — `CampaignRanking` already ranked them "closest to
+winning," but nothing ever converted that ranking into an actual
+declared outcome. The user's own direction: whenever the campaign
+reaches its end (or a point where only one airline remains) without a
+real dominance winner, declare one — keeping `CampaignRanking`'s own
+existing tie-break order (regions led, then passengers carried, then net
+worth) exactly as-is, not passengers carried alone. A true stalemate
+should now only happen if every remaining airline goes bankrupt in the
+same quarter.
+
+**Shipped, two real additions, no change to the dominance condition or
+`CampaignRanking.Rank`'s own tested contract:**
+1. `WinConditionChecker.CheckWinner` gained a second win path, checked
+   every quarter alongside the existing dominance check — the instant
+   only one airline remains solvent ("at any point," not just at
+   campaign's end), that airline wins outright, whether or not it
+   independently ever satisfied the 3-region/4-quarter condition (not
+   guaranteed even for a sole survivor — e.g. a home-region-only airline
+   that never expanded). Both real quarter loops (`FullGameRunner.cs`,
+   `AeroNext.Sim/Program.cs`) now also break early on true mutual
+   elimination (every remaining airline bankrupt the same quarter),
+   mirroring the existing "stop the instant the outcome is decided"
+   pattern rather than wastefully simulating a frozen game to 244.
+2. A new `CampaignRanking.DeclareWinner(ranking, eligibleAirlineNames)`
+   converts the existing informational ranking into an actual declared
+   winner — the highest-ranked airline that's still actually solvent,
+   filtered explicitly rather than trusting the invariant that 0-or-1
+   survivors would already have ended the campaign earlier. Both real
+   quarter loops call it in their own post-loop tail, only when `Winner`
+   is still `null` there.
+
+**Measured: the stalemate rate genuinely collapsed, with zero effect on
+the underlying simulation.** Real 300-game sweep: stalemate rate
+94.7%→**0%** (300/300 now declare a real winner) — bankruptcy rates are
+statistically unchanged (NorthAmerica 75.2%→74.5%, noise-level, exactly
+as expected since nothing about bankruptcy or the sim's own economics
+changed). Average win quarter rose sharply (56.4→210.7), since most
+outcomes are now decided by the end-of-campaign ranking fallback rather
+than an early, rare, true 3-region dominance win. The win-share
+distribution is far richer as a direct result: EastAsia 50.7%, Europe
+24.7%, NorthAmerica 12.7%, SouthWestAsia/AustralAsia/SouthAmerica
+3.7-4.3% each — instead of the old picture, where EastAsia held
+80-90%+ of the tiny handful of real dominance wins and every other
+region's "win share" was near-meaningless noise over a handful of games.
+
+**What this means for every win-rate figure discussed anywhere earlier
+in this project's own history:** they used the *old* definition (a
+declared `Winner` meant a genuine 3-region dominance win only). Under
+this change, "win rate" now means "the campaign resolved to a real,
+declared outcome" — expect it near 100% going forward, and read
+`WinShare%`/`RegionsLed`/average-win-quarter as the meaningful
+comparison axes instead, not raw win-rate-as-a-percentage.
+
+---
+
 ## Kept in mind, not scheduled
 
 - **Difficulty tiers** (varying `RequiredRegionCount`, and possibly
