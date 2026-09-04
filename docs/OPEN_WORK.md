@@ -33,9 +33,14 @@ Suitability comparison that structurally disqualified
 `DomesticProfitOptimizerStrategy` for 90.3% of mid/late-game selections —
 see `BASELINE_AI_ROADMAP.md`'s own M58 section for the full evidence
 chain). NorthAmerica's own bankruptcy rate improved only marginally
-(85.0%→83.9%) even after the real fix landed — traced to a *separate*,
-already-tracked regional-demand-shock issue, not a remaining defect in
-this milestone; see the Active priority section below. **M61-M64 shipped
+(85.0%→83.9%) even after the real fix landed. **A follow-up round dug
+into why and found a real, distinct defect** (not the regional-demand-shock
+issue it was first assumed to be): `NetworkOptimizerStrategy`'s own
+new-pair opening had no real cash discipline, letting NorthAmerica's
+dense city pool drive its network to more than double in size right
+before the 1979 oil shock. Fixed (83.9%→80.7%) — see the Active priority
+section below for the full evidence chain and the new, later bankruptcy
+cluster (years 33-35) this surfaced as the next lead. **M61-M64 shipped
 a real, active, known regression** — see the Active priority section
 below for the full picture; this is not the same kind of "clean and done"
 as the other ranges listed here. Update this line the moment a new
@@ -309,33 +314,36 @@ question. The smaller, still-unexplained EastAsia regional shift (present
 even in the healthy `RapidExpansionStrategy`-only state) is a real,
 separate follow-up once the primary collapse is fixed.
 
-**A seventh round, `BASELINE_AI_ROADMAP.md`'s M58, surfaces a concrete new
-lead for NorthAmerica specifically — a live follow-up target, not a
-mystery.** M58 (`NetworkOptimizerStrategy`, resumed and fixed through
-three real regression rounds — see its own write-up) recovered
+**A seventh round, `BASELINE_AI_ROADMAP.md`'s M58, surfaced a concrete
+NorthAmerica lead, then an eighth round (M58 follow-up) traced and
+partially fixed it — real progress, with a fresh, still-open cluster
+found in the process, not the original regional-demand-shock imbalance
+this section otherwise tracks.** M58 itself (`NetworkOptimizerStrategy`,
+resumed and fixed through three real regression rounds) recovered
 Europe/SouthWestAsia/AustralAsia/SouthAmerica meaningfully but left
-NorthAmerica's bankruptcy rate almost unchanged (85.0%→83.9%). Direct
-measurement in the same 300-game sweep: **51.7% of all 230 NorthAmerica
-bankruptcies (119) land in a single 10-quarter window, Q101-110 (years
-26-28, 1980-82) — immediately after the 1979 second oil shock (Q97)** —
-plus a secondary 17.8% (41) at Q131-140 (years 33-35). This is the same
-pattern this session's very first investigation already found (before
-M58's own strategy-selection work began): NorthAmerica's own
-unprofitable-route share jumps permanently after each authored oil-shock
-event and never recovers, while EastAsia stays comparatively immune,
-attributed to M63's uneven regional `HubQuality`-driven demand buffer.
-**This is squarely the same regional-demand-shock imbalance this whole
-section already tracks** (see the sequencing note at the bottom of this
-document — the old "wait for dynamic demand" deferral was lifted
-2026-08-31, so this is unblocked, active work, not gated on anything).
-Concrete next step for whoever picks this up: trace why NorthAmerica's
-own network specifically fails to absorb the 1979 shock's demand
-contraction where other regions do — candidates include M63's
-`HubQuality` asymmetry (already suspected for EastAsia's own immunity),
-NorthAmerica's own dense-network profile interacting badly with a
-global demand multiplier drop, or something route-opening-side not yet
-isolated. Not chased further in M58 itself, which correctly stayed
-scoped to the strategy-selection defect it was fixing.
+NorthAmerica's bankruptcy rate almost unchanged (85.0%→83.9%), clustered
+51.7% in a single 10-quarter window right after the 1979 oil shock. Real
+per-quarter instrumentation (not the demand model — `GravityDemandModel`'s
+own global shock multiplier applies identically to every region) found
+the actual cause: `NetworkOptimizerStrategy`'s own step 3 (new pair) had
+no real cash discipline, so NorthAmerica's uniquely dense 22-city pool
+(M44) let its network more than double in size (routes 5.3→12.0, fleet
+7.1→15.0) in the years leading straight into the shock, draining cash
+from $372.9M to $106.3M funding it. **Fixed** (`BASELINE_AI_ROADMAP.md`'s
+own M58-follow-up section has the full evidence chain, including a first
+attempt that measurably made things worse before the real fix landed):
+opening a brand-new pair now only happens with real, committed capital,
+never an ungated lease fallback. Genuinely flattens the growth curve and
+eliminates the collapse-exactly-at-the-shock pattern — but only moves the
+aggregate number 83.9%→**80.7%**, because the bankruptcy wave **shifted
+later** rather than disappearing: 55.7% of all NorthAmerica bankruptcies
+(123/221) now cluster at years 33-35, a window with **no authored
+historical shock at all**. **This new cluster is the live follow-up
+target** — concrete next step: the same per-quarter fleet/route/cash
+diagnostic approach (years 30-40 this time), to find what NorthAmerica's
+network is doing differently there without an external shock forcing it.
+By explicit user decision, the fix shipped now rather than blocking on
+this next round.
 
 ---
 

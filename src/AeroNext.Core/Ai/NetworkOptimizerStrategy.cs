@@ -64,6 +64,45 @@ namespace AeroNext.Core.Ai;
 /// } only - so this strategy is now the sole eligible one for MidGame and
 /// LateGame, chosen unconditionally at the year-11 boundary. See
 /// docs/BASELINE_AI_ROADMAP.md's M58 section for the full evidence chain.
+///
+/// M58 follow-up: even with selection fixed, NorthAmerica's own
+/// bankruptcy rate barely moved (85.0%→83.9%) - traced to this class's
+/// own step 3 (new pair), not selection. NorthAmerica's uniquely dense
+/// 22-city pool (M44) means step 3 - deliberately uncapped, see the
+/// class doc comment above - always has another candidate, so it never
+/// goes rare there the way the design assumed: a real 100-game
+/// diagnostic found NorthAmerica's own network more than doubling
+/// (routes 5.3→12.0, fleet 7.1→15.0) between years 18-26 while every
+/// other region stayed flat, cash draining $372.9M→$106.3M funding it,
+/// right into the 1979 oil shock (year ~24.75). A second diagnostic
+/// (real cost lines from QuarterlyStatement) found this is two-stage:
+/// purchases front-load into years 20-23 then hit $0 (capacity
+/// exhausted), but growth doesn't stop - leased-unit count and lease
+/// spend both jump right as purchases stop, because the new-pair lease
+/// fallback had no cash gate at all, only an action-budget one.
+///
+/// First fix attempt: a stricter purchase-comfort multiplier
+/// (NewPairCashComfortMultiplier, below) plus a *separate*, lease-fee-based
+/// comfort gate on the lease fallback. Measured, and found to make
+/// things *worse* - NorthAmerica's fleet ended up bigger (15.1 vs. 14.9
+/// by year 26) and cash lower ($93.1M vs. $106.3M) than before this fix
+/// existed at all. Root cause: a lease-fee-based bar (6 quarters of a
+/// 4%/quarter fee) is only 0.24x the aircraft's own price - 25x weaker
+/// than the purchase bar - so raising the purchase bar alone just made
+/// leasing *relatively* easier to reach, and leasing is the worse
+/// long-run deal (permanent recurring cost vs. one-time purchase), so
+/// more growth funneled into the worse channel instead of slowing down.
+/// A same-price-basis bar for both was tried next, but that makes the
+/// lease branch's own condition a strict subset of the purchase
+/// condition it's checked after - provably unreachable, not just
+/// stricter - so the lease fallback for step 3 specifically is removed
+/// outright instead of left as dead code behind an always-false gate:
+/// opening a brand-new, unproven pair now only ever happens with real,
+/// committed capital (NewPairComfortableOrderCost), never CLAUDE.md's
+/// own "expensive instant-metal escape hatch." Step 2 (grow an existing,
+/// already-flying route, including its own lease fallback) is
+/// deliberately untouched throughout - a lower-risk action reinforcing
+/// proven demand, not an open bet on a new one.
 /// </summary>
 public sealed class NetworkOptimizerStrategy : IAiStrategy
 {
@@ -114,6 +153,24 @@ public sealed class NetworkOptimizerStrategy : IAiStrategy
     /// trouble under the old same-quarter check.
     /// </summary>
     private const int MinimumSustainedUnprofitableQuarters = 2;
+
+    /// <summary>
+    /// M58 follow-up (proposed, tunable) - stricter than BaselineAi's
+    /// shared ComfortableOrderCost (3x), mirroring RapidExpansionStrategy's
+    /// own precedent of overriding the shared multiplier for its own risk
+    /// posture (that one lower, 2x, for a more aggressive strategy; this
+    /// one higher, for a more cautious one). Real 100-game diagnostic
+    /// evidence: NorthAmerica's own dense city pool let step 3 (new pair)
+    /// keep finding "affordable" purchases for years under the old 3x bar
+    /// - aggregate purchase spend front-loaded into years 20-23 alone
+    /// ($130.6M→$3,349.4M→$6,180.0M→$2,880.0M by year), draining cash
+    /// from $372.9M (year 20) to $106.3M (year 26) right before the 1979
+    /// oil shock. Scoped to step 3 only, not step 2 (growing an existing,
+    /// already-flying route) - see the class doc comment.
+    /// </summary>
+    private const int NewPairCashComfortMultiplier = 6;
+
+    private static Money NewPairComfortableOrderCost(AircraftType type) => type.Cost * NewPairCashComfortMultiplier;
 
     /// <summary>
     /// Combined via Math.Max, not a weighted sum - either signal alone is
@@ -247,21 +304,19 @@ public sealed class NetworkOptimizerStrategy : IAiStrategy
                     ? (Origin: newOrigin, Destination: newDestination)
                     : ((City Origin, City Destination)?)null;
 
+                // M58 follow-up: no lease fallback here (unlike step 2, and
+                // unlike this same search's own idle-fleet branch above) -
+                // see the class doc comment for the real evidence chain.
+                // Opening a brand new, unproven pair only happens with
+                // real, committed capital now; without it, step 3 does
+                // nothing this quarter rather than reaching for CLAUDE.md's
+                // own "expensive instant-metal escape hatch" on an
+                // unproven bet.
                 if (bestOrdered is not null && oriented is not null && context.AvailableCash is not null
-                    && FinancialState.CanAfford(context.AvailableCash.Value, BaselineAi.ComfortableOrderCost(bestOrdered.Value.Aircraft)))
+                    && FinancialState.CanAfford(context.AvailableCash.Value, NewPairComfortableOrderCost(bestOrdered.Value.Aircraft)))
                 {
                     orders.Add(new AircraftOrder(bestOrdered.Value.Aircraft, Quantity: 1));
                     spent += 1;
-                }
-                else if (bestOrdered is not null && oriented is not null && spent + 2 <= context.ActionCap
-                    && BaselineAi.HasSlotAtEveryGateway(oriented.Value.Origin, oriented.Value.Destination, context.AvailableSlotsByCity, slotsReservedByCity)
-                    && AiToolkit.HasRoomAtEveryCity(oriented.Value.Origin, oriented.Value.Destination, context.CityWideSlotsRemaining, citySpendReservedByCity))
-                {
-                    orders.Add(new LeaseAircraftOrder(bestOrdered.Value.Aircraft, Quantity: 1));
-                    orders.Add(new RouteOrder(oriented.Value.Origin, oriented.Value.Destination, bestOrdered.Value.Aircraft));
-                    BaselineAi.ReserveSlots(oriented.Value.Origin, oriented.Value.Destination, slotsReservedByCity);
-                    AiToolkit.ReserveCityWideSlots(oriented.Value.Origin, oriented.Value.Destination, citySpendReservedByCity);
-                    spent += 2;
                 }
             }
         }

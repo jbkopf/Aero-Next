@@ -1969,6 +1969,74 @@ the regional-balance effort in `docs/OPEN_WORK.md`, not this file.
 
 ---
 
+## M58 follow-up — NetworkOptimizerStrategy: new-pair cash discipline ✅
+
+**Origin:** the user's own direct follow-up — dig into *why* NorthAmerica
+specifically fails to recover from the 1979 oil shock, rather than leave
+it filed as a regional-balance mystery.
+
+**Root-caused with real per-quarter instrumentation, not guessed:** the
+1979 shock itself isn't region-specific — `GravityDemandModel.ForPair`
+applies its global multiplier identically everywhere. NorthAmerica's own
+network more than doubles between years 18-26 (routes 5.3→12.0, fleet
+7.1→15.0) while every other region stays flat, cash draining
+$372.9M→$106.3M funding it — squarely `NetworkOptimizerStrategy`'s own
+step 3 (new pair), which the M58 class doc comment always assumed would
+stay rare "by the time this strategy is selected" but never does for
+NorthAmerica's uniquely dense 22-city pool (M44). A second diagnostic
+(real cost lines from `QuarterlyStatement`) found the failure is
+two-stage: purchases front-load into years 20-23 then genuinely run out
+of comfortable headroom, but growth doesn't stop there — the new-pair
+lease fallback had **no cash gate at all**, only an action-budget one,
+and picks up exactly where purchasing leaves off, right through the
+shock window.
+
+**First fix attempt, measured and reverted:** a stricter 6x purchase-comfort
+multiplier (`NewPairCashComfortMultiplier`) plus a *separate* comfort
+gate on the lease fallback, sized against the lease's own recurring fee
+(6 quarters × 4%/quarter ≈ 0.24x the aircraft's price). This made things
+**worse** — NorthAmerica's fleet ended up *bigger* (15.1 vs. 14.9) and
+cash *lower* ($93.1M vs. $106.3M) than with no fix at all. The lease bar
+was 25x weaker than the purchase bar, so raising only the purchase side
+made leasing *relatively* easier to reach — and leasing is the worse
+long-run deal (permanent recurring cost vs. one-time purchase), so more
+growth funneled into the worse channel.
+
+**Shipped instead:** the lease fallback is removed from step 3 entirely,
+not re-gated — a same-price-basis bar for both branches would have made
+the lease branch's own condition a strict subset of the (already-checked)
+purchase condition, provably unreachable dead code, not just stricter.
+Opening a brand-new, unproven pair now only happens with real, committed
+capital (`NewPairComfortableOrderCost`, 6x price); without it, step 3
+does nothing that quarter rather than reaching for CLAUDE.md's own
+"expensive instant-metal escape hatch" on an unproven bet. Step 2 (grow
+an existing, already-flying route, including its own lease fallback) is
+deliberately untouched — a lower-risk action reinforcing proven demand,
+not an open bet on a new one.
+
+**Measured: a real, if partial, win.** The targeted mechanism is
+genuinely fixed — a fresh per-quarter trace shows fleet plateauing at
+10.8 (not ballooning to 15+), leased-unit count staying near zero the
+whole window (vs. climbing to 2.4+), and cash declining gently
+($356M→$153M by year 30) instead of crashing toward zero. The exact
+collapse-at-the-1979-shock pattern (a bankruptcy wave at years 26-28) is
+gone. But the aggregate NorthAmerica bankruptcy rate only moved 83.9%→**80.7%**
+(300-game sweep, win rate 7.0%→7.3%) — the bankruptcy wave didn't
+disappear, it **shifted later**: 55.7% of all NorthAmerica bankruptcies
+(123/221) now cluster at years 33-35, a window with no authored
+historical shock at all. The strategy still has no ceiling on cumulative
+long-run growth (only slower, more cash-disciplined per-transaction
+gates), so it eventually overextends itself again, just later and for a
+still-untraced reason.
+
+**What this doesn't close:** the year-33-35 cluster is a fresh, real,
+unexplained finding — filed in `docs/OPEN_WORK.md`'s Active priority
+section as the concrete next step, by the user's own explicit decision to
+ship this real improvement now and investigate that cluster as its own
+follow-up round, rather than block shipping on it.
+
+---
+
 ## Kept in mind, not scheduled
 
 - **`AllianceCourtOrder`** — deliberately excluded from every milestone

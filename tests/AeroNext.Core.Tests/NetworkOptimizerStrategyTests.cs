@@ -247,14 +247,18 @@ public class NetworkOptimizerStrategyTests
     }
 
     [Fact]
-    public void DecideOrders_NewPair_NothingIdle_CashComfortable_OrdersInsteadOfLeasing()
+    public void DecideOrders_NewPair_NothingIdle_CashComfortable_Orders()
     {
+        // M58 follow-up: NewPairCashComfortMultiplier (6x) is stricter
+        // than BaselineAi's shared 3x - $6,000,000 is exactly 6x this
+        // $1M aircraft, so this proves "genuinely comfortable -> buys"
+        // against the new, real threshold.
         var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
         var near = MakeCity("near", Region.NorthAmerica, 1, 1, 90);
         var cities = new[] { home, near };
         var aircraft = new AircraftType("t", "Test", Seats: 10, RangeKm: 2000, Cost: Money.FromDollars(1_000_000));
 
-        var context = MakeContext(Array.Empty<Route>(), cities, new[] { aircraft }, Region.NorthAmerica, cash: Money.FromDollars(3_000_000));
+        var context = MakeContext(Array.Empty<Route>(), cities, new[] { aircraft }, Region.NorthAmerica, cash: Money.FromDollars(6_000_000));
 
         var orders = Strategy.DecideOrders(context);
 
@@ -265,8 +269,39 @@ public class NetworkOptimizerStrategyTests
     }
 
     [Fact]
-    public void DecideOrders_NewPair_NothingIdle_CashNotComfortable_LeasesInstead()
+    public void DecideOrders_NewPair_NothingIdle_CashNotComfortable_NoOp()
     {
+        // M58 follow-up: step 3's lease fallback was removed entirely
+        // (see the class doc comment - a same-bar lease gate would have
+        // been provably unreachable, and a weaker one measurably made
+        // things worse) - $500,000 falls short of NewPairComfortableOrderCost
+        // (6x $1M = $6,000,000), so step 3 now does nothing at all rather
+        // than leasing into an unproven pair, unlike before this fix.
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
+        var near = MakeCity("near", Region.NorthAmerica, 1, 1, 90);
+        var cities = new[] { home, near };
+        var aircraft = new AircraftType("t", "Test", Seats: 10, RangeKm: 2000, Cost: Money.FromDollars(1_000_000));
+
+        var context = MakeContext(Array.Empty<Route>(), cities, new[] { aircraft }, Region.NorthAmerica, cash: Money.FromDollars(500_000));
+
+        var orders = Strategy.DecideOrders(context);
+
+        Assert.Empty(orders.OfType<AircraftOrder>());
+        Assert.Empty(orders.OfType<LeaseAircraftOrder>());
+        Assert.Empty(orders.OfType<RouteOrder>());
+    }
+
+    [Fact]
+    public void DecideOrders_NewPair_NothingIdle_NullCash_NoOp()
+    {
+        // M58 follow-up: a deliberate departure from the permissive-
+        // default convention used elsewhere (e.g. AiToolkit.ApplyMarketingCampaign) -
+        // mirrors the sibling AircraftOrder branch's own existing
+        // "must confirm affordability" contract instead. Null AvailableCash
+        // never happens in real gameplay (FullGameRunner/AeroNext.Sim
+        // always populate it), so this only changes behavior for a
+        // genuinely unknown-cash caller, not a real one - regression-lock
+        // for that intentional change, not accidental.
         var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
         var near = MakeCity("near", Region.NorthAmerica, 1, 1, 90);
         var cities = new[] { home, near };
@@ -277,9 +312,8 @@ public class NetworkOptimizerStrategyTests
         var orders = Strategy.DecideOrders(context);
 
         Assert.Empty(orders.OfType<AircraftOrder>());
-        var lease = Assert.Single(orders.OfType<LeaseAircraftOrder>());
-        Assert.Equal("t", lease.Type.Id);
-        Assert.Single(orders.OfType<RouteOrder>());
+        Assert.Empty(orders.OfType<LeaseAircraftOrder>());
+        Assert.Empty(orders.OfType<RouteOrder>());
     }
 
     [Fact]
