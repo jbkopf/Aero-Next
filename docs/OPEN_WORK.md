@@ -572,16 +572,36 @@ un-scoped question if it's ever revisited.
 - ~~**Whether permanent, unrecoverable bankruptcy needs campaign-pacing
   revisiting**~~ — investigated directly (`BASELINE_AI_ROADMAP.md`'s own
   "Bankruptcy conditions" section): real 300-game instrumentation found
-  100% of bankruptcies are triggered by cash going negative (never the
-  $80M debt ceiling), almost always a slow, multi-quarter bleed with
-  plenty of warning. A new `AiToolkit.MaintainCashRunway` gives every
-  strategy a real borrowing lever before that point — real, substantial
-  fix for a fixable cash crunch (SouthAmerica bankruptcy 37.6%→10.5%),
-  honestly limited against a genuinely structural deficit (NorthAmerica's
-  own oil-shock-era cluster stayed flat, 74.5%→74.1%) — bankruptcy
-  itself is still permanent once it actually happens; this doesn't add
-  reorganization, it prevents more of the *avoidable* cases from
-  happening in the first place.
+  100% of bankruptcies are triggered by cash going negative, almost always
+  a slow, multi-quarter bleed with plenty of warning. A new
+  `AiToolkit.MaintainCashRunway` gives every strategy a real borrowing
+  lever before that point — real, substantial fix for a fixable cash
+  crunch (SouthAmerica bankruptcy 37.6%→10.5%), honestly limited against a
+  genuinely structural deficit (NorthAmerica's own oil-shock-era cluster
+  stayed flat, 74.5%→74.1%). **The "Bankruptcy conditions follow-up"
+  section closes the gap this left: cash going negative no longer freezes
+  the same quarter it happens** — a one-quarter grace (`FinancialState.InDistress`)
+  gives the airline's very next turn a real chance to react before
+  `IsBankrupt` can ever become true, and the $80M debt ceiling stopped
+  being a bankruptcy trigger at all — it's now a cap enforced at the loan
+  request itself (`QuarterEngine.RunQuarter` rejects an over-ceiling
+  `RefinanceOrder` outright), with `FinancialResolver.RemainingBorrowingCapacity`
+  the real, queryable headroom a future loan-request UI would show.
+  Measured: no regression, Europe's own bankruptcy rate improved further
+  (18.3%→10.7%), every other region moved little or not at all — exactly
+  the structural-vs-fixable split the original investigation already
+  drew. Bankruptcy itself is still permanent once it actually happens;
+  this doesn't add reorganization, it gives more of the *avoidable* cases
+  one more real chance before that point.
+- **Distress-aware AI reaction** — deliberately deferred alongside the
+  grace-period fix above: no strategy yet reacts to `FinancialState.InDistress`
+  by proactively closing a weak route or retiring an idle aircraft: the
+  grace period today relies entirely on `MaintainCashRunway`'s existing
+  unconditional borrow-to-runway logic (which now actually gets applied
+  during the grace quarter instead of being discarded). A real starting
+  point for whoever picks this up: `CloseRouteOrder`/`RetireAircraftOrder`
+  are both already free, Private actions with no code gap to close, only
+  AI judgment for *when* to reach for them over borrowing.
 
 ### `HISTORICAL_DYNAMICS_ROADMAP.md`
 - **Gate capacity growing over time** — done, via

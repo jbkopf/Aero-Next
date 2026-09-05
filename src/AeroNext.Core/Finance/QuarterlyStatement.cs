@@ -33,6 +33,13 @@ namespace AeroNext.Core.Finance;
 /// per-quarter charge for however many executives are already on staff)
 /// get the same treatment — both fold into NetIncome, both broken out on
 /// their own line.
+///
+/// Bankruptcy-conditions follow-up: InDistress mirrors FinancialState's
+/// own field of the same name — true when this quarter ended cash
+/// negative but hasn't (yet) triggered IsBankrupt, the one-quarter grace
+/// window. Broken out here, not just left on FinancialState, so a caller
+/// (or future UI) can see the warning from the statement alone, the same
+/// legibility treatment every other line on this record already gets.
 /// </summary>
 public sealed record QuarterlyStatement(
     Money Revenue,
@@ -51,4 +58,5 @@ public sealed record QuarterlyStatement(
     Money SalaryCost = default,
     Money MarketingCost = default,
     Money ExecutiveHiringCost = default,
-    Money ExecutiveSalaryCost = default);
+    Money ExecutiveSalaryCost = default,
+    bool InDistress = default);

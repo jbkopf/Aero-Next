@@ -38,14 +38,46 @@ public static class FinancialResolver
 {
     /// <summary>
     /// M23: closes a real gap found while designing the win condition —
-    /// RefinanceOrder has no limit, so without this an airline could stay
+    /// RefinanceOrder had no limit, so without this an airline could stay
     /// technically solvent forever by borrowing just enough cash each
     /// quarter, regardless of how deep its debt hole actually is. A flat
     /// ceiling, not scaled per airline's own starting cash (which varies
     /// by RegionalEconomics.Factor) — keeps this resolver self-contained
     /// rather than coupling it to AeroNext.Core.Setup for one constant.
+    ///
+    /// Bankruptcy-conditions follow-up: this used to also be a direct
+    /// bankruptcy trigger here in Resolve (debt ending the quarter above
+    /// this line meant instant IsBankrupt, even with positive cash) —
+    /// removed. Enforcement moved earlier, to the loan request itself:
+    /// QuarterEngine.RunQuarter now rejects a RefinanceOrder outright if
+    /// it would push debt past this ceiling (mirroring PayDownDebtOrder's
+    /// own "rejected outright, not silently clamped" convention), so
+    /// DebtBalance can no longer drift past it at all — principal
+    /// repayment only ever shrinks it, applied borrowing is the only thing
+    /// that grows it. The constant's purpose (stop infinite borrowing) is
+    /// unchanged; only *how* it's enforced moved from punishing the whole
+    /// airline after the fact to rejecting the specific over-limit ask.
+    /// See RemainingBorrowingCapacity below for the queryable headroom a
+    /// loan-request UI would show.
     /// </summary>
     public const long DebtCeilingDollars = 80_000_000;
+
+    /// <summary>
+    /// Bankruptcy-conditions follow-up: the one named, testable source of
+    /// truth for "how much more can this airline borrow before hitting
+    /// DebtCeilingDollars" — what a real loan-request UI would show the
+    /// player, and what QuarterEngine.RunQuarter's own RefinanceOrder
+    /// validation checks against. Floors at Money.Zero rather than going
+    /// negative for an airline already at or past the ceiling (shouldn't
+    /// happen going forward now that borrowing past it is rejected at the
+    /// source, but stays a sane answer rather than a nonsensical negative
+    /// one if it ever does).
+    /// </summary>
+    public static Money RemainingBorrowingCapacity(Money currentDebtBalance)
+    {
+        var headroom = Money.FromDollars(DebtCeilingDollars) - currentDebtBalance;
+        return headroom > Money.Zero ? headroom : Money.Zero;
+    }
 
     /// <summary>
     /// M26: recurring fee on every currently-leased unit, charged every
@@ -179,10 +211,21 @@ public static class FinancialResolver
 
         var netIncome = revenue - operatingCost - debtService - purchaseCost - leaseFee + retirementProceeds - negotiationBidCost - salaryCost - marketingCost - executiveHiringCost - executiveSalaryCost;
         var cashAfter = state.CashBalance + borrowed - manualPaydown + netIncome;
-        var isBankrupt = cashAfter < Money.Zero || finalDebtBalance > Money.FromDollars(DebtCeilingDollars);
 
-        var newState = state with { CashBalance = cashAfter, DebtBalance = finalDebtBalance, IsBankrupt = isBankrupt };
-        var statement = new QuarterlyStatement(revenue, operatingCost, debtService, borrowed, netIncome, cashAfter, isBankrupt, purchaseCost, leaseFee, retirementProceeds, negotiationBidCost, principalRepayment, manualPaydown, salaryCost, marketingCost, executiveHiringCost, executiveSalaryCost);
+        // Bankruptcy-conditions follow-up: cash negative no longer freezes
+        // the same quarter it happens - the airline's very next turn gets
+        // a real chance to react (borrow, sell aircraft, close/shrink a
+        // route - all free, Private actions) before this actually bites.
+        // Only cash negative *again* while already InDistress from last
+        // quarter's crossing becomes real bankruptcy; recovering to >= 0
+        // at any point clears InDistress instead. See FinancialState's own
+        // doc comment for the full rule.
+        var isCashNegative = cashAfter < Money.Zero;
+        var isBankrupt = isCashNegative && state.InDistress;
+        var newInDistress = isCashNegative && !isBankrupt;
+
+        var newState = state with { CashBalance = cashAfter, DebtBalance = finalDebtBalance, IsBankrupt = isBankrupt, InDistress = newInDistress };
+        var statement = new QuarterlyStatement(revenue, operatingCost, debtService, borrowed, netIncome, cashAfter, isBankrupt, purchaseCost, leaseFee, retirementProceeds, negotiationBidCost, principalRepayment, manualPaydown, salaryCost, marketingCost, executiveHiringCost, executiveSalaryCost, InDistress: newInDistress);
 
         return (newState, statement);
     }

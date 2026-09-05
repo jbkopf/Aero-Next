@@ -75,8 +75,15 @@ public class FinancialResolverTests
     }
 
     [Fact]
-    public void Resolve_CashGoesNegative_TriggersBankruptcy()
+    public void Resolve_CashGoesNegative_EntersDistress_NotYetBankrupt()
     {
+        // Bankruptcy-conditions follow-up: cash going negative no longer
+        // freezes the same quarter it happens - it enters a one-quarter
+        // grace (InDistress), giving the airline's very next turn a real
+        // chance to react (borrow, sell aircraft, close/shrink a route)
+        // before IsBankrupt can ever become true. See
+        // Resolve_CashStaysNegativeSecondQuarter_TriggersBankruptcy for
+        // what happens if nothing is done about it.
         var a = MakeCity("a", 0, 0, 1);
         var airline = new Airline("A", Array.Empty<Route>());
         var market = CompetitiveMarket.Resolve(new[] { airline }, new[] { a }, DemandModel);
@@ -84,22 +91,97 @@ public class FinancialResolverTests
 
         var (newState, statement) = FinancialResolver.Resolve(state, airline, market, Array.Empty<QuarterOrder>());
 
-        Assert.True(statement.IsBankrupt);
-        Assert.True(newState.IsBankrupt);
+        Assert.False(statement.IsBankrupt);
+        Assert.False(newState.IsBankrupt);
+        Assert.True(statement.InDistress);
+        Assert.True(newState.InDistress);
         Assert.True(newState.CashBalance < Money.Zero);
     }
 
     [Fact]
-    public void Resolve_DebtExceedsCeiling_TriggersBankruptcy_EvenWithPositiveCash()
+    public void Resolve_CashStaysNegativeSecondQuarter_TriggersBankruptcy()
     {
-        // M23: closes the infinite-refinance gap - without this trigger, an
-        // airline could stay technically solvent forever by borrowing just
-        // enough cash each quarter, no matter how deep its debt hole is.
-        // M29: the ceiling is now checked against the balance *after* this
-        // same quarter's automatic 5% principal repayment, so borrowing
-        // merely 1 dollar over the ceiling (the old amount here) no longer
-        // triggers it on its own - borrow comfortably past ceiling/0.95
-        // instead, so the post-repayment balance is still well over it.
+        // The other half of the grace period: cash negative *again*, with
+        // no corrective order changing that, while already InDistress from
+        // the prior quarter's crossing is what actually freezes it.
+        var a = MakeCity("a", 0, 0, 1);
+        var airline = new Airline("A", Array.Empty<Route>());
+        var market = CompetitiveMarket.Resolve(new[] { airline }, new[] { a }, DemandModel);
+        var state = FinancialState.Start(Money.FromDollars(100), Money.FromDollars(1_000_000), interestRatePerQuarter: 0.5);
+
+        var (afterFirstQuarter, _) = FinancialResolver.Resolve(state, airline, market, Array.Empty<QuarterOrder>());
+        var (afterSecondQuarter, secondStatement) = FinancialResolver.Resolve(afterFirstQuarter, airline, market, Array.Empty<QuarterOrder>());
+
+        Assert.True(afterFirstQuarter.InDistress);
+        Assert.False(afterFirstQuarter.IsBankrupt);
+        Assert.True(secondStatement.IsBankrupt);
+        Assert.True(afterSecondQuarter.IsBankrupt);
+    }
+
+    [Fact]
+    public void Resolve_CashRecoversWhileInDistress_ClearsDistress_NeverBankrupt()
+    {
+        // Recovering to non-negative cash at any point during the grace
+        // quarter clears InDistress instead of freezing - the airline is
+        // simply back to normal, not permanently flagged.
+        var a = MakeCity("a", 0, 0, 1);
+        var airline = new Airline("A", Array.Empty<Route>());
+        var market = CompetitiveMarket.Resolve(new[] { airline }, new[] { a }, DemandModel);
+        var distressedState = FinancialState.Start(Money.FromDollars(-500), Money.Zero, interestRatePerQuarter: 0.0) with { InDistress = true };
+
+        var (newState, statement) = FinancialResolver.Resolve(distressedState, airline, market, new QuarterOrder[] { new RefinanceOrder(Money.FromDollars(1_000)) });
+
+        Assert.False(statement.IsBankrupt);
+        Assert.False(newState.IsBankrupt);
+        Assert.False(statement.InDistress);
+        Assert.False(newState.InDistress);
+        Assert.True(newState.CashBalance >= Money.Zero);
+    }
+
+    [Fact]
+    public void Resolve_RetiringIdleAircraftDuringDistress_ResaleProceedsAvoidTheFreeze()
+    {
+        // "Selling aircraft" as a real recovery lever, exercised through
+        // Resolve's own existing fleet/retiredUnits parameters (no new
+        // production code) - retiring an idle unit both stops its ongoing
+        // (reduced) idle salary drag and credits an immediate
+        // RetirementResaleFraction of its purchase cost, same as any other
+        // quarter's retirement. Two idle CostlyAircraft units, already
+        // InDistress from a prior quarter: doing nothing keeps both
+        // idle-cost-bleeding and freezes; retiring one turns the same
+        // quarter solidly cash-positive instead.
+        var a = MakeCity("a", 0, 0, 1);
+        var airline = new Airline("A", Array.Empty<Route>());
+        var market = CompetitiveMarket.Resolve(new[] { airline }, new[] { a }, DemandModel);
+        var distressedState = FinancialState.Start(Money.FromDollars(-500), Money.Zero, interestRatePerQuarter: 0.0) with { InDistress = true };
+        var twoIdle = FleetLedger.ApplyDelivery(AirlineFleet.Empty, CostlyAircraft, quantity: 2, FleetOwnershipMode.Owned);
+
+        var (withoutRetiring, _) = FinancialResolver.Resolve(distressedState, airline, market, Array.Empty<QuarterOrder>(), fleet: twoIdle);
+
+        var oneIdleRemaining = AirlineFleet.Empty with { Units = new[] { twoIdle.Units[1] } };
+        var retiredUnit = new[] { twoIdle.Units[0] };
+        var (withRetiring, retiringStatement) = FinancialResolver.Resolve(distressedState, airline, market, new QuarterOrder[] { new RetireAircraftOrder(twoIdle.Units[0].Id) }, fleet: oneIdleRemaining, retiredUnits: retiredUnit);
+
+        Assert.True(withoutRetiring.IsBankrupt);
+        Assert.False(retiringStatement.IsBankrupt);
+        Assert.False(withRetiring.IsBankrupt);
+        Assert.False(withRetiring.InDistress);
+        Assert.True(withRetiring.CashBalance > Money.Zero);
+    }
+
+    [Fact]
+    public void Resolve_DebtExceedsCeiling_NoLongerTriggersBankruptcy_EnforcementMovedToQuarterEngine()
+    {
+        // Bankruptcy-conditions follow-up: the debt ceiling stopped being
+        // a bankruptcy trigger here in Resolve - it's now enforced earlier,
+        // at the loan request itself (QuarterEngine.RunQuarter rejects an
+        // over-ceiling RefinanceOrder outright - see QuarterEngineTests).
+        // Real production traffic never reaches this state (the order
+        // would already have been rejected upstream); this test documents
+        // Resolve's own boundary explicitly - it is deliberately permissive
+        // about debt level alone, on purpose, so nobody "helpfully"
+        // re-adds this check here without realizing enforcement already
+        // happens upstream.
         var a = MakeCity("a", 0, 0, 1);
         var airline = new Airline("A", Array.Empty<Route>());
         var market = CompetitiveMarket.Resolve(new[] { airline }, new[] { a }, DemandModel);
@@ -108,14 +190,17 @@ public class FinancialResolverTests
 
         var (newState, statement) = FinancialResolver.Resolve(state, airline, market, orders);
 
-        Assert.True(newState.CashBalance > Money.Zero); // cash alone would not have triggered it
-        Assert.True(statement.IsBankrupt);
-        Assert.True(newState.IsBankrupt);
+        Assert.True(newState.CashBalance > Money.Zero);
+        Assert.True(newState.DebtBalance > Money.FromDollars(FinancialResolver.DebtCeilingDollars)); // over the ceiling...
+        Assert.False(statement.IsBankrupt); // ...but Resolve itself no longer cares
+        Assert.False(newState.IsBankrupt);
     }
 
     [Fact]
     public void Resolve_DebtAtOrBelowCeiling_DoesNotTriggerBankruptcy_OnDebtAlone()
     {
+        // Debt level alone never triggers bankruptcy in Resolve any more,
+        // at the ceiling or otherwise - see the test above for why.
         var a = MakeCity("a", 0, 0, 1);
         var airline = new Airline("A", Array.Empty<Route>());
         var market = CompetitiveMarket.Resolve(new[] { airline }, new[] { a }, DemandModel);
@@ -169,19 +254,42 @@ public class FinancialResolverTests
     }
 
     [Fact]
-    public void Resolve_Refinancing_CanAvoidBankruptcy_ThatWouldOtherwiseTrigger()
+    public void Resolve_RefinancingDuringDistressQuarter_AvoidsTheFreezeThatWouldOtherwiseTrigger()
     {
+        // The flagship "the opportunity to fix it" case: already InDistress
+        // from a prior quarter (this quarter's own crossing would
+        // otherwise freeze it), borrowing during this exact grace quarter
+        // pulls cash back to non-negative and avoids the freeze entirely.
         var a = MakeCity("a", 0, 0, 1);
         var airline = new Airline("A", Array.Empty<Route>());
         var market = CompetitiveMarket.Resolve(new[] { airline }, new[] { a }, DemandModel);
-        var state = FinancialState.Start(Money.FromDollars(100), Money.FromDollars(10_000), interestRatePerQuarter: 0.1); // debt service = $1,000 > cash
+        var state = FinancialState.Start(Money.FromDollars(100), Money.FromDollars(10_000), interestRatePerQuarter: 0.1) with { InDistress = true }; // debt service = $1,000 > cash
 
         var (withoutRefinance, _) = FinancialResolver.Resolve(state, airline, market, Array.Empty<QuarterOrder>());
         var (withRefinance, statement) = FinancialResolver.Resolve(state, airline, market, new QuarterOrder[] { new RefinanceOrder(Money.FromDollars(5_000)) });
 
         Assert.True(withoutRefinance.IsBankrupt);
         Assert.False(withRefinance.IsBankrupt);
+        Assert.False(withRefinance.InDistress);
         Assert.False(statement.IsBankrupt);
+    }
+
+    [Fact]
+    public void RemainingBorrowingCapacity_UnderCeiling_ReturnsRealHeadroom()
+    {
+        var headroom = FinancialResolver.RemainingBorrowingCapacity(Money.FromDollars(FinancialResolver.DebtCeilingDollars - 1_000));
+
+        Assert.Equal(Money.FromDollars(1_000), headroom);
+    }
+
+    [Fact]
+    public void RemainingBorrowingCapacity_AtOrPastCeiling_FloorsAtZero_NeverNegative()
+    {
+        var atCeiling = FinancialResolver.RemainingBorrowingCapacity(Money.FromDollars(FinancialResolver.DebtCeilingDollars));
+        var pastCeiling = FinancialResolver.RemainingBorrowingCapacity(Money.FromDollars(FinancialResolver.DebtCeilingDollars + 1_000));
+
+        Assert.Equal(Money.Zero, atCeiling);
+        Assert.Equal(Money.Zero, pastCeiling);
     }
 
     [Fact]

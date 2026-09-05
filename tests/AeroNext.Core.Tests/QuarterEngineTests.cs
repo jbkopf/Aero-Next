@@ -1,4 +1,5 @@
 using AeroNext.Core.Airlines;
+using AeroNext.Core.Finance;
 using AeroNext.Core.Fleet;
 using AeroNext.Core.Turns;
 using AeroNext.Core.World;
@@ -1632,6 +1633,62 @@ public class QuarterEngineTests
         };
 
         var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, orders, Array.Empty<City>(), demandModel, currentDebtBalance: Money.FromDollars(10_000));
+
+        Assert.Single(result.AppliedOrders);
+        Assert.Single(result.RejectedOrders);
+    }
+
+    // --- Bankruptcy-conditions follow-up: debt ceiling as a borrowing cap, not a bankruptcy trigger ---
+
+    [Fact]
+    public void RunQuarter_RefinanceOrder_NoLimitsPassed_NeverRejected()
+    {
+        var demandModel = new GravityDemandModel();
+        var order = new RefinanceOrder(Money.FromDollars(FinancialResolver.DebtCeilingDollars * 10));
+
+        var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, Array.Empty<City>(), demandModel);
+
+        Assert.Single(result.AppliedOrders);
+        Assert.Empty(result.RejectedOrders);
+    }
+
+    [Fact]
+    public void RunQuarter_RefinanceOrder_ExceedingDebtCeiling_Rejected()
+    {
+        var demandModel = new GravityDemandModel();
+        var order = new RefinanceOrder(Money.FromDollars(10_000));
+
+        var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, Array.Empty<City>(), demandModel, currentDebtBalance: Money.FromDollars(FinancialResolver.DebtCeilingDollars - 9_999));
+
+        Assert.Empty(result.AppliedOrders);
+        Assert.Single(result.RejectedOrders);
+    }
+
+    [Fact]
+    public void RunQuarter_RefinanceOrder_ExactlyMatchingRemainingCeilingHeadroom_Applied()
+    {
+        var demandModel = new GravityDemandModel();
+        var order = new RefinanceOrder(Money.FromDollars(10_000));
+
+        var result = QuarterEngine.RunQuarter(
+            1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, Array.Empty<City>(), demandModel,
+            currentDebtBalance: Money.FromDollars(FinancialResolver.DebtCeilingDollars - 10_000));
+
+        Assert.Single(result.AppliedOrders);
+        Assert.Empty(result.RejectedOrders);
+    }
+
+    [Fact]
+    public void RunQuarter_TwoRefinanceOrders_SecondExceedsWhatFirstLeftOfCeilingHeadroom_Rejected()
+    {
+        var demandModel = new GravityDemandModel();
+        var orders = new QuarterOrder[]
+        {
+            new RefinanceOrder(Money.FromDollars(6_000)),
+            new RefinanceOrder(Money.FromDollars(6_000)),
+        };
+
+        var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, orders, Array.Empty<City>(), demandModel, currentDebtBalance: Money.FromDollars(FinancialResolver.DebtCeilingDollars - 10_000));
 
         Assert.Single(result.AppliedOrders);
         Assert.Single(result.RejectedOrders);

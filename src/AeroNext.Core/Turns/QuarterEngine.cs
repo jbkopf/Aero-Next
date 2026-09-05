@@ -99,20 +99,25 @@ public static class QuarterEngine
     /// </param>
     /// <param name="currentDebtBalance">
     /// Null (the default) preserves fully permissive behavior — a
-    /// PayDownDebtOrder is never rejected for exceeding the debt owed,
-    /// exactly as before this parameter existed. Passing a real amount
+    /// PayDownDebtOrder is never rejected for exceeding the debt owed, and
+    /// (bankruptcy-conditions follow-up) a RefinanceOrder is never
+    /// rejected for exceeding FinancialResolver.DebtCeilingDollars,
+    /// exactly as before either check existed. Passing a real amount
     /// (quarter-start DebtBalance, before this quarter's own automatic
-    /// interest/principal or RefinanceOrder borrowing) turns on
-    /// enforcement (M29): a PayDownDebtOrder whose Amount would exceed
-    /// what's left of it — after every already-applied paydown this
-    /// quarter — is rejected outright, the same "never attempt what will
-    /// predictably fail" principle availableCash already applies.
-    /// PayDownDebtOrder is gated by *both* this and availableCash
-    /// independently — it's rejected if it exceeds either. Validated
-    /// against the quarter-start balance only; a same-quarter
-    /// RefinanceOrder never increases how much can be paid down that same
-    /// quarter, since RefinanceOrder does no QuarterEngine-side processing
-    /// at all (resolved entirely in FinancialResolver, as always).
+    /// interest/principal) turns on enforcement for both orders
+    /// independently: a PayDownDebtOrder whose Amount would exceed what's
+    /// left of the balance (M29) — after every already-applied paydown
+    /// this quarter — is rejected outright, the same "never attempt what
+    /// will predictably fail" principle availableCash already applies;
+    /// and a RefinanceOrder whose AdditionalBorrowing would push the
+    /// balance — after every already-applied borrow this quarter — past
+    /// the ceiling is rejected outright the same way. PayDownDebtOrder is
+    /// additionally gated by availableCash — rejected if it exceeds
+    /// either. Both validated against the quarter-start balance only; a
+    /// same-quarter RefinanceOrder never increases how much can be paid
+    /// down, nor does a same-quarter PayDownDebtOrder ever increase how
+    /// much more can be borrowed — the two run their own independent
+    /// running totals (debtPaidDownSoFar, borrowedSoFar).
     /// </param>
     /// <param name="homeCity">
     /// Null (the default) preserves fully permissive behavior — a
@@ -202,6 +207,7 @@ public static class QuarterEngine
         var slotsSpentByCity = new Dictionary<string, int>();
         var autoSlotsSpentByCity = new Dictionary<string, int>();
         var debtPaidDownSoFar = Money.Zero;
+        var borrowedSoFar = Money.Zero;
         var networkMarketingAcceptedThisQuarter = false;
         var routeMarketingPairsAcceptedThisQuarter = new HashSet<(string, string)>();
         var executivesHiredThisQuarter = 0;
@@ -316,6 +322,30 @@ public static class QuarterEngine
                     rejected.Add(order);
                     continue;
                 }
+            }
+
+            if (order is RefinanceOrder refinanceOrder && currentDebtBalance is not null)
+            {
+                // Bankruptcy-conditions follow-up: the debt ceiling moved
+                // from a post-hoc bankruptcy trigger (FinancialResolver)
+                // to a cap enforced right here, at the loan request itself
+                // - same "rejected outright, not silently clamped"
+                // convention as PayDownDebtOrder just above. Validated
+                // against the quarter-start balance plus every
+                // already-applied RefinanceOrder this same batch, not a
+                // same-quarter PayDownDebtOrder's own paydown (mirroring
+                // PayDownDebtOrder's own doc comment: RefinanceOrder does
+                // no other QuarterEngine-side processing, so this is the
+                // one place it does).
+                var exceedsCeiling = currentDebtBalance.Value + borrowedSoFar + refinanceOrder.AdditionalBorrowing > Money.FromDollars(FinancialResolver.DebtCeilingDollars);
+
+                if (exceedsCeiling)
+                {
+                    rejected.Add(order);
+                    continue;
+                }
+
+                borrowedSoFar += refinanceOrder.AdditionalBorrowing;
             }
 
             if (order is SetFareOrder fareOrder)

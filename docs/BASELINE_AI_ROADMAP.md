@@ -2297,6 +2297,84 @@ round's scope) and is exactly what that work is for.
 
 ---
 
+## Bankruptcy conditions follow-up — a cash grace period, debt ceiling becomes a borrowing cap ✅
+
+**Origin:** the user's own direct follow-up to the borrowing lever above -
+going cash-negative froze an airline the *same quarter* it happened, with
+no window at all to react. Even the existing `AiToolkit.MaintainCashRunway`
+rescue-borrow, if decided the same quarter cash went negative, was
+discarded before it could apply (the orchestration layer forces a
+bankrupt-entering-the-quarter airline's orders to empty). The user's
+direction: cash going negative should give a real opportunity to fix it -
+borrow, sell aircraft, close or shrink a route - and only freeze the
+airline if cash is *still* negative once that opportunity has played out.
+Separately redirected: the $80M debt ceiling should stop being a
+bankruptcy trigger and become a simple cap on how much can be borrowed in
+the first place, with the remaining headroom a real, queryable value (for
+a future loan-request UI to show the player).
+
+**Shipped:** `FinancialState` gets one new field, `InDistress` - cash
+negative for the first time sets it true without touching `IsBankrupt`;
+cash negative *again* the following quarter while still `InDistress` is
+what actually freezes it; recovering to non-negative cash at any point
+clears it back to false instead. No changes needed in the orchestration
+layer (`FullGameRunner.cs`, `AeroNext.Sim/Program.cs`) - both already gate
+the order-freeze and win-condition eligibility purely on `IsBankrupt`, so
+a distressed-but-not-frozen airline already keeps submitting real orders
+and stays win-eligible once `IsBankrupt` itself only flips one quarter
+later. Because orders are no longer discarded during the grace quarter,
+`MaintainCashRunway`'s existing unconditional borrow-to-runway logic now
+gets a genuine chance to fire automatically - no new AI code needed for
+the common case (distress-aware route-closing/aircraft-selling AI logic
+is deliberately deferred, `docs/OPEN_WORK.md`).
+
+The debt ceiling's own bankruptcy check in `FinancialResolver.Resolve` is
+removed - enforcement moved to the loan request itself: `QuarterEngine.RunQuarter`
+now rejects a `RefinanceOrder` outright (mirroring `PayDownDebtOrder`'s own
+"rejected outright, not silently clamped" convention) if it would push
+debt past `DebtCeilingDollars`. Since `DebtBalance` only ever grows via
+applied borrowing (interest/principal repayment only ever shrink it), it
+can no longer drift past the ceiling at all once this is wired in - the
+old bankruptcy check became genuinely unreachable, not just redundant, and
+was removed rather than left dead. A new `FinancialResolver.RemainingBorrowingCapacity`
+is the one named, testable source of truth for "how much more can this
+airline borrow" - what a real loan-request UI would show, and what both
+the new `QuarterEngine` validation and the existing `AiToolkit.MaintainCashRunway`/`NegotiateOrBorrow`
+(previously each re-deriving the same subtraction inline) now call.
+
+**Measured: no regression, a real improvement concentrated where the
+mechanism predicts one, honestly flat everywhere else.** Same seed-1/300-game/244-quarter
+sweep, run immediately after the Phase-1-demand-ranking fix above (so this
+compares directly against that fix's own already-measured numbers, not an
+older baseline):
+
+| Region | Bankrupt before → after | Win share before → after |
+|---|---|---|
+| NorthAmerica | 0.4% → 0.4% | 19.7% → 19.3% |
+| Europe | 18.3% → **10.7%** | 2.7% → 3.0% |
+| EastAsia | 6.2% → 4.5% | 70.0% → 70.7% |
+| SouthWestAsia | 2.9% → 2.9% | 5.0% → 4.7% |
+| AustralAsia | 37.1% → 37.1% | 2.7% → 2.3% |
+| SouthAmerica | 12.2% → 12.2% | 0.0% → 0.0% |
+
+Europe is the one region where a real population of "one bad quarter,
+would have self-healed given the chance" cases existed - the grace period
+plus the now-unblocked rescue-borrow closes most of them (18.3%→10.7%).
+Every other region moved little or not at all, consistent with those
+bankruptcies being the genuinely structural kind this session's earlier
+borrow-recovery investigation already found borrowing alone can't fix -
+the grace period gives the same rescue lever one more chance to fire, it
+doesn't change what that lever can accomplish. NorthAmerica's own single
+remaining bankruptcy (down to 1 event, from the Phase-1 fix above) simply
+moved later (years 8-10 → years 11-13) rather than disappearing - a mere
+delay, not a cure, exactly the honest distinction the original borrowing-lever
+section above already drew. The 100%-clean/100%-real-winner game-health
+metric held at ceiling before and after, and the debt-ceiling trigger's
+own removal contributed exactly zero difference by construction (0% of
+every bankruptcy measured all session was ever debt-ceiling-triggered).
+
+---
+
 ## Kept in mind, not scheduled
 
 - **`AllianceCourtOrder`** — deliberately excluded from every milestone

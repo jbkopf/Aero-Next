@@ -441,7 +441,7 @@ public static class AiToolkit
         else if (context.AvailableCash is not null && context.CurrentDebtBalance is not null)
         {
             var shortfall = BaselineAi.NegotiationBidAmount - context.AvailableCash.Value;
-            var ceilingHeadroom = Money.FromDollars(FinancialResolver.DebtCeilingDollars) - context.CurrentDebtBalance.Value;
+            var ceilingHeadroom = FinancialResolver.RemainingBorrowingCapacity(context.CurrentDebtBalance.Value);
 
             if (FinancialState.CanAfford(ceilingHeadroom, shortfall))
             {
@@ -708,7 +708,7 @@ public static class AiToolkit
 
         var targetCash = quarterlyBurn * TargetCashRunwayQuarters;
         var shortfall = targetCash - context.AvailableCash.Value;
-        var ceilingHeadroom = Money.FromDollars(FinancialResolver.DebtCeilingDollars) - context.CurrentDebtBalance.Value;
+        var ceilingHeadroom = FinancialResolver.RemainingBorrowingCapacity(context.CurrentDebtBalance.Value);
         var borrowAmount = shortfall < ceilingHeadroom ? shortfall : ceilingHeadroom;
 
         if (borrowAmount > Money.Zero)

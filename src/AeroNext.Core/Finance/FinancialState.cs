@@ -3,8 +3,17 @@ namespace AeroNext.Core.Finance;
 /// <summary>
 /// IsBankrupt is sticky — once true, it stays true permanently. There's no
 /// reorganization mechanic; a bankrupt airline is out, full stop.
+///
+/// InDistress is the one-quarter grace period before that: cash negative
+/// for the first time sets it true without touching IsBankrupt, giving
+/// the airline's very next turn a real chance to react (borrow, sell
+/// aircraft, close or shrink a route — see FinancialResolver.Resolve).
+/// Cash negative *again* the following quarter while still InDistress is
+/// what actually flips IsBankrupt; recovering to non-negative cash at any
+/// point clears it back to false instead. Not sticky the way IsBankrupt
+/// is — it's a warning flag, not a verdict.
 /// </summary>
-public sealed record FinancialState(Money CashBalance, Money DebtBalance, double InterestRatePerQuarter, bool IsBankrupt)
+public sealed record FinancialState(Money CashBalance, Money DebtBalance, double InterestRatePerQuarter, bool IsBankrupt, bool InDistress = false)
 {
     public static FinancialState Start(Money startingCash, Money startingDebt, double interestRatePerQuarter) =>
         new(startingCash, startingDebt, interestRatePerQuarter, IsBankrupt: false);
