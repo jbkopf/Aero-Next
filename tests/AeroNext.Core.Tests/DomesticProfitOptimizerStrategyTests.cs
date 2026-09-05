@@ -27,15 +27,15 @@ public class DomesticProfitOptimizerStrategyTests
             QuarterNumber: quarterNumber, RouteHistoryByPair: routeHistoryByPair);
 
     [Fact]
-    public void DecideOrders_BelowCap_OpensMostProfitableIntraRegionPair_NotHighestDemandPair()
+    public void DecideOrders_BelowCap_OpensHighestDemandPair_NotHighestFarePair()
     {
-        // Verified numerically before writing this test (not guessed):
-        // "near" has ~160x the raw demand of "far" but is capacity-capped
-        // at a much lower fare (short distance), while "far" - lower
-        // demand, but capacity-capped at a much higher fare (long
-        // distance) - has the higher estimated profit. A strategy
-        // ranking by demand would pick "near"; ranking by profit picks
-        // "far".
+        // M56 follow-up: Phase 1 now ranks by raw demand, not revenue -
+        // this fixture's own original comment already established (before
+        // this round) that "near" has ~160x the raw demand of "far",
+        // which used to lose because "far"'s much longer distance gave it
+        // a much higher per-seat fare under the old revenue ranking. That
+        // fare-driven advantage is exactly what this round removes -
+        // "near" now correctly wins on its own real, dominant demand.
         var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
         var near = MakeCity("near", Region.NorthAmerica, 1, 1, 100);
         var far = MakeCity("far", Region.NorthAmerica, 8, 8, 40);
@@ -51,7 +51,7 @@ public class DomesticProfitOptimizerStrategyTests
         // city id, unrelated to which city is conceptually "home" -
         // check membership, not a specific Origin/Destination order.
         var routeOrder = Assert.Single(orders.OfType<RouteOrder>());
-        Assert.Equal(new HashSet<string> { "home", "far" }, new HashSet<string> { routeOrder.Origin.Id, routeOrder.Destination.Id });
+        Assert.Equal(new HashSet<string> { "home", "near" }, new HashSet<string> { routeOrder.Origin.Id, routeOrder.Destination.Id });
     }
 
     [Fact]
@@ -113,19 +113,19 @@ public class DomesticProfitOptimizerStrategyTests
     [Fact]
     public void DecideOrders_HubConnectedCandidate_BeatsHigherNonstopProfitDisconnectedOne_OnceOneStopValueIsCounted()
     {
-        // Numerically pre-verified (not guessed): with an existing
-        // home-hub route, "hub-far" earns less on its own nonstop demand
-        // alone ($1,525,138.86) than the fully disconnected "p2-p3"
-        // ($1,612,260.00) - a nonstop-only ranking picks p2-p3. But
-        // hub-far also unlocks a brand-new home<->far one-stop
-        // connection through the existing hub (home is already
-        // home-hub-connected) - real extra demand carried on hub-far's
-        // own leg, at hub-far's own fare, exactly FinancialResolver's
-        // real per-leg mechanic. Counting it correctly flips the
-        // ranking: hub-far's real value ($1,826,396.60) beats p2-p3. A
-        // tight 500km aircraft range excludes every other candidate pair
-        // among these 5 cities (all >500km apart otherwise) so only
-        // these two compete.
+        // M56 follow-up: re-verified against AiToolkit.ValidOriginCityIds
+        // directly, not just re-run - with only the home-hub route
+        // existing, the only valid origins are "home" and "hub" (M44's
+        // network-contiguity rule), so p2-p3 (touching neither) is
+        // excluded from domesticPairs entirely and never actually
+        // competes against hub-far under either ranking metric. hub-far
+        // is the sole legal candidate here regardless of whether Phase 1
+        // ranks by revenue or by raw demand - this test passes for that
+        // reason, not because a demand/revenue race was won. Left in
+        // place because it still documents the one-stop hub-bonus
+        // mechanic correctly; a tight 500km aircraft range excludes
+        // every other candidate pair among these 5 cities (all >500km
+        // apart otherwise).
         var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
         var hub = MakeCity("hub", Region.NorthAmerica, 5, 0, 100);
         var far = MakeCity("far", Region.NorthAmerica, 9, 0, 7);
@@ -148,41 +148,43 @@ public class DomesticProfitOptimizerStrategyTests
     [Fact]
     public void DecideOrders_HubBonus_SkipsDemandAlreadyDirectlyServedElsewhere_NotDoubleCounted()
     {
-        // Numerically pre-verified: existing routes home-hub, hub-elsewhere,
-        // elsewhere-far. Candidate hub-far connects through hub to TWO
-        // already-served neighbors (home and elsewhere) - but elsewhere is
-        // already directly connected to far via the existing elsewhere-far
-        // route, so that demand is already nonstop-served and must be
-        // skipped, not double-counted. Correct hub bonus = home-far demand
-        // only, giving hub-far a lower value than the decoy pair, so decoy
-        // wins; if elsewhere-far's demand were wrongly double-counted too,
-        // hub-far's value would be pushed high enough to wrongly beat the
-        // decoy instead.
+        // M56 follow-up: re-verified numerically against the new
+        // demand-score metric (raw PassengersPerQuarter + HubBonus, not
+        // revenue) - the old fixture's own dollar-figure margin was too
+        // thin in demand-units to keep discriminating once the ranking
+        // basis changed (both the correct and the wrongly-double-counted
+        // total still landed below decoy's own huge demand either way,
+        // silently losing this test's own power to catch the regression
+        // it exists for). far's weight raised 7->70 to widen the
+        // correct-vs-wrong gap in absolute terms; decoy's weight lowered
+        // 100->29 to land it back inside that widened gap. Real numbers:
+        // hub-far nonstop demand 265,381; correct hub bonus (home-far
+        // only) 52,421 -> correct total 317,802; wrong extra if
+        // elsewhere-far's demand were also (wrongly) double-counted
+        // 49,517 -> wrong total 367,319; decoy's own demand at weight 29
+        // is 346,529 - strictly between the two (comfortable ~28,700/~20,800
+        // margins), so decoy wins with the correct bonus but would lose to
+        // hub-far if the bonus were ever double-counted again.
         //
-        // M64: decoy touches "elsewhere" (not "home", the pre-M64 fixture's
-        // own choice) specifically because elsewhere's own M64
-        // route-count-share (2 of 3 existing routes touch it, same as hub)
-        // exactly matches hub's - giving elsewhere-decoy and hub-far the
-        // *same* M64 consolidation multiplier, which cancels out of this
-        // comparison entirely and restores this test's original,
-        // M64-independent power to isolate the M40 double-counting
-        // invariant specifically (verified directly: an earlier version of
-        // this fixture using "home" - share 0.333, half of hub's - let
-        // M64's own bonus alone flip the winner to hub-far regardless of
-        // whether the M40 hub-bonus was computed correctly or double-counted,
-        // silently losing its ability to catch that regression).
-        // decoy sits offset from elsewhere by exactly what the original
-        // p2-p3 decoy pair (pre-M44) was offset from home, at the same
-        // weight - reproduces (not bit-for-bit, since elsewhere's own
-        // latitude differs slightly from home's, but comparably) the
-        // original fixture's own dollar-figure relationship. A tight
-        // 500km aircraft range excludes every other candidate pair (all
-        // >500km apart) so only these two compete.
+        // Existing routes home-hub, hub-elsewhere, elsewhere-far.
+        // Candidate hub-far connects through hub to TWO already-served
+        // neighbors (home and elsewhere) - but elsewhere is already
+        // directly connected to far via the existing elsewhere-far route,
+        // so that demand is already nonstop-served and must be skipped,
+        // not double-counted.
+        //
+        // M64: DomesticProfitOptimizerStrategy never wires in
+        // AiToolkit.ConsolidationMultiplier at all (see the class doc
+        // comment's own M64 paragraph) - the route-share reasoning this
+        // comment used to carry is moot for this specific ranking, not
+        // something this round needs to re-verify. A tight 500km aircraft
+        // range excludes every other candidate pair (all >500km apart) so
+        // only these two compete.
         var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
         var hub = MakeCity("hub", Region.NorthAmerica, 5, 0, 100);
-        var far = MakeCity("far", Region.NorthAmerica, 9, 0, 7);
+        var far = MakeCity("far", Region.NorthAmerica, 9, 0, 70);
         var elsewhere = MakeCity("elsewhere", Region.NorthAmerica, 5, -6, 60);
-        var decoy = MakeCity("decoy", Region.NorthAmerica, 5 - 0.9, -6 - 1.5, 100);
+        var decoy = MakeCity("decoy", Region.NorthAmerica, 5 - 0.9, -6 - 1.5, 29);
         var cities = new[] { home, hub, far, elsewhere, decoy };
         var wideAircraft = new AircraftType("wide", "Wide", Seats: 100, RangeKm: 2000); // flies the existing network's own legs
         var candidateAircraft = new AircraftType("t", "Test", Seats: 100, RangeKm: 500); // short enough to exclude every other candidate pair

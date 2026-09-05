@@ -504,22 +504,43 @@ un-scoped question if it's ever revisited.
   pair wins)** — real, measured, no regression: SouthAmerica's own
   bankruptcy rate improved 70.5%→58.6% with zero change elsewhere, but
   the overall win rate stayed flat at 41.3%, so this is progress, not a
-  close. `DomesticProfitOptimizerStrategy`'s own pair *selection* is
-  still revenue-only and untouched; switching it to raw-demand ranking
-  (matching `RapidExpansionStrategy`'s own proven-safe metric) is the
-  real remaining candidate for whoever picks this up next, with its own
-  check-in first — see `BASELINE_AI_ROADMAP.md`'s M57. `AiToolkit`'s own
-  removed `ClosureWouldSeverContiguity` and
+  close. `AiToolkit`'s own removed `ClosureWouldSeverContiguity` and
   `AiRouteHistory.ConsecutiveUnprofitableQuarters` itself (still
   tracked, unconsumed) remain real starting points for reintroducing
   closure once route-opening quality is judged good enough.
+- ~~**`DomesticProfitOptimizerStrategy`'s own pair *selection*, still
+  revenue-only after M57**~~ — closed by the M56 follow-up
+  (`BASELINE_AI_ROADMAP.md`): switched Phase 1's ranking key from
+  `EstimatedRevenue` to raw demand + hub bonus (`RapidExpansionStrategy`'s
+  own proven-safe metric shape, not `AiToolkit.ConsolidationMultiplier`
+  itself), same seed-1/300-game/244-quarter sweep before and after.
+  NorthAmerica's own structural growth-into-bankruptcy — the exact
+  pattern this whole thread traced to — is gone (74.1%→0.4% bankrupt;
+  the dominant Q91-100/years-23-25 bankruptcy spike, 161 events pre-fix,
+  is now zero events in that window). Bankruptcy fell broadly elsewhere
+  too (Europe 48.2%→18.3%, SouthWestAsia 60.0%→2.9%, AustralAsia
+  48.5%→37.1%, EastAsia 11.7%→6.2%); SouthAmerica ticked up slightly
+  (10.5%→12.2%). The 100%-clean/100%-real-winner game-health metric held
+  at ceiling both before and after — none of M56's own four reverted
+  designs' regression signature (win rate collapsing to 10-29%).
 - **Europe's own idle-fleet stall under `DomesticProfitOptimizerStrategy`**
-  — Europe remains the worst-performing region (86.3% bankrupt after
-  M43+M44 both) throughout; root cause not yet isolated.
-- **NorthAmerica's own post-M44 dominance (87.6% win share)** — real,
-  causally understood (its dense 22-city local network is now a
-  compounding advantage under network-contiguity), but a strikingly
-  lopsided result flagged for a decision on whether it's acceptable.
+  — Europe remains a weak-performing region; root cause not yet isolated.
+- **EastAsia's own dominance, now sharper (70.0% win share) once
+  NorthAmerica stops self-destructing** — real, not newly introduced by
+  the M56-follow-up fix above: EastAsia was already the single strongest
+  region before it (52.0% win share, already more than double anyone
+  else), and Europe/SouthAmerica's own win shares (25.3%→2.7%,
+  4.0%→0.0%) were being propped up by inheriting wins whenever
+  NorthAmerica collapsed into bankruptcy rather than by winning against
+  a full field. Once that artificial clearing stopped, EastAsia's
+  already-existing structural edge (a compact, naturally-contiguous city
+  pool that doesn't overreach into marginal candidates the way
+  NorthAmerica's larger 22-city pool used to) simply became visible
+  instead of masked. This is the same shape of finding as the older
+  "NorthAmerica's own post-M44 dominance (87.6% win share)" entry this
+  replaces — which region ends up lopsided keeps moving, the underlying
+  regional-balance question doesn't. Feeds directly into the active
+  regional-balance work; not itself a reason to hold this fix back.
 - **Changing an existing route's aircraft *type*** — no atomic order
   exists (M54); growing a route requires the exact type already flying
   it. A genuine "swap type" capability needs a new order type or

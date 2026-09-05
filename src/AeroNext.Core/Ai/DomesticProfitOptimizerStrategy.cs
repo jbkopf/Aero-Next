@@ -9,13 +9,10 @@ namespace AeroNext.Core.Ai;
 /// M39 (docs/BASELINE_AI_ROADMAP.md): consolidate a small, profitable
 /// home-region network rather than chase every market in the world.
 /// Below MaxDomesticRoutes intra-region routes, opens the single best
-/// remaining candidate ranked by estimated *profitability*, not raw
-/// demand — a real equivalence under today's fare model, not a loose
-/// proxy: FareCalculator bakes in a flat, uniform margin fraction over
-/// cost everywhere, so profit is directly proportional to
-/// fare-per-passenger x carried, meaning ranking by that revenue
-/// estimate genuinely *is* ranking by profit. At the cap, stops opening
-/// entirely and only optimizes what it already holds (reusing
+/// remaining candidate ranked by raw demand (M56 follow-up below revised
+/// this from the original revenue-based ranking - see that paragraph for
+/// why). At the cap, stops opening entirely and only optimizes what it
+/// already holds (reusing
 /// BaselineAi's own close/raise/cut/retire/debt/hire toolkit, which
 /// applies to every held route regardless of region — an inherited
 /// cross-region route from a prior strategy still gets managed, just
@@ -57,8 +54,10 @@ namespace AeroNext.Core.Ai;
 /// selection.
 ///
 /// What ships now instead is two strictly separated phases: Phase 1
-/// (which pair wins) is completely unchanged — still EstimatedRevenue,
-/// still the same ranking as M40. Phase 2, added on top, re-selects only
+/// (which pair wins) was, at the time, left completely unchanged - still
+/// EstimatedRevenue, still the same ranking as M40 (see the M56 follow-up
+/// paragraph below for why that stopped being true). Phase 2, added on
+/// top, re-selects only
 /// the *aircraft type* for that one already-decided pair, maximizing
 /// real, cost-subtracted profit (FareCalculator.EstimatedProfit) among
 /// the same candidate pool the pair search already had access to. That
@@ -84,6 +83,43 @@ namespace AeroNext.Core.Ai;
 /// home-region network), and NetworkOptimizerStrategy owns everything
 /// from year 11 on (see that class's own doc comment). See
 /// docs/BASELINE_AI_ROADMAP.md's M58 section for the full evidence chain.
+///
+/// M56 follow-up (docs/BASELINE_AI_ROADMAP.md): the deferred half of
+/// M56/M57's own history, finally closed. Real per-quarter instrumentation
+/// (digging into why NorthAmerica specifically fails to recover) found
+/// NorthAmerica's own network exploding in size once it ran out of
+/// genuinely good candidate pairs (its 22-city pool leaves a large tail
+/// of merely-mediocre ones after the best ~5 are gone) - operating cost
+/// growing faster than revenue as progressively worse pairs kept getting
+/// opened, margin ratio collapsing from a healthy ~1.4 to 0.587, net
+/// income reaching -$33.07M/quarter right before a bankruptcy wave.
+/// EastAsia, with only 10 cities, simply runs out of candidates early and
+/// stops growing - the real difference was never city *quality* (pre-collapse
+/// revenue-per-route was similar, $3.72M NA vs $3.91M EA), it was having
+/// enough mediocre candidates left to keep reaching for. Phase 1's own
+/// EstimatedRevenue ranking (fare x capped-carried) had no way to tell a
+/// genuinely good pair from a merely-adequate one once "good enough to
+/// carry its own capacity" was cleared - exactly the mechanism M56's own
+/// trace already named responsible for 51.7% of this strategy's own bad
+/// opens.
+///
+/// Fixed by switching Phase 1 to raw demand (PassengersPerQuarter + the
+/// existing M40 hub bonus) - mechanistically different from all four of
+/// M56's own reverted attempts (real profit, real captured demand, a
+/// profitability floor, load-factor-derated ranking), every one of which
+/// still depended on a specific candidate aircraft's own capacity once
+/// carried gets capped at demand, which M56 proved favors ever-smaller
+/// aircraft without bound. Raw demand never references capacity at all -
+/// the exact same shape as RapidExpansionStrategy's own already-proven-safe
+/// AiToolkit.EffectiveDemandScore (13.1% bad-open rate, never the dominant
+/// driver), just without that strategy's own M64 ConsolidationMultiplier,
+/// which this class's own M64 paragraph above already found regresses
+/// when stacked on this class's own M40 hub bonus. EstimatedRevenue
+/// itself is removed (confirmed dead - no other caller anywhere). Phase 2
+/// (M57's own aircraft-type refinement) is untouched - it only ever
+/// compares types within one already-chosen pair, never across pairs, so
+/// it can't leak a capacity bias back into pair selection regardless of
+/// what Phase 1 ranks by.
 /// </summary>
 public sealed class DomesticProfitOptimizerStrategy : IAiStrategy
 {
@@ -287,15 +323,19 @@ public sealed class DomesticProfitOptimizerStrategy : IAiStrategy
         // to bound the bonus's effect. See docs/HUB_DEMAND_ROADMAP.md's
         // M64 section for the real measured numbers.
 
-        // Phase 1: which pair wins - unchanged since M40, still ranked by
-        // EstimatedRevenue (which already folds in HubBonus above); see
-        // the class doc comment for why this stays untouched while Phase
-        // 2 below is new.
+        // Phase 1: which pair wins - M56 follow-up: ranked by raw demand
+        // (PassengersPerQuarter + HubBonus, both aircraft-independent),
+        // not EstimatedRevenue - see the class doc comment for the real
+        // evidence and why this is safe where M56's own four attempts
+        // weren't. DemandScore never depends on `type`, so every
+        // candidate type reachable for a given pair scores identically;
+        // Phase 2 below re-derives the real best type for whichever pair
+        // wins regardless of which one is carried through here.
         var best = candidateTypes
             .SelectMany(type => pairsWithHubBonus
                 .Where(pb => pb.Pair.DistanceKm <= type.RangeKm)
-                .Select(pb => (Pair: pb.Pair, Aircraft: type, HubBonus: pb.HubBonus, Revenue: EstimatedRevenue(pb.Pair, type, pb.HubBonus))))
-            .OrderByDescending(c => c.Revenue.Cents)
+                .Select(pb => (Pair: pb.Pair, Aircraft: type, HubBonus: pb.HubBonus, DemandScore: pb.Pair.PassengersPerQuarter + pb.HubBonus)))
+            .OrderByDescending(c => c.DemandScore)
             .ThenBy(c => c.Pair.Origin.Id, StringComparer.Ordinal)
             .ThenBy(c => c.Pair.Destination.Id, StringComparer.Ordinal)
             .ThenBy(c => c.Aircraft.Id, StringComparer.Ordinal)
@@ -403,22 +443,6 @@ public sealed class DomesticProfitOptimizerStrategy : IAiStrategy
         }
 
         return bonus;
-    }
-
-    /// <summary>
-    /// M57: renamed from its old, misleading name EstimatedProfit - it
-    /// never subtracted cost. fare-per-passenger x carried (nonstop
-    /// demand plus M40's real hub bonus) - Phase 1's own ranking figure;
-    /// see the class doc comment for why this stays the pair-selection
-    /// signal while Phase 2 (EstimatedProfitForAircraft, below) handles
-    /// aircraft-type fit separately.
-    /// </summary>
-    private static Money EstimatedRevenue(PairDemand pair, AircraftType aircraft, long hubBonusDemand)
-    {
-        var hypotheticalRoute = new Route(pair.Origin, pair.Destination, aircraft, AircraftCount: 1);
-        var cappedCarried = Math.Min(pair.PassengersPerQuarter + hubBonusDemand, hypotheticalRoute.SeatsPerQuarter);
-
-        return FareCalculator.SuggestedFarePerPassenger(hypotheticalRoute) * cappedCarried;
     }
 
     /// <summary>

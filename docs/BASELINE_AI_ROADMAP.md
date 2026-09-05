@@ -2196,6 +2196,107 @@ expected boundary, not a gap in this round's own fix.
 
 ---
 
+## M56 follow-up — DomesticProfitOptimizerStrategy: Phase 1 pair-selection switched from revenue to raw demand ✅
+
+**Origin:** digging into why NorthAmerica's own year-23-25 bankruptcy
+cluster (flagged as "structural" and "borrowing only delays it" in the
+Bankruptcy-conditions section above) doesn't recover. Real per-quarter
+instrumentation (100 games, years 15-40) found NorthAmerica running a
+healthy margin through years 15-20, then its network **explodes** in
+years 21-24 (routes 5.6→8.2, fleet 7.2→11.1) with operating cost growing
+faster than revenue (margin ratio 1.31→0.587, net income reaching
+**-$33.07M/quarter**) right before the bankruptcy wave. EastAsia, over
+the identical window, stays pinned at 4.7 routes the whole time (margin
+ratio a steady ~1.48) — it simply runs out of good city pairs (10 cities)
+and stops. Pre-shock revenue-per-route was similar between the two
+regions ($3.72M NA vs $3.91M EA) — this was never about NorthAmerica's
+cities being worse; its 22-city pool just leaves a much larger pool of
+mediocre candidates once the best ~5 are taken, and nothing was stopping
+it from reaching for them.
+
+This traces directly to a gap M56 and M57 (above) had already found and
+explicitly deferred: `NetworkOptimizerStrategy` reuses
+`DomesticProfitOptimizerStrategy.FindMostProfitableDomesticPairAcrossTypes`
+unmodified, and that method's Phase 1 (which *pair* wins) had ranked by
+`EstimatedRevenue` (fare × capped-carried) unchanged since M40 — the
+exact method M56's own instrumentation found responsible for 51.7% of
+its own opens going on to sustained real unprofitability. M57 fixed
+Phase 2 (aircraft-*type* selection for an already-chosen pair) and
+explicitly left Phase 1 revenue-only, flagging raw-demand ranking
+(matching `RapidExpansionStrategy`'s own proven-safe metric) as "the
+real remaining candidate for whoever picks this up next."
+
+**Why this is mechanistically different from M56's own four reverted
+attempts.** Every prior attempt (real profit, real captured demand,
+a profitability-floor veto, load-factor-derated ranking) ranked by
+something depending on a *specific candidate aircraft's own capacity* —
+once a candidate's capacity meets or exceeds a pair's demand,
+`carried = min(demand, capacity)` is capped at the same value for every
+such candidate, so any of those keys becomes a function of capacity
+alone, rewarding ever-smaller aircraft without bound. `RapidExpansionStrategy`'s
+own `AiToolkit.EffectiveDemandScore` (`pair.PassengersPerQuarter *
+ConsolidationMultiplier`) never referenced capacity, carried, or fare —
+computed before any candidate aircraft is even considered — and was
+never the dominant bad-open driver (13.1% vs. 51.7%). None of M56's four
+attempts tried this.
+
+**Shipped:** Phase 1's ranking key in `FindMostProfitableDomesticPairAcrossTypes`
+changed from `EstimatedRevenue` to `pair.PassengersPerQuarter + hubBonus`
+— raw demand plus the existing M40 hub bonus, both already
+aircraft-independent and already cached once per `DecideOrders` call.
+Deliberately **not** `AiToolkit.EffectiveDemandScore`/`ConsolidationMultiplier`
+itself — M64's own class doc comment already found stacking that
+specific bonus on top of this strategy's own M40 hub bonus caused a
+measured regression, still deliberately excluded here; this change swaps
+what unit Phase 1 ranks *in*, it doesn't add a new bonus layer. Phase 2
+(M57) is completely untouched — it only ever compares aircraft types
+within one already-chosen pair, never across pairs, so it can't leak the
+capacity bias back in regardless of what Phase 1 ranks by.
+`EstimatedRevenue` itself was confirmed dead (no other caller anywhere)
+and removed rather than left unreachable.
+
+**Measured: NorthAmerica's own structural bankruptcy problem is
+essentially gone, with no regression in the metric M56's own four
+reverted designs collapsed.** Same seed-1/300-game/244-quarter sweep, run
+both before and after (git-stashed the fix to get a true, apples-to-apples
+baseline rather than trust an older recorded number):
+
+| Region | Bankrupt before → after | Win share before → after |
+|---|---|---|
+| NorthAmerica | 74.1% → **0.4%** | 10.3% → 19.7% |
+| Europe | 48.2% → 18.3% | 25.3% → 2.7% |
+| EastAsia | 11.7% → 6.2% | 52.0% → **70.0%** |
+| SouthWestAsia | 60.0% → 2.9% | 4.0% → 5.0% |
+| AustralAsia | 48.5% → 37.1% | 4.3% → 2.7% |
+| SouthAmerica | 10.5% → 12.2% | 4.0% → 0.0% |
+
+NorthAmerica's own bankruptcy-quarter distribution confirms this isn't
+just an aggregate shift: the dominant Q91-100 (years 23-25) spike this
+whole investigation traced — 161 of 203 total NorthAmerica bankruptcies
+pre-fix — is **zero events in that window post-fix** (1 NorthAmerica
+bankruptcy total, in years 8-10). The 100%-clean/100%-real-winner
+game-health metric (M56's own critical regression signal) held at
+ceiling before and after — none of M56's four reverted designs' own
+signature (win rate collapsing to 10-29%).
+
+**Honestly-reported side effect, not a reason to revert:** EastAsia's win
+share, already the strongest region before this fix (52.0%, already more
+than double anyone else), grew further (70.0%), while Europe's and
+SouthAmerica's own win shares (25.3%→2.7%, 4.0%→0.0%) fell hard. This
+isn't newly introduced by ranking-by-demand — it's the same
+already-existing structural edge (a compact, naturally-contiguous city
+pool that doesn't overreach into marginal candidates, unlike
+NorthAmerica's larger 22-city pool used to) becoming *visible* instead of
+masked: Europe and SouthAmerica were partly winning by inheriting the
+field whenever NorthAmerica collapsed into bankruptcy, not by beating a
+full field outright. This is the same shape of finding as the earlier
+"NorthAmerica's own post-M44 dominance (87.6% win share)" open item —
+which single region ends up lopsided keeps moving; the underlying
+regional-balance question is separate, already-active work (not this
+round's scope) and is exactly what that work is for.
+
+---
+
 ## Kept in mind, not scheduled
 
 - **`AllianceCourtOrder`** — deliberately excluded from every milestone
