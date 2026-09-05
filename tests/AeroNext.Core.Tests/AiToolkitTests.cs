@@ -24,9 +24,10 @@ public class AiToolkitTests
         System.Collections.Generic.IReadOnlyDictionary<(string OriginId, string DestinationId), int>? rivalCountByServedRoute = null,
         System.Collections.Generic.IReadOnlyDictionary<(string OriginId, string DestinationId), long>? lastQuarterSeatsCarriedByRoute = null,
         int quarterNumber = 1,
-        System.Collections.Generic.IReadOnlyDictionary<(string OriginId, string DestinationId), AiRouteHistory>? routeHistoryByPair = null) =>
-        new(routes ?? Array.Empty<Route>(), actionCap, cities, DemandModel, new[] { Aircraft }, AirlineFleet.Empty, homeCity.Region, homeCity,
-            IdleContestableSlotsByCity: idleContestableSlotsByCity, AvailableCash: availableCash,
+        System.Collections.Generic.IReadOnlyDictionary<(string OriginId, string DestinationId), AiRouteHistory>? routeHistoryByPair = null,
+        AirlineFleet? fleet = null, Money? currentDebtBalance = null) =>
+        new(routes ?? Array.Empty<Route>(), actionCap, cities, DemandModel, new[] { Aircraft }, fleet ?? AirlineFleet.Empty, homeCity.Region, homeCity,
+            IdleContestableSlotsByCity: idleContestableSlotsByCity, AvailableCash: availableCash, CurrentDebtBalance: currentDebtBalance,
             RivalCountByServedRoute: rivalCountByServedRoute, LastQuarterSeatsCarriedByRoute: lastQuarterSeatsCarriedByRoute,
             QuarterNumber: quarterNumber, RouteHistoryByPair: routeHistoryByPair);
 
@@ -243,6 +244,102 @@ public class AiToolkitTests
         };
 
         Assert.Null(AiToolkit.FindBestIdleContestableGateway(context));
+    }
+
+    // --- ApplyManagementToolkit: MaintainCashRunway (bankruptcy-conditions investigation) ---
+
+    [Fact]
+    public void ApplyManagementToolkit_ComfortablyAboveWarningLine_DoesNotBorrow()
+    {
+        // 4 units x $250,000/quarter = $1,000,000/quarter burn.
+        // MinimumCashRunwayQuarters (2) x that = $2,000,000 warning line -
+        // $5,000,000 clears it comfortably.
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 50);
+        var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, Aircraft, quantity: 4, FleetOwnershipMode.Owned);
+        var context = MakeContext(new[] { home }, home, availableCash: Money.FromDollars(5_000_000), currentDebtBalance: Money.Zero, fleet: fleet);
+        var orders = new System.Collections.Generic.List<QuarterOrder>();
+
+        AiToolkit.ApplyManagementToolkit(context, orders, new System.Collections.Generic.HashSet<int>(), spentBeforeToolkit: 0);
+
+        Assert.Empty(orders.OfType<RefinanceOrder>());
+    }
+
+    [Fact]
+    public void ApplyManagementToolkit_BelowWarningLine_BorrowsExactlyEnoughToReachTarget()
+    {
+        // Same $1,000,000/quarter burn. $1,000,000 cash is below the
+        // $2,000,000 warning line. TargetCashRunwayQuarters (4) x burn =
+        // $4,000,000 target - shortfall is exactly $3,000,000, well under
+        // the $80M ceiling headroom (zero debt), so the full shortfall is
+        // borrowed.
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 50);
+        var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, Aircraft, quantity: 4, FleetOwnershipMode.Owned);
+        var context = MakeContext(new[] { home }, home, availableCash: Money.FromDollars(1_000_000), currentDebtBalance: Money.Zero, fleet: fleet);
+        var orders = new System.Collections.Generic.List<QuarterOrder>();
+
+        AiToolkit.ApplyManagementToolkit(context, orders, new System.Collections.Generic.HashSet<int>(), spentBeforeToolkit: 0);
+
+        var order = Assert.Single(orders.OfType<RefinanceOrder>());
+        Assert.Equal(Money.FromDollars(3_000_000), order.AdditionalBorrowing);
+    }
+
+    [Fact]
+    public void ApplyManagementToolkit_NearDebtCeiling_CapsTheBorrowToRealHeadroom()
+    {
+        // Same $3,000,000 shortfall as above, but only $1,000,000 of real
+        // headroom remains under the $80M ceiling ($79M already owed) -
+        // the borrow is capped to that headroom, not the full shortfall.
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 50);
+        var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, Aircraft, quantity: 4, FleetOwnershipMode.Owned);
+        var context = MakeContext(new[] { home }, home, availableCash: Money.FromDollars(1_000_000), currentDebtBalance: Money.FromDollars(79_000_000), fleet: fleet);
+        var orders = new System.Collections.Generic.List<QuarterOrder>();
+
+        AiToolkit.ApplyManagementToolkit(context, orders, new System.Collections.Generic.HashSet<int>(), spentBeforeToolkit: 0);
+
+        var order = Assert.Single(orders.OfType<RefinanceOrder>());
+        Assert.Equal(Money.FromDollars(1_000_000), order.AdditionalBorrowing);
+    }
+
+    [Fact]
+    public void ApplyManagementToolkit_EmptyFleet_ZeroBurnRate_DoesNotBorrow()
+    {
+        // No fleet at all - nothing to maintain runway against, even
+        // with cash far below any plausible warning line.
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 50);
+        var context = MakeContext(new[] { home }, home, availableCash: Money.Zero, currentDebtBalance: Money.Zero);
+        var orders = new System.Collections.Generic.List<QuarterOrder>();
+
+        AiToolkit.ApplyManagementToolkit(context, orders, new System.Collections.Generic.HashSet<int>(), spentBeforeToolkit: 0);
+
+        Assert.Empty(orders.OfType<RefinanceOrder>());
+    }
+
+    [Fact]
+    public void ApplyManagementToolkit_NullAvailableCash_DoesNotBorrow_PermissiveDefault()
+    {
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 50);
+        var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, Aircraft, quantity: 4, FleetOwnershipMode.Owned);
+        var context = MakeContext(new[] { home }, home, currentDebtBalance: Money.Zero, fleet: fleet); // no cash passed
+
+        var orders = new System.Collections.Generic.List<QuarterOrder>();
+
+        AiToolkit.ApplyManagementToolkit(context, orders, new System.Collections.Generic.HashSet<int>(), spentBeforeToolkit: 0);
+
+        Assert.Empty(orders.OfType<RefinanceOrder>());
+    }
+
+    [Fact]
+    public void ApplyManagementToolkit_NullCurrentDebtBalance_DoesNotBorrow_PermissiveDefault()
+    {
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 50);
+        var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, Aircraft, quantity: 4, FleetOwnershipMode.Owned);
+        var context = MakeContext(new[] { home }, home, availableCash: Money.FromDollars(1_000_000), fleet: fleet); // no debt balance passed
+
+        var orders = new System.Collections.Generic.List<QuarterOrder>();
+
+        AiToolkit.ApplyManagementToolkit(context, orders, new System.Collections.Generic.HashSet<int>(), spentBeforeToolkit: 0);
+
+        Assert.Empty(orders.OfType<RefinanceOrder>());
     }
 
     // --- ApplyManagementToolkit: hiring (M50) ---

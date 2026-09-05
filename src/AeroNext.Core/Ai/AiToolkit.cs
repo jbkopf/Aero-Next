@@ -637,6 +637,87 @@ public static class AiToolkit
     private const int SustainedSingleAircraftClosureThreshold = 8;
 
     /// <summary>
+    /// (Proposed, tunable) — bankruptcy-conditions investigation: a real
+    /// 300-game diagnostic found 100% of 545 bankruptcy events were
+    /// triggered by cash going negative, never the $80M debt ceiling
+    /// (FinancialResolver.DebtCeilingDollars) - 82% of bankruptcies carried
+    /// zero debt at all. Almost always a slow, multi-quarter bleed
+    /// crossing zero by a modest margin (avg -$5.12M, 84.8% within -$10M),
+    /// not a cliff - plenty of quarters of visible warning before the
+    /// actual crossing, and a large, essentially unused gap between where
+    /// airlines actually die and the real borrowing capacity available to
+    /// them. The only existing RefinanceOrder use anywhere (NegotiateOrBorrow,
+    /// below) is narrowly scoped to a negotiation-bid shortfall - no
+    /// strategy ever borrowed as a general "running low, buy runway" move
+    /// before this. Below this many quarters of runway (see
+    /// MaintainCashRunway's own quarterlyBurn - the fleet's own
+    /// SalaryCostPerAircraftPerQuarter, the dominant fixed cost per the
+    /// M58-follow-up investigation's own finding that revenue and
+    /// operating cost nearly cancel out), a rescue borrow fires.
+    /// </summary>
+    private const int MinimumCashRunwayQuarters = 2;
+
+    /// <summary>
+    /// (Proposed, tunable) — the runway level a rescue borrow restores to,
+    /// deliberately higher than MinimumCashRunwayQuarters (hysteresis) -
+    /// stops the AI borrowing a token amount every single quarter once
+    /// hovering right at the warning line.
+    /// </summary>
+    private const int TargetCashRunwayQuarters = 4;
+
+    /// <summary>
+    /// Borrows real cash (RefinanceOrder - free, Private, 0 action-cost
+    /// per QuarterEngine's own RefinanceOrder =&gt; 0 mapping, per
+    /// CLAUDE.md's "these cost no action" rule) whenever this airline's
+    /// own current cash falls below MinimumCashRunwayQuarters worth of its
+    /// current fleet's own quarterly burn - enough to restore
+    /// TargetCashRunwayQuarters, capped by real headroom under
+    /// FinancialResolver.DebtCeilingDollars (never exceeds it - the exact
+    /// same never-exceed-the-ceiling idiom NegotiateOrBorrow already
+    /// established, reused here rather than re-derived). A no-op (same
+    /// permissive-default convention as every other nullable StrategyContext
+    /// field) when AvailableCash or CurrentDebtBalance is null, or when the
+    /// fleet is empty (zero burn rate - nothing to maintain runway
+    /// against). Deliberately not a cure for bad route economics - a
+    /// genuinely structurally-unprofitable airline (the chronic-thin-
+    /// margin pattern the same diagnostic also found, e.g. in
+    /// SouthAmerica) may still exhaust its full borrowing capacity and go
+    /// bankrupt via the debt ceiling instead of cash&lt;0 - a real,
+    /// honest possibility this safety net doesn't paper over, only the
+    /// fare-cut/shrink/closure levers already shipped this session
+    /// actually fix that.
+    /// </summary>
+    public static void MaintainCashRunway(StrategyContext context, List<QuarterOrder> orders)
+    {
+        if (context.AvailableCash is null || context.CurrentDebtBalance is null)
+        {
+            return;
+        }
+
+        var quarterlyBurn = FinancialResolver.SalaryCostPerAircraftPerQuarter * context.OwnFleet.Units.Count;
+        if (quarterlyBurn <= Money.Zero)
+        {
+            return;
+        }
+
+        var warningLine = quarterlyBurn * MinimumCashRunwayQuarters;
+        if (FinancialState.CanAfford(context.AvailableCash.Value, warningLine))
+        {
+            return;
+        }
+
+        var targetCash = quarterlyBurn * TargetCashRunwayQuarters;
+        var shortfall = targetCash - context.AvailableCash.Value;
+        var ceilingHeadroom = Money.FromDollars(FinancialResolver.DebtCeilingDollars) - context.CurrentDebtBalance.Value;
+        var borrowAmount = shortfall < ceilingHeadroom ? shortfall : ceilingHeadroom;
+
+        if (borrowAmount > Money.Zero)
+        {
+            orders.Add(new RefinanceOrder(borrowAmount));
+        }
+    }
+
+    /// <summary>
     /// Applies BaselineAi's M31/M35/M36/M37 passive toolkit against
     /// whatever this strategy already holds, unconditionally and
     /// unfiltered by region — a route/unit is a route/unit regardless of
@@ -661,6 +742,10 @@ public static class AiToolkit
     /// </param>
     public static void ApplyManagementToolkit(StrategyContext context, List<QuarterOrder> orders, HashSet<int> reservedUnitIds, int spentBeforeToolkit, bool enableSustainedSingleAircraftClosure = false)
     {
+        // Solvency first, before any other spending decision - see
+        // MaintainCashRunway's own doc comment for the real evidence.
+        MaintainCashRunway(context, orders);
+
         var routeLoads = RouteEvaluator.EvaluateNetwork(context.CurrentRoutes, context.DemandModel);
 
         foreach (var saturated in routeLoads

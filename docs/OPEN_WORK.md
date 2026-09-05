@@ -47,7 +47,18 @@ bankruptcy improvement (NorthAmerica 80.7%→75.2%, every other region down
 20-40+ points) alongside a real, root-caused (not a bug) win-rate
 side effect. See the Active priority section below for the full evidence
 chain both rounds, and the still-open, different (1973-oil-crisis-driven)
-NorthAmerica cluster round 2 surfaced. **M61-M64 shipped
+NorthAmerica cluster round 2 surfaced. **A third round (`WIN_CONDITIONS_ROADMAP.md`'s
+own M23 follow-up) closed the near-universal stalemate this same
+investigation surfaced** — 94.7% of games ran the full campaign with no
+declared winner even with 2+ solvent airlines; a sole-survivor win path
+plus an end-of-campaign ranking fallback dropped that to 0% stalemates,
+with zero effect on bankruptcy rates (confirmed). **A fourth round
+(`BASELINE_AI_ROADMAP.md`'s own "Bankruptcy conditions" section) answered
+the long-deferred `WIN_CONDITIONS_ROADMAP.md` "does bankruptcy need a
+comeback path" question directly** — a new real borrowing lever
+(`AiToolkit.MaintainCashRunway`) fixed the exact fixable case it targeted
+(SouthAmerica 37.6%→10.5%) and honestly couldn't touch the genuinely
+structural one (NorthAmerica flat, 74.5%→74.1%). **M61-M64 shipped
 a real, active, known regression** — see the Active priority section
 below for the full picture; this is not the same kind of "clean and done"
 as the other ranges listed here. Update this line the moment a new
@@ -537,9 +548,19 @@ un-scoped question if it's ever revisited.
 - **Reconciling the QA harness's old informal "wins" column** (highest
   final cash — never a real victory condition) **with real win data.**
   Both coexist today.
-- **Whether permanent, unrecoverable bankruptcy needs campaign-pacing
-  revisiting** — the one item left open after M42's win-condition-constant
-  re-tuning check (both constants were reaffirmed, not revised).
+- ~~**Whether permanent, unrecoverable bankruptcy needs campaign-pacing
+  revisiting**~~ — investigated directly (`BASELINE_AI_ROADMAP.md`'s own
+  "Bankruptcy conditions" section): real 300-game instrumentation found
+  100% of bankruptcies are triggered by cash going negative (never the
+  $80M debt ceiling), almost always a slow, multi-quarter bleed with
+  plenty of warning. A new `AiToolkit.MaintainCashRunway` gives every
+  strategy a real borrowing lever before that point — real, substantial
+  fix for a fixable cash crunch (SouthAmerica bankruptcy 37.6%→10.5%),
+  honestly limited against a genuinely structural deficit (NorthAmerica's
+  own oil-shock-era cluster stayed flat, 74.5%→74.1%) — bankruptcy
+  itself is still permanent once it actually happens; this doesn't add
+  reorganization, it prevents more of the *avoidable* cases from
+  happening in the first place.
 
 ### `HISTORICAL_DYNAMICS_ROADMAP.md`
 - **Gate capacity growing over time** — done, via

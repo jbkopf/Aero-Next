@@ -2133,6 +2133,69 @@ understood, wasn't itself judged a problem to fix this round -
 
 ---
 
+## Bankruptcy conditions — a real borrowing lever for a slow cash bleed ✅
+
+**Origin:** the user's own direct request to "look at bankruptcy
+conditions." Real 300-game instrumentation of `FinancialResolver.Resolve`'s
+own two triggers (`cashAfter < Money.Zero`, or debt exceeding
+`DebtCeilingDollars`, $80M) found: **100% of 545 bankruptcy events were
+triggered by cash going negative - zero ever hit the debt ceiling**, and
+82% carried zero debt at all. Bankruptcies are almost always a slow,
+multi-quarter bleed crossing zero by a modest margin (avg -$5.12M, 84.8%
+within -$10M) - not a cliff, plenty of quarters of visible warning.
+`AiToolkit.NegotiateOrBorrow` was the only existing use of `RefinanceOrder`
+anywhere in the codebase, narrowly scoped to covering a negotiation-bid
+shortfall - no strategy ever borrowed as a general "running low, buy
+myself runway" move. A large, essentially unused gap between where
+airlines actually die and their real $80M borrowing capacity.
+
+**Shipped:** a new `AiToolkit.MaintainCashRunway`, called first inside
+`ApplyManagementToolkit` (before any other spending decision), always-on
+for every strategy - unlike the M58-follow-up closure fix (legitimately
+scoped to `NetworkOptimizerStrategy`'s own plateaued-network case), this
+slow-bleed pattern showed up in every region's own diagnostic data, so it
+belongs in the shared toolkit unconditionally. Below
+`MinimumCashRunwayQuarters` (2) worth of the fleet's own current quarterly
+burn (`SalaryCostPerAircraftPerQuarter` x fleet size - the dominant fixed
+cost per the M58-follow-up investigation's own finding that revenue and
+operating cost nearly cancel out), it borrows enough to restore
+`TargetCashRunwayQuarters` (4) - deliberately higher than the trigger
+(hysteresis, so it doesn't borrow a token amount every single quarter
+hovering near the line), capped by real headroom under the $80M ceiling,
+reusing the exact same never-exceed-the-ceiling idiom `NegotiateOrBorrow`
+already established.
+
+**Measured: a real, substantial win concentrated in exactly the case the
+evidence predicted, honestly limited in exactly the case it predicted
+too.** 300-game sweep: total bankruptcy events **545→467** (-14.3%).
+**SouthAmerica: 37.6%→10.5% bankrupt** (-27.1 points) - the diagnostic's
+own "chronic thin-margin, already using debt, still not enough" pattern
+turned out to be genuinely fixable with a real cash cushion. Every other
+region moved only slightly (Europe 50.3%→48.2%, AustralAsia
+52.6%→48.5%, SouthWestAsia 61.0%→60.0%, EastAsia 13.1%→11.7%) except
+**NorthAmerica, which stayed flat (74.5%→74.1%)** - its own year-23-25
+cluster (the still-open, likely 1973-oil-crisis-driven wave from the
+prior round) is a genuinely structural, permanent deficit that borrowing
+only delays, not fixes. Confirmed directly, not assumed: a follow-up
+trigger-breakdown re-run still shows 100% cash-triggered bankruptcies
+(never the debt ceiling), but the population that carries *any* debt at
+bankruptcy jumped from 18% to 41.8%, with 5.1% now reaching $40-80M -
+the lever is genuinely firing and being used heavily, it just can't
+out-borrow a deficit large enough that debt service itself (interest +
+principal, both proportional to the growing balance) becomes its own
+additional drag before the ceiling is ever technically reached.
+
+**This directly answers the question `docs/WIN_CONDITIONS_ROADMAP.md`
+flagged and deliberately deferred** ("does a bankrupt airline need some
+kind of comeback path, for pacing's sake if nothing else?") - a real,
+working comeback path now exists for a fixable cash crunch; a genuinely
+permanent structural deficit (like NorthAmerica's own oil-shock-era
+cluster) still isn't something this lever - or any lever short of fixing
+the underlying route economics - can rescue, and that's an honest,
+expected boundary, not a gap in this round's own fix.
+
+---
+
 ## Kept in mind, not scheduled
 
 - **`AllianceCourtOrder`** — deliberately excluded from every milestone
