@@ -169,6 +169,12 @@ public static class FullGameRunner
             // every airline's strategy sees the same picture regardless
             // of processing order within the quarter.
             var servingAirlineNamesByPairKey = new Dictionary<(string, string), HashSet<string>>();
+            // BalancedGrowthStrategy follow-up: same idea, one level up -
+            // which airlines touch which region at all, computed once per
+            // quarter alongside the pair-level map above (same source
+            // data, routesAtQuarterStart, so this costs nothing extra to
+            // build together).
+            var touchingAirlineNamesByRegion = new Dictionary<Region, HashSet<string>>();
             foreach (var n in names)
             {
                 foreach (var route in routesAtQuarterStart[n])
@@ -181,6 +187,17 @@ public static class FullGameRunner
                     }
 
                     servingNames.Add(n);
+
+                    foreach (var region in new[] { route.Origin.Region, route.Destination.Region })
+                    {
+                        if (!touchingAirlineNamesByRegion.TryGetValue(region, out var touchingNames))
+                        {
+                            touchingNames = new HashSet<string>(StringComparer.Ordinal);
+                            touchingAirlineNamesByRegion[region] = touchingNames;
+                        }
+
+                        touchingNames.Add(n);
+                    }
                 }
             }
 
@@ -249,6 +266,18 @@ public static class FullGameRunner
                         r => QuarterEngine.NormalizedPairKey(r.Origin, r.Destination),
                         r => servingAirlineNamesByPairKey[QuarterEngine.NormalizedPairKey(r.Origin, r.Destination)].Count - 1);
 
+                    // BalancedGrowthStrategy follow-up: the global
+                    // counterparts - every pair/region *any* airline
+                    // touches, not just this one's own served routes,
+                    // each still excluding this airline itself from its
+                    // own rival count.
+                    var rivalPresenceByPairKey = servingAirlineNamesByPairKey.ToDictionary(
+                        kv => kv.Key,
+                        kv => kv.Value.Count - (kv.Value.Contains(name) ? 1 : 0));
+                    var rivalPresenceByRegion = touchingAirlineNamesByRegion.ToDictionary(
+                        kv => kv.Key,
+                        kv => kv.Value.Count - (kv.Value.Contains(name) ? 1 : 0));
+
                     var strategyContext = new StrategyContext(
                         routes[name], caps[name], cities, yearDemandModel, availableFleet, fleets[name], homeRegionByName[name],
                         HomeCity: seatByName[name].StartingCity,
@@ -259,10 +288,22 @@ public static class FullGameRunner
                         RivalCountByServedRoute: rivalCountByServedRoute,
                         LastQuarterSeatsCarriedByRoute: lastQuarterSeatsCarriedByRouteByName[name],
                         QuarterNumber: q,
-                        RouteHistoryByPair: routeHistoryByAirlineName[name]);
-                    var strategy = BaselineAi.SelectStrategy(currentStrategyByName[name], q, strategyContext);
-                    currentStrategyByName[name] = strategy;
-                    orders = strategy.DecideOrders(strategyContext);
+                        RouteHistoryByPair: routeHistoryByAirlineName[name],
+                        InDistress: finances[name].InDistress,
+                        RivalPresenceByPairKey: rivalPresenceByPairKey,
+                        RivalPresenceByRegion: rivalPresenceByRegion);
+
+                    // Bankruptcy-conditions follow-up: SelectStrategy's own
+                    // year-boundary rotation keeps advancing regardless of
+                    // distress - normalStrategy is what gets persisted, so
+                    // the rotation resumes exactly where it would have been
+                    // the moment distress clears. DistressStrategy overrides
+                    // only which one actually runs *this* quarter - see its
+                    // own class doc comment.
+                    var normalStrategy = BaselineAi.SelectStrategy(currentStrategyByName[name], q, strategyContext);
+                    currentStrategyByName[name] = normalStrategy;
+                    var activeStrategy = strategyContext.InDistress ? DistressStrategy.Instance : normalStrategy;
+                    orders = activeStrategy.DecideOrders(strategyContext);
                 }
 
                 // M18's guaranteed quarter-1 route is exempt from slot

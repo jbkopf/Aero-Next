@@ -18,11 +18,11 @@ namespace AeroNext.Core.Finance;
 /// flat quarterly salary (M30) — divided across the seats ONE assigned
 /// aircraft offers this quarter, not the route's total (route.SeatsPerQuarter
 /// / route.AircraftCount recovers exactly that, with no remainder, since
-/// SeatsPerQuarter is built as a multiple of AircraftCount). A future
-/// per-aircraft recurring cost (e.g. a lease fee once a route can carry
-/// leased units) is meant to be added as one more term summed in here —
-/// a single, obvious extension point, not a change to every call site
-/// that reads a default fare.
+/// SeatsPerQuarter is built as a multiple of AircraftCount). BalancedGrowthStrategy
+/// follow-up: the once-future per-aircraft recurring lease fee named
+/// here is now that one more optional term, gated by includeLeaseFee —
+/// see its own doc comment; a default fare (SuggestedFarePerPassenger,
+/// every existing caller) still assumes ownership, unaffected.
 ///
 /// This is necessary, not optional: a margin over operating cost alone
 /// can never reliably cover a flat, distance-independent cost like
@@ -46,12 +46,29 @@ public static class FareCalculator
     /// </summary>
     public const double FareDemandElasticity = 1.5;
 
-    public static Money CostPerSeatCarried(Route route)
+    /// <param name="includeLeaseFee">
+    /// BalancedGrowthStrategy follow-up: the real per-quarter recurring
+    /// cost a *leased* (not owned) unit carries — FinancialResolver.LeaseFeeRatePerQuarter
+    /// of the aircraft's own purchase Cost, prorated across the same
+    /// per-aircraft seat count the salary term already uses. Defaults
+    /// false, reproducing every existing call site's exact prior
+    /// behavior unchanged — Route itself carries no ownership-mode field
+    /// (that's FleetUnit.Mode, one level up), so a caller evaluating a
+    /// specific fulfillment path (idle fleet vs. a fresh lease) passes
+    /// this explicitly rather than it being inferable from the Route
+    /// alone. This is the exact extension point this class's own doc
+    /// comment already named ("a lease fee... is meant to be added as
+    /// one more term summed in here").
+    /// </param>
+    public static Money CostPerSeatCarried(Route route, bool includeLeaseFee = false)
     {
         var seatsPerQuarterPerAircraft = route.SeatsPerQuarter / route.AircraftCount;
         var operatingCostPerSeat = route.DistanceKm * route.Aircraft.CostPerAvailableSeatKm;
         var salaryPerSeat = FinancialResolver.SalaryCostPerAircraftPerQuarter.Cents / (double)seatsPerQuarterPerAircraft / 100.0;
-        var cents = (long)Math.Round((operatingCostPerSeat + salaryPerSeat) * 100, MidpointRounding.AwayFromZero);
+        var leaseFeePerSeat = includeLeaseFee
+            ? route.Aircraft.Cost.Cents * FinancialResolver.LeaseFeeRatePerQuarter / seatsPerQuarterPerAircraft / 100.0
+            : 0.0;
+        var cents = (long)Math.Round((operatingCostPerSeat + salaryPerSeat + leaseFeePerSeat) * 100, MidpointRounding.AwayFromZero);
 
         return new Money(cents);
     }
@@ -75,14 +92,14 @@ public static class FareCalculator
     /// available" figure — a real, competitively-resolved carried count
     /// when one exists (a contested route), or RouteEvaluator's own
     /// solo-carrier estimate otherwise (an uncontested route, where that
-    /// estimate is already accurate). Doesn't account for a route's
-    /// prorated lease fee (no per-route lease-fee model exists yet — see
-    /// CostPerSeatCarried's own doc comment on this same, already-flagged
-    /// gap), so this is an estimate, not a guaranteed match to
-    /// FinancialResolver's own final number.
+    /// estimate is already accurate). includeLeaseFee (BalancedGrowthStrategy
+    /// follow-up) forwards to CostPerSeatCarried unchanged — see its own
+    /// doc comment; defaults false, so every pre-existing caller here
+    /// (which never modeled a route's own prorated lease fee) is
+    /// unaffected.
     /// </summary>
-    public static Money EstimatedProfit(Route route, long carriedPassengers) =>
-        route.FarePerPassenger * carriedPassengers - CostPerSeatCarried(route) * route.SeatsPerQuarter;
+    public static Money EstimatedProfit(Route route, long carriedPassengers, bool includeLeaseFee = false) =>
+        route.FarePerPassenger * carriedPassengers - CostPerSeatCarried(route, includeLeaseFee) * route.SeatsPerQuarter;
 
     /// <summary>
     /// M48: how much this route's own actual fare (FarePerPassenger —

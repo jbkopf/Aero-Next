@@ -217,4 +217,71 @@ public class FareCalculatorTests
 
         Assert.True(FareCalculator.EstimatedProfit(route, barelyAnyone) < Money.Zero);
     }
+
+    // --- BalancedGrowthStrategy follow-up: includeLeaseFee ---
+
+    [Fact]
+    public void CostPerSeatCarried_IncludeLeaseFeeDefaultsFalse_MatchesEveryExistingCallSite()
+    {
+        var a = MakeCity("a", 0, 0);
+        var b = MakeCity("b", 5, 5);
+        var costlyAircraft = new AircraftType("t", "Test", Seats: 20, CruiseSpeedKmh: 400, CostPerAvailableSeatKm: 0.10, Cost: Money.FromDollars(1_000_000));
+        var route = new Route(a, b, costlyAircraft, AircraftCount: 1);
+
+        Assert.Equal(FareCalculator.CostPerSeatCarried(route), FareCalculator.CostPerSeatCarried(route, includeLeaseFee: false));
+    }
+
+    [Fact]
+    public void CostPerSeatCarried_IncludeLeaseFeeTrue_MatchesIndependentlyComputedTotal()
+    {
+        // Independently computed, not calling CostPerSeatCarried itself -
+        // the same operating+salary terms ExpectedFare already
+        // establishes, plus FinancialResolver.LeaseFeeRatePerQuarter (4%)
+        // of the aircraft's own $1,000,000 Cost, prorated across the same
+        // per-aircraft seat count the salary term already uses - all
+        // three summed and rounded once together, matching
+        // CostPerSeatCarried's own single combined rounding (comparing
+        // via subtraction of two independently-rounded totals instead
+        // can be off by a cent from ordinary rounding, not a real bug).
+        var a = MakeCity("a", 0, 0);
+        var b = MakeCity("b", 5, 5);
+        var costlyAircraft = new AircraftType("t", "Test", Seats: 20, CruiseSpeedKmh: 400, CostPerAvailableSeatKm: 0.10, Cost: Money.FromDollars(1_000_000));
+        var route = new Route(a, b, costlyAircraft, AircraftCount: 1);
+        var seatsPerQuarterPerAircraft = route.SeatsPerQuarter / route.AircraftCount;
+        var operatingCostPerSeat = route.DistanceKm * route.Aircraft.CostPerAvailableSeatKm;
+        var salaryPerSeat = FinancialResolver.SalaryCostPerAircraftPerQuarter.Cents / (double)seatsPerQuarterPerAircraft / 100.0;
+        var leaseFeePerSeat = costlyAircraft.Cost.Cents * FinancialResolver.LeaseFeeRatePerQuarter / seatsPerQuarterPerAircraft / 100.0;
+        var expectedCents = (long)Math.Round((operatingCostPerSeat + salaryPerSeat + leaseFeePerSeat) * 100, MidpointRounding.AwayFromZero);
+
+        Assert.Equal(expectedCents, FareCalculator.CostPerSeatCarried(route, includeLeaseFee: true).Cents);
+    }
+
+    [Fact]
+    public void CostPerSeatCarried_IncludeLeaseFeeTrue_ZeroCostAircraft_UnaffectedByTheFlag()
+    {
+        // A synthetic Test aircraft's own default Cost (Money.Zero, per
+        // AircraftType's own doc comment) means 4% of zero is zero -
+        // every pre-existing test in this file using the shared MakeRoute
+        // helper is genuinely unaffected regardless of this flag.
+        var a = MakeCity("a", 0, 0);
+        var b = MakeCity("b", 5, 5);
+        var route = MakeRoute(a, b);
+
+        Assert.Equal(FareCalculator.CostPerSeatCarried(route, includeLeaseFee: false), FareCalculator.CostPerSeatCarried(route, includeLeaseFee: true));
+    }
+
+    [Fact]
+    public void EstimatedProfit_IncludeLeaseFee_CanFlipAThinMarginRouteNegative()
+    {
+        var a = MakeCity("a", 0, 0);
+        var b = MakeCity("b", 5, 5);
+        var costlyAircraft = new AircraftType("t", "Test", Seats: 20, CruiseSpeedKmh: 400, CostPerAvailableSeatKm: 0.10, Cost: Money.FromDollars(50_000_000));
+        var route = new Route(a, b, costlyAircraft, AircraftCount: 1);
+
+        var profitOwned = FareCalculator.EstimatedProfit(route, route.SeatsPerQuarter, includeLeaseFee: false);
+        var profitLeased = FareCalculator.EstimatedProfit(route, route.SeatsPerQuarter, includeLeaseFee: true);
+
+        Assert.True(profitOwned > Money.Zero);
+        Assert.True(profitLeased < profitOwned);
+    }
 }

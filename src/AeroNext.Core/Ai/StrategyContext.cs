@@ -95,6 +95,28 @@ namespace AeroNext.Core.Ai;
 /// entirely, confirmed via direct grep to have zero other consumers
 /// anywhere in the codebase before deletion — see
 /// docs/BASELINE_AI_ROADMAP.md's M58 section for the full evidence chain.
+///
+/// Bankruptcy-conditions follow-up: InDistress mirrors FinancialState's
+/// own field of the same name, defaults false like every other field
+/// after HomeCity. Not consulted by any real strategy's own decision
+/// logic or by BaselineAi.SelectStrategy's own rotation — it's read only
+/// at the one real dispatch site (FullGameRunner.cs) to decide whether
+/// DistressStrategy overrides whatever SelectStrategy's own rotation
+/// would otherwise run this exact quarter, orthogonally to that
+/// rotation's own year-boundary cadence. See DistressStrategy's own class
+/// doc comment for the full design.
+///
+/// BalancedGrowthStrategy follow-up: RivalPresenceByPairKey/RivalPresenceByRegion
+/// close a real, previously-nonexistent gap — no prior field told a
+/// strategy anything about a pair or region it doesn't itself serve.
+/// RivalCountByServedRoute above stays scoped to only this airline's own
+/// CurrentRoutes (M52's own convention); these two are global, keyed
+/// across every airline's own current routes, computed once per quarter
+/// in FullGameRunner.cs from the same servingAirlineNamesByPairKey data
+/// RivalCountByServedRoute is already narrowed from. Both nullable,
+/// permissive-default like everything else here — null means "no
+/// visibility," every candidate treated as uncontested, not "assume
+/// zero rivals everywhere" silently baked into a non-nullable default.
 /// </summary>
 public sealed record StrategyContext(
     IReadOnlyList<Route> CurrentRoutes,
@@ -114,4 +136,7 @@ public sealed record StrategyContext(
     IReadOnlyDictionary<(string OriginId, string DestinationId), int>? RivalCountByServedRoute = null,
     IReadOnlyDictionary<(string OriginId, string DestinationId), long>? LastQuarterSeatsCarriedByRoute = null,
     int QuarterNumber = 1,
-    IReadOnlyDictionary<(string OriginId, string DestinationId), AiRouteHistory>? RouteHistoryByPair = null);
+    IReadOnlyDictionary<(string OriginId, string DestinationId), AiRouteHistory>? RouteHistoryByPair = null,
+    bool InDistress = false,
+    IReadOnlyDictionary<(string OriginId, string DestinationId), int>? RivalPresenceByPairKey = null,
+    IReadOnlyDictionary<Region, int>? RivalPresenceByRegion = null);

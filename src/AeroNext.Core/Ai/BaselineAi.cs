@@ -427,12 +427,19 @@ public static class BaselineAi
     /// SelectStrategy, which sorts by Suitability with a deterministic
     /// Name tie-break, never by roster position. M58: NetworkOptimizerStrategy
     /// added, the first strategy to cover GameEra.LateGame at all.
+    /// BalancedGrowthStrategy follow-up: the second MidGame/LateGame
+    /// strategy - see its own class doc comment and
+    /// AiToolkit.NetworkTroubleRatio's for why the two are a guaranteed
+    /// non-overlapping Suitability partition, not independently-tuned
+    /// scores hoping to compare correctly (the exact bug M58 resume round
+    /// 3 already found and fixed once for the prior pairing).
     /// </summary>
     public static IReadOnlyList<IAiStrategy> Strategies { get; } = new IAiStrategy[]
     {
         new DomesticProfitOptimizerStrategy(),
         new RapidExpansionStrategy(),
         new NetworkOptimizerStrategy(),
+        new BalancedGrowthStrategy(),
     };
 
     /// <summary>

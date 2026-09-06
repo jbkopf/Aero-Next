@@ -144,6 +144,71 @@ public static class AiToolkit
         return ids;
     }
 
+    /// <summary>
+    /// BalancedGrowthStrategy: which regions this airline has a real
+    /// presence in — every region touched by CurrentRoutes, plus
+    /// HomeRegion unconditionally (the same "always a valid, persistent
+    /// foothold" treatment ValidOriginCityIds already gives HomeCity,
+    /// applied one level up). Deliberately a presence signal only ("this
+    /// airline flies somewhere here"), not WinConditionChecker's own
+    /// dominance bar (leading a region on passenger share, a much higher,
+    /// separate threshold) - this only gates which growth phase
+    /// BalancedGrowthStrategy runs, never anything win-condition-related.
+    /// </summary>
+    public static IReadOnlySet<Region> TouchedRegions(StrategyContext context)
+    {
+        var regions = context.CurrentRoutes
+            .SelectMany(r => new[] { r.Origin.Region, r.Destination.Region })
+            .ToHashSet();
+        regions.Add(context.HomeRegion);
+        return regions;
+    }
+
+    /// <summary>
+    /// M58/BalancedGrowthStrategy follow-up: "is this airline's network
+    /// in real trouble" - Math.Max of unprofitableRatio (a route read
+    /// unprofitable for MinimumSustainedUnprofitableQuarters in a row,
+    /// reusing AiRouteHistory.ConsecutiveUnprofitableQuarters) and
+    /// contestedRatio (the exact same "contested" definition
+    /// ApplyMarketingCampaign already acts on), each gated by
+    /// MinimumTroubledRouteCountForSignal so a tiny, young network with
+    /// one struggling route doesn't register as "the network is in
+    /// trouble" the way a mature one genuinely does. Originally
+    /// NetworkOptimizerStrategy's own Suitability body verbatim (see its
+    /// own doc comment for the full tuning history: why the floor is 1
+    /// not 3, why "sustained 2+ quarters" not a same-quarter snapshot) -
+    /// extracted here, byte-identical, once BalancedGrowthStrategy needed
+    /// the same signal to define its own Suitability as this value's
+    /// direct complement (see that class's own doc comment for why a
+    /// guaranteed partition, not two independently-tuned scores, is the
+    /// safe way for two MidGame/LateGame strategies to coexist).
+    /// </summary>
+    private const int MinimumTroubledRouteCountForSignal = 1;
+
+    /// <summary>See NetworkTroubleRatio's own doc comment - originally NetworkOptimizerStrategy's own constant of the same name and meaning, moved alongside it.</summary>
+    private const int MinimumSustainedUnprofitableQuarters = 2;
+
+    public static double NetworkTroubleRatio(StrategyContext context)
+    {
+        var routes = context.CurrentRoutes;
+
+        if (routes.Count == 0)
+        {
+            return 0.0;
+        }
+
+        var sustainedUnprofitableCount = routes.Count(r =>
+            (context.RouteHistoryByPair?.GetValueOrDefault(QuarterEngine.NormalizedPairKey(r.Origin, r.Destination))?.ConsecutiveUnprofitableQuarters ?? 0)
+                >= MinimumSustainedUnprofitableQuarters);
+        var unprofitableRatio = sustainedUnprofitableCount < MinimumTroubledRouteCountForSignal ? 0.0 : sustainedUnprofitableCount / (double)routes.Count;
+
+        var contestedCount = routes.Count(r =>
+            (context.RivalCountByServedRoute?.GetValueOrDefault(QuarterEngine.NormalizedPairKey(r.Origin, r.Destination)) ?? 0) > 0);
+        var contestedRatio = contestedCount < MinimumTroubledRouteCountForSignal ? 0.0 : contestedCount / (double)routes.Count;
+
+        return Math.Max(unprofitableRatio, contestedRatio);
+    }
+
     /// <summary>M55 (proposed, tunable) — a route shrunk within this many quarters of context.QuarterNumber is excluded from being picked as "best performing" to grow. See RecentlyShrunkPairKeys.</summary>
     public const int GrowthCooldownQuarters = 2;
 

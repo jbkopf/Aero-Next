@@ -593,15 +593,17 @@ un-scoped question if it's ever revisited.
   drew. Bankruptcy itself is still permanent once it actually happens;
   this doesn't add reorganization, it gives more of the *avoidable* cases
   one more real chance before that point.
-- **Distress-aware AI reaction** — deliberately deferred alongside the
-  grace-period fix above: no strategy yet reacts to `FinancialState.InDistress`
-  by proactively closing a weak route or retiring an idle aircraft: the
-  grace period today relies entirely on `MaintainCashRunway`'s existing
-  unconditional borrow-to-runway logic (which now actually gets applied
-  during the grace quarter instead of being discarded). A real starting
-  point for whoever picks this up: `CloseRouteOrder`/`RetireAircraftOrder`
-  are both already free, Private actions with no code gap to close, only
-  AI judgment for *when* to reach for them over borrowing.
+- ~~**Distress-aware AI reaction**~~ — built (`DistressStrategy`,
+  `docs/BASELINE_AI_ROADMAP.md`'s own section) - dispatched for exactly
+  as long as `StrategyContext.InDistress` is true, no growth phase,
+  `AiToolkit.ApplyManagementToolkit` reused wholesale otherwise. Measured
+  a real, honest wash (not a regression, not a clean win) against the
+  grace-period-only baseline - shipped anyway as a real, reasonable
+  behavior. `CloseRouteOrder`/`RetireAircraftOrder`'s own aggressive,
+  unconditional-retirement version was tried and found to cost real value
+  in Europe specifically (some idle units really were useful again once
+  solvent) - the shipped version relies on `ApplyManagementToolkit`'s own
+  narrower stranded-unit check instead.
 
 ### `HISTORICAL_DYNAMICS_ROADMAP.md`
 - **Gate capacity growing over time** — done, via

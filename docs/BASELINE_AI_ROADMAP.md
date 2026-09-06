@@ -2375,7 +2375,122 @@ every bankruptcy measured all session was ever debt-ceiling-triggered).
 
 ---
 
-## Kept in mind, not scheduled
+## DistressStrategy — emergency posture for the one-quarter grace window, a measured wash ⚠️
+
+**Origin:** the user's own direct follow-up to the grace-period fix above
+- trigger a distinct AI posture for exactly as long as `StrategyContext.InDistress`
+is true, revert automatically the moment it clears. Design: no growth
+phase at all (no `RouteOrder`/`LeaseAircraftOrder`/`AircraftOrder`/`NegotiationOrder`/
+`AllianceCourtOrder`), reusing `AiToolkit.ApplyManagementToolkit` wholesale
+for everything else (`MaintainCashRunway`'s borrow, fare cuts, cash-gated
+hiring/paydown, `enableSustainedSingleAircraftClosure: true` - matching
+`NetworkOptimizerStrategy`'s own choice, the real fix for a bug this
+investigation found: substituting this class in for `NetworkOptimizerStrategy`
+- the assigned strategy for 72% of all distress events, exactly
+proportional to its own 82.9% share of all quarter-assignments once
+properly exposure-normalized, not disproportionately unstable as first
+suspected - silently downgraded away that capability). Dispatched
+directly at `FullGameRunner.cs`, orthogonal to `BaselineAi.SelectStrategy`'s
+own year-boundary rotation, which keeps advancing underneath regardless
+of distress.
+
+**Measured: a real, honest wash, not a clean win.** Same
+seed-1/300-game/244-quarter sweep, best-tuned version (closure flag
+fixed, aggressive idle-retirement dropped after it was found to cost
+real value in Europe), against the grace-period-only baseline:
+NorthAmerica/SouthWestAsia/SouthAmerica unaffected, EastAsia exactly
+matches baseline, AustralAsia a noise-level point better (37.1%→36.1%),
+Europe a real but small point worse (10.7%→11.7%) - the one real,
+irreducible cost of forbidding growth during the grace quarter, with no
+offsetting gain found anywhere. Shipped anyway as a real, working,
+reasonable behavior (an airline in real distress *should* stop growing
+and reach for patient-closure tools) rather than for what the aggregate
+number alone would justify - the honest number is a wash, not a
+regression and not a win.
+
+---
+
+## BalancedGrowthStrategy — a real profit-gated growth counterpart to NetworkOptimizerStrategy ✅
+
+**Origin:** the user's own direct request — `NetworkOptimizerStrategy` is
+deliberately a stabilize-what-exists strategy (never proposes a
+cross-region `RouteOrder`/`NegotiationOrder` at all), so nothing kept
+deliberately growing an airline's reach once MidGame started. Wanted: a
+second MidGame/LateGame strategy, phased (reach 3 regions first, then
+grow within them), gated on real, cost-aware projected profit rather than
+raw demand, with real cost accounting - operating, salary, lease,
+existing competition.
+
+**Two real regressions found and fixed before this shipped, both via
+real sweeps, not assumption:**
+
+**Round 1 (raw-demand ranking):** the first version ranked candidates by
+`AiToolkit.EffectiveDemandScore` (the same safe metric `RapidExpansionStrategy`
+already uses), gated only by a cash-comfort multiplier. Real 300-game
+sweep: SouthWestAsia bankruptcy exploded 2.9%→**41.0%** - the exact
+growth-binge pattern this codebase's own `NetworkOptimizerStrategy` class
+doc comment already documents for NorthAmerica (a stable network suddenly
+grows unchecked the moment this strategy wins the year-boundary
+selection). Raising the cash bar to 6x (matching `NetworkOptimizerStrategy`'s
+own precedent) and dropping the lease fallback for new pairs only
+partially helped (41.0%→33.3%, still ~11x baseline) - the binge shifted
+later, didn't disappear, the identical shape a cash-discipline-only fix
+left for NorthAmerica's own two-round history.
+
+**Round 2 (the real redesign, this round):** stopped ranking by demand
+entirely. `EstimatedRealProfit` evaluates every candidate at its own
+best-fitting era-available aircraft type (real operating + salary cost
+via `FareCalculator.CostPerSeatCarried`, a real lease-fee term added to
+`FareCalculator` for exactly this — `includeLeaseFee`, the extension
+point that class's own doc comment had named since M34 — and existing
+competition derating captured demand via two new `StrategyContext`
+fields, `RivalPresenceByPairKey`/`RivalPresenceByRegion`, the first real
+visibility any strategy has ever had into a rival's presence on a pair
+this airline doesn't itself fly). Two cases, exactly as specified: Case 1
+(fewer than 3 regions touched) picks the best real-profit candidate
+reaching an untouched region; Case 2 (always available) picks the best
+real-profit candidate within regions already touched. Both gated by
+`ProfitabilityFloor` (`Money.Zero`) - unlike `docs/BASELINE_AI_ROADMAP.md`'s
+own M56 section (four reverted attempts at exactly this kind of
+profit-based ranking), this stays safe because every candidate is
+optimized to its own single-peaked-in-capacity best fit
+(`DomesticProfitOptimizerStrategy.EstimatedProfitForAircraft`'s own
+already-proven property) *before* different pairs are ever compared
+against each other - none of M56's four attempts did that.
+
+**Measured: a clean win, no region worse than baseline, several
+substantially better.** Same seed-1/300-game/244-quarter sweep,
+`DistressStrategy`'s own still-undecided dispatch bypassed for an
+isolated read, against the pre-existing baseline (NorthAmerica 0.4%,
+Europe 10.7%, EastAsia 4.5%, SouthWestAsia 2.9%, AustralAsia 37.1%,
+SouthAmerica 12.2% bankrupt):
+
+| Region | Baseline | Round 1 (raw demand) | Round 1 fix (6x, no lease) | Round 2 (real profit) |
+|---|---|---|---|---|
+| NorthAmerica | 0.4% | 5.1% | 5.1% | **0.4%** |
+| Europe | 10.7% | 12.7% | 11.7% | **9.6%** |
+| EastAsia | 4.5% | 5.2% | 4.5% | **4.5%** |
+| SouthWestAsia | 2.9% | 41.0% | 33.3% | **1.9%** |
+| AustralAsia | 37.1% | 40.2% | 40.2% | **34.0%** |
+| SouthAmerica | 12.2% | 4.2% | 4.2% | **0.4%** |
+
+SouthWestAsia - the region this whole redesign exists to fix - lands
+*better* than the pre-`BalancedGrowthStrategy` baseline, not just
+"recovered." SouthAmerica improved dramatically (12.2%→0.4%). AustralAsia
+improved too, though its own bankruptcy still concentrates entirely
+pre-MidGame (years 1-13, confirmed via its own bankruptcy-quarter
+distribution) - already established as a separate, pre-existing issue
+unrelated to this strategy (`BalancedGrowthStrategy` only activates from
+MidGame). 300/300 clean games with a real win-condition winner both
+before and after (the game-health ceiling M56's own four attempts
+collapsed) - average win quarter dropped from ~235 to ~143, real,
+decisive competitive growth rather than a stalled world.
+
+Growing an *existing* route stays untouched - still `BaselineAi.FindBestPerformingRoute`'s
+own real, observed load-factor ranking, deliberately not folded into the
+same real-profit-estimate machinery (the user's own two cases were both
+about *opening* routes).
+
 
 - **`AllianceCourtOrder`** — deliberately excluded from every milestone
   above, carrying forward `BaselineAi`'s own existing reasoning (M9):

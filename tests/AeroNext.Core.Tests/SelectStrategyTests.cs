@@ -105,34 +105,49 @@ public class SelectStrategyTests
     }
 
     [Fact]
-    public void SelectStrategy_LateGame_NoCurrent_PicksNetworkOptimizer()
+    public void SelectStrategy_LateGame_NoCurrent_HealthyNetwork_PicksBalancedGrowth()
     {
-        // M58: NetworkOptimizerStrategy is the first strategy to cover
+        // M58: NetworkOptimizerStrategy was the first strategy to cover
         // LateGame at all - this used to throw (no eligible strategy and
-        // no current to fall back to); now it resolves for real.
+        // no current to fall back to). BalancedGrowthStrategy follow-up:
+        // MakeContext's own empty-route fixture means
+        // AiToolkit.NetworkTroubleRatio is exactly 0.0 (nothing to
+        // optimize) - BalancedGrowthStrategy's own Suitability (the
+        // direct complement, see its own class doc comment) is 1.0 and
+        // wins. See the test below for the complementary, troubled-network
+        // case.
         var context = MakeContext(Money.FromDollars(20_000_000));
 
         var chosen = BaselineAi.SelectStrategy(null, quarterNumber: 200, context);
 
-        Assert.IsType<NetworkOptimizerStrategy>(chosen);
+        Assert.IsType<BalancedGrowthStrategy>(chosen);
     }
 
     [Fact]
-    public void SelectStrategy_MidGame_PicksNetworkOptimizer_RegardlessOfCash()
+    public void SelectStrategy_MidGame_TroubledNetwork_PicksNetworkOptimizer_RegardlessOfCash()
     {
         // M58 resume (round 3): DomesticProfitOptimizerStrategy is no
         // longer MidGame-eligible at all (see its own class doc comment
         // for why - its cash signal was structurally disqualified for
-        // 90.3% of real MidGame/LateGame comparisons), so
-        // NetworkOptimizerStrategy is the sole eligible strategy there
-        // now - picked unconditionally, not because it happens to win a
-        // cash comparison. Poor cash used to favor
-        // DomesticProfitOptimizerStrategy outright; it no longer matters.
-        var poorContext = MakeContext(Money.FromDollars(2_000_000));
-        var richContext = MakeContext(Money.FromDollars(20_000_000));
+        // 90.3% of real MidGame/LateGame comparisons). BalancedGrowthStrategy
+        // follow-up: a real contested route (RivalCountByServedRoute > 0)
+        // gives AiToolkit.NetworkTroubleRatio a nonzero reading, so
+        // NetworkOptimizerStrategy's own Suitability wins the
+        // now-three-way MidGame/LateGame comparison regardless of cash -
+        // the guaranteed partition (see NetworkOptimizerStrategy's own
+        // class doc comment) rather than a cash-driven pick.
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
+        var away = MakeCity("away", Region.NorthAmerica, 1, 1, 100);
+        var aircraft = new AircraftType("t", "Test", Seats: 100);
+        var route = new Route(home, away, aircraft, AircraftCount: 1);
+        var rivalCount = new System.Collections.Generic.Dictionary<(string, string), int> { [QuarterEngine.NormalizedPairKey(home, away)] = 1 };
 
-        var chosenPoor = BaselineAi.SelectStrategy(null, quarterNumber: 100, poorContext);
-        var chosenRich = BaselineAi.SelectStrategy(null, quarterNumber: 100, richContext);
+        StrategyContext MakeTroubledContext(Money cash) =>
+            new(new[] { route }, QuarterEngine.BaseActionCap, new[] { home, away }, DemandModel, Array.Empty<AircraftType>(), AirlineFleet.Empty,
+                Region.NorthAmerica, home, AvailableCash: cash, RivalCountByServedRoute: rivalCount);
+
+        var chosenPoor = BaselineAi.SelectStrategy(null, quarterNumber: 100, MakeTroubledContext(Money.FromDollars(2_000_000)));
+        var chosenRich = BaselineAi.SelectStrategy(null, quarterNumber: 100, MakeTroubledContext(Money.FromDollars(20_000_000)));
 
         Assert.IsType<NetworkOptimizerStrategy>(chosenPoor);
         Assert.IsType<NetworkOptimizerStrategy>(chosenRich);
@@ -151,11 +166,12 @@ public class SelectStrategyTests
     }
 
     [Fact]
-    public void Strategies_ContainsExactlyTheThreeBuiltStrategies()
+    public void Strategies_ContainsExactlyTheFourBuiltStrategies()
     {
-        Assert.Equal(3, BaselineAi.Strategies.Count);
+        Assert.Equal(4, BaselineAi.Strategies.Count);
         Assert.Contains(BaselineAi.Strategies, s => s is DomesticProfitOptimizerStrategy);
         Assert.Contains(BaselineAi.Strategies, s => s is RapidExpansionStrategy);
         Assert.Contains(BaselineAi.Strategies, s => s is NetworkOptimizerStrategy);
+        Assert.Contains(BaselineAi.Strategies, s => s is BalancedGrowthStrategy);
     }
 }

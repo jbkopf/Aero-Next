@@ -134,50 +134,6 @@ public sealed class NetworkOptimizerStrategy : IAiStrategy
     public IReadOnlySet<GameEra> ApplicableEras { get; } = new HashSet<GameEra> { GameEra.MidGame, GameEra.LateGame };
 
     /// <summary>
-    /// (Proposed, tunable) — a real 300-game sweep measured the first
-    /// version of this Suitability (pure ratios, no floor) picking this
-    /// strategy at an average of just 3.7 routes - a single unprofitable
-    /// or contested route out of 2-3 total was enough to hit ratio 1.0,
-    /// crowding out real early growth (win rate 41.3%→29.7%, NorthAmerica
-    /// bankruptcy 24.1%→54.0%). The user's own wording is "multiple
-    /// unprofitable routes" / "many contested routes" - plural, not a
-    /// bare ratio - so an absolute-count floor is the direct fix, not a
-    /// guess: below this many, the signal contributes nothing at all,
-    /// however high the ratio.
-    ///
-    /// M58 resume: lowered 3 → 1, together with the new
-    /// MinimumSustainedUnprofitableQuarters requirement below - the
-    /// original floor of 3 was sized against a *same-quarter* snapshot
-    /// (any one bad quarter counted), but the real damage this strategy
-    /// exists to catch (NorthAmerica's own permanent ~12-14%
-    /// unprofitable-route share after the 1973 oil-shock event) is
-    /// roughly one persistently-bad route out of 5-8 - it never crossed a
-    /// same-quarter floor of 3 at all, which is the literal mechanism by
-    /// which this signal almost never fired for the real problem
-    /// (measured: only 318 of ~59,000 NorthAmerica evaluations). Once
-    /// "sustained 2+ quarters" is doing the real noise-filtering a
-    /// same-quarter count floor was originally built for, a floor this
-    /// strict is provably too strict for the real pattern.
-    /// </summary>
-    private const int MinimumTroubledRouteCountForSignal = 1;
-
-    /// <summary>
-    /// M58 resume (proposed, tunable): a route only counts toward
-    /// unprofitableRatio once it's read unprofitable for this many
-    /// quarters *in a row*, ending with the most recent one - reuses
-    /// AiRouteHistory.ConsecutiveUnprofitableQuarters (real, already
-    /// tracked every quarter by FullGameRunner.cs, previously unconsumed
-    /// by anything). Same principle docs/BASELINE_AI_ROADMAP.md's M55
-    /// already established for route *closure* specifically ("a route
-    /// needs to remember it was just bad, not just prove itself bad in
-    /// this one isolated quarter") - now applied to this strategy's own
-    /// selection signal too, closing the gap that let a one-off bad
-    /// quarter on a young network read the same as genuine, sustained
-    /// trouble under the old same-quarter check.
-    /// </summary>
-    private const int MinimumSustainedUnprofitableQuarters = 2;
-
-    /// <summary>
     /// M58 follow-up (proposed, tunable) - stricter than BaselineAi's
     /// shared ComfortableOrderCost (3x), mirroring RapidExpansionStrategy's
     /// own precedent of overriding the shared multiplier for its own risk
@@ -196,49 +152,24 @@ public sealed class NetworkOptimizerStrategy : IAiStrategy
     private static Money NewPairComfortableOrderCost(AircraftType type) => type.Cost * NewPairCashComfortMultiplier;
 
     /// <summary>
-    /// Combined via Math.Max, not a weighted sum - either signal alone is
-    /// enough to make this strategy the best choice. unprofitableRatio
-    /// reuses AiRouteHistory.ConsecutiveUnprofitableQuarters (see
-    /// MinimumSustainedUnprofitableQuarters); contestedRatio reuses the
-    /// exact same "contested" definition ApplyMarketingCampaign already
-    /// acts on, so this strategy gets picked by the same signal it will
-    /// then go fix. Both gated by MinimumTroubledRouteCountForSignal so a
-    /// tiny, young network with one struggling route doesn't register as
-    /// "the network is in trouble" the same way a mature one genuinely
-    /// does.
-    ///
-    /// M58 resume (round 3): with DomesticProfitOptimizerStrategy no
-    /// longer eligible for MidGame or LateGame (see the class doc comment
-    /// above), this strategy is currently the sole occupant of both
-    /// eras - SelectStrategy's own eligible list is always length 1
-    /// there, so this exact value is never actually compared against a
-    /// rival's in practice today. Kept exactly as measured and tested
-    /// anyway, not simplified to a constant: it's correct, it's already
-    /// exercised directly by this class's own unit tests (not just
-    /// through reachability), and it's the real signal this strategy
-    /// should keep using if a future roster edit ever gives MidGame or
-    /// LateGame a second eligible strategy again.
+    /// BalancedGrowthStrategy follow-up: the actual troubled-network
+    /// computation (Math.Max of unprofitableRatio/contestedRatio, both
+    /// gated by a minimum troubled-route count and a minimum sustained-quarters
+    /// requirement) moved to AiToolkit.NetworkTroubleRatio - a pure
+    /// extraction, same formula, same constants, verified byte-identical
+    /// against this class's own existing Suitability tests. It moved
+    /// because the "never actually compared against a rival in practice"
+    /// caveat this doc comment used to carry stopped being true the
+    /// moment BalancedGrowthStrategy became MidGame/LateGame's second
+    /// eligible strategy: rather than trust two independently-tuned
+    /// scores to compare correctly (the exact M58 resume round 3 mistake
+    /// - see the class doc comment above), BalancedGrowthStrategy's own
+    /// Suitability is defined as the direct complement of this same
+    /// shared value (nonzero here means real trouble, so it wins; exactly
+    /// zero means BalancedGrowthStrategy wins instead) - a guaranteed
+    /// non-overlapping partition, not a hoped-for one.
     /// </summary>
-    public double Suitability(StrategyContext context)
-    {
-        var routes = context.CurrentRoutes;
-
-        if (routes.Count == 0)
-        {
-            return 0.0;
-        }
-
-        var sustainedUnprofitableCount = routes.Count(r =>
-            (context.RouteHistoryByPair?.GetValueOrDefault(QuarterEngine.NormalizedPairKey(r.Origin, r.Destination))?.ConsecutiveUnprofitableQuarters ?? 0)
-                >= MinimumSustainedUnprofitableQuarters);
-        var unprofitableRatio = sustainedUnprofitableCount < MinimumTroubledRouteCountForSignal ? 0.0 : sustainedUnprofitableCount / (double)routes.Count;
-
-        var contestedCount = routes.Count(r =>
-            (context.RivalCountByServedRoute?.GetValueOrDefault(QuarterEngine.NormalizedPairKey(r.Origin, r.Destination)) ?? 0) > 0);
-        var contestedRatio = contestedCount < MinimumTroubledRouteCountForSignal ? 0.0 : contestedCount / (double)routes.Count;
-
-        return Math.Max(unprofitableRatio, contestedRatio);
-    }
+    public double Suitability(StrategyContext context) => AiToolkit.NetworkTroubleRatio(context);
 
     public IReadOnlyList<QuarterOrder> DecideOrders(StrategyContext context)
     {
