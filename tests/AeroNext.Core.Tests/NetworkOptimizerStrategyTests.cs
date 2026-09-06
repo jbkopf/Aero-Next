@@ -21,9 +21,11 @@ public class NetworkOptimizerStrategyTests
         AirlineFleet? fleet = null, int actionCap = 3, Money? cash = null, City? homeCity = null,
         System.Collections.Generic.IReadOnlyDictionary<(string OriginId, string DestinationId), int>? rivalCountByServedRoute = null,
         System.Collections.Generic.IReadOnlyDictionary<(string OriginId, string DestinationId), AiRouteHistory>? routeHistoryByPair = null,
-        int quarterNumber = 1) =>
+        int quarterNumber = 1,
+        System.Collections.Generic.IReadOnlyDictionary<(string OriginId, string DestinationId), long>? lastQuarterSeatsCarriedByRoute = null) =>
         new(routes, actionCap, cities, DemandModel, eraTypes, fleet ?? AirlineFleet.Empty, homeRegion, HomeCity: homeCity ?? cities[0], AvailableCash: cash,
-            RivalCountByServedRoute: rivalCountByServedRoute, RouteHistoryByPair: routeHistoryByPair, QuarterNumber: quarterNumber);
+            RivalCountByServedRoute: rivalCountByServedRoute, RouteHistoryByPair: routeHistoryByPair, QuarterNumber: quarterNumber,
+            LastQuarterSeatsCarriedByRoute: lastQuarterSeatsCarriedByRoute);
 
     /// <summary>Shorthand for a RouteHistoryByPair entry with only ConsecutiveUnprofitableQuarters set - the only field this strategy's own Suitability reads.</summary>
     private static AiRouteHistory Sustained(int consecutiveUnprofitableQuarters) =>
@@ -245,6 +247,48 @@ public class NetworkOptimizerStrategyTests
         var lease = Assert.Single(orders.OfType<LeaseAircraftOrder>());
         Assert.Equal("t", lease.Type.Id);
         Assert.Contains(orders.OfType<RouteOrder>(), o => new HashSet<string> { "home", "served" }.SetEquals(new[] { o.Origin.Id, o.Destination.Id }));
+    }
+
+    [Fact]
+    public void DecideOrders_GrowExisting_SoloSaturatedButReallyUnprofitable_SkipsInFavorOfRealProfitableRoute()
+    {
+        // Existing-route-evaluation audit follow-up: home-bad reads as
+        // fully sold under RouteEvaluator's own solo estimate (100% load
+        // factor, real numbers verified via the scratchpad calculator:
+        // capacity 75,400 against a real gravity demand of 6,066,153) -
+        // under the old, solo-only ranking this is the unambiguous growth
+        // winner. But its own real, competitively-resolved carried figure
+        // (LastQuarterSeatsCarriedByRoute, set here to 10% of capacity)
+        // makes it a real loser (profit -$1,249,001.00). home-good has a
+        // lower solo load factor (93.34%, no real-data override - real
+        // equals solo) but is genuinely profitable (+$489,735.48) at that
+        // real figure. actionCap 2 lets the lease+route fallback (nothing
+        // idle) fully claim the budget on whichever pair step 2 picks,
+        // so no NegotiationOrder or step-3 new-pair order can appear
+        // afterward regardless of what candidates exist elsewhere.
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
+        var bad = MakeCity("bad", Region.NorthAmerica, 1, 1, 200);
+        var good = MakeCity("good", Region.NorthAmerica, 2, 2, 8);
+        var cities = new[] { home, bad, good };
+        var aircraft = new AircraftType("t", "Test", Seats: 100, RangeKm: 10_000, CruiseSpeedKmh: 900, CostPerAvailableSeatKm: 0.1);
+        var existing = new[]
+        {
+            new Route(home, bad, aircraft, AircraftCount: 1),
+            new Route(home, good, aircraft, AircraftCount: 1),
+        };
+        var badRoute = existing[0];
+        var realCarried = new System.Collections.Generic.Dictionary<(string, string), long>
+        {
+            [QuarterEngine.NormalizedPairKey(home, bad)] = badRoute.SeatsPerQuarter / 10,
+        };
+
+        var context = MakeContext(existing, cities, Array.Empty<AircraftType>(), Region.NorthAmerica, actionCap: 2, lastQuarterSeatsCarriedByRoute: realCarried);
+
+        var orders = Strategy.DecideOrders(context);
+
+        var routeOrder = Assert.Single(orders.OfType<RouteOrder>());
+        Assert.Equal(new HashSet<string> { "home", "good" }, new HashSet<string> { routeOrder.Origin.Id, routeOrder.Destination.Id });
+        Assert.Single(orders.OfType<LeaseAircraftOrder>());
     }
 
     [Fact]

@@ -2582,8 +2582,10 @@ the same point, ~77%, *at the default fare*) but not addressed this
 round; a genuinely bigger change than the contained raise-loop fix,
 filed here rather than folded in.
 
-**Tested and rejected: extending `enableSustainedSingleAircraftClosure`
-to `BalancedGrowthStrategy`.** Only `NetworkOptimizerStrategy`/`DistressStrategy`
+**Tested, initially rejected, then corrected and shipped (see the
+"FindBestPerformingRoute" section below for the full story): extending
+`enableSustainedSingleAircraftClosure` to `BalancedGrowthStrategy`.**
+Only `NetworkOptimizerStrategy`/`DistressStrategy`
 can ever close a permanently-dead single-aircraft route; `RapidExpansionStrategy`,
 `DomesticProfitOptimizerStrategy`, and `BalancedGrowthStrategy` all leave
 it at the default `false`, so a dead single-aircraft route under any of
@@ -2609,14 +2611,98 @@ SouthAmerica 0.4%):
 | SouthAmerica | 0.4% | 0.4% |
 
 NorthAmerica's own move (0.4%→0.0%) is a single bankruptcy event either
-way, not a real signal. Europe got measurably worse (9.6%→12.2%,
-19→24 bankruptcies), confirming the existing caution rather than
-disproving it — `BalancedGrowthStrategy` really is still actively
-opening new routes in a way `NetworkOptimizerStrategy`'s plateaued state
-isn't, so closure fires on routes that are genuinely still finding their
-footing, not just permanently dead ones. **Not shipped** — reverted
-after measuring, `enableSustainedSingleAircraftClosure` stays `false`
+way, not a real signal. Europe *appeared* measurably worse (9.6%→12.2%,
+19→24 bankruptcies) — reported at the time as confirming the existing
+caution, reverted, `enableSustainedSingleAircraftClosure` left `false`
 for `BalancedGrowthStrategy`.
+
+**Correction (FindBestPerformingRoute round, below): this conclusion was
+wrong, and the error is worth recording plainly.** The "9.6%" baseline
+above was measured *before* this same round's own fare-raise-loop fix
+(just above) had actually landed in the sweep binary — the closure
+measurement itself ran *after* that fix was already written, so its own
+"12.2% with closure on" result was being compared against a stale
+number instead of a concurrent one. The FindBestPerformingRoute round
+re-ran the fare-raise fix *alone*, no closure change at all, and got
+Europe 12.2% — identical to the number this section blamed on closure.
+`enableSustainedSingleAircraftClosure: true` for `BalancedGrowthStrategy`
+is a true no-op, not a regression, and now ships (see below). Left here
+unedited otherwise, with this correction attached, rather than quietly
+rewritten — a wrong conclusion reported honestly and then caught is
+better recordkeeping than one smoothed over after the fact.
+
+---
+
+## Existing-route evaluation audit, FindBestPerformingRoute round — gate growth on real profitability ✅
+
+**Origin:** the user's own direct follow-up to the audit above — fix the
+one item explicitly flagged, not chased, in the fare-raise-loop round:
+`BaselineAi.FindBestPerformingRoute` (the shared method
+`RapidExpansionStrategy`/`NetworkOptimizerStrategy`/`BalancedGrowthStrategy`
+all use to pick which already-served route gets a second aircraft) ranks
+purely by `RouteEvaluator`'s own fare/competition-agnostic solo estimate,
+with no profitability floor at all — a route can be picked for growth
+because it looks "full" against raw demand while a rival is really
+taking most of its actual traffic, or while it's genuinely losing money
+at its current fare.
+
+**Shipped: `enableRealProfitabilityGate`, the same opt-in "ablation
+lever" shape as `enableSustainedSingleAircraftClosure`.** Off (default)
+reproduces the exact pre-existing ranking, byte-identical — required
+because `FindBestPerformingRoute` also has one frozen legacy caller,
+`BaselineAi.DecideOrders`, with no `StrategyContext` to draw a real
+carried figure from at all (the first implementation attempt missed
+this and applied the new floor unconditionally, breaking two of that
+method's own existing tests — caught immediately by the full suite,
+fixed before proceeding). On: excludes any candidate whose real,
+competitively-resolved profit (`FareCalculator.EstimatedProfit`, real
+carried when `LastQuarterSeatsCarriedByRoute` has one, else the same
+solo estimate as before) is negative — a floor, never a ranking key,
+deliberately avoiding `docs/BASELINE_AI_ROADMAP.md`'s own M56 shape
+(ranking growth candidates by profit across pairs, which always
+collapsed into favoring the smallest aircraft available) — then ranks
+the survivors by that same real figure instead of the solo estimate.
+
+**Measured per strategy, real 300-game sweep, and the result genuinely
+differs by strategy - not shipped uniformly:**
+
+| Configuration | Europe bankrupt |
+|---|---|
+| All three flags off (true current baseline) | 12.2% |
+| NetworkOptimizerStrategy only | 12.2% |
+| BalancedGrowthStrategy only | 12.2% |
+| Both together | 12.2% |
+| RapidExpansionStrategy only | 13.7% |
+| All three on | 13.7% |
+
+`NetworkOptimizerStrategy` and `BalancedGrowthStrategy`'s own use of the
+flag is a genuine no-op in every configuration tested — real, verified
+safety for a correctness fix that doesn't need a measurable win to be
+worth keeping. `RapidExpansionStrategy`'s own use, isolated cleanly
+(present alone reproduces the *entire* regression on its own; absent
+from an otherwise-all-on sweep removes it entirely), is a real
+regression with zero offsetting gain anywhere else. Root cause is
+strategy *intent*, not a bug: this strategy's whole purpose (its own
+class doc comment) is expanding as fast as possible during the Starting
+era — gating that growth on real profitability cuts directly against
+the design it was built to embody, unlike the two later-era strategies'
+own more measured growth postures. **Shipped for `NetworkOptimizerStrategy`/
+`BalancedGrowthStrategy` only; `RapidExpansionStrategy` keeps the flag
+`false`, unchanged from before this round.**
+
+**A second, more significant correction fell out of this investigation
+by accident: the baseline itself, used for every sweep since the
+fare-raise-loop fix landed, was stale.** Every comparison in the
+fare-raise-loop section above used "Europe 9.6%" as "the current
+baseline" — the real number *from before* that same round's own
+fare-raise fix, never re-measured *after* it with no other change. This
+round's own isolation sweeps incidentally re-measured the true
+post-fare-raise-fix baseline directly (all three of this round's new
+flags off): Europe 12.2%, not 9.6%. That's what exposed the closure-flag
+correction above. Filed here as a standing reminder: after any
+unconditional (non-ablation-gated) shared-logic change, the very next
+sweep's own numbers *are* the new baseline - re-measure before reusing
+an old one as the comparison point, even when the change felt small.
 
 - **`AllianceCourtOrder`** — deliberately excluded from every milestone
   above, carrying forward `BaselineAi`'s own existing reasoning (M9):

@@ -959,18 +959,20 @@ public static class AiToolkit
     /// "ablation lever, off is exactly old behavior" guarantee
     /// GravityDemandModel's own enableHubDemandBonus already established)
     /// - see SustainedSingleAircraftClosureThreshold's own doc comment
-    /// for the real evidence this exists for. Only NetworkOptimizerStrategy/
-    /// DistressStrategy pass true; RapidExpansionStrategy and
-    /// DomesticProfitOptimizerStrategy are unaffected, unchanged,
-    /// byte-identical to before this parameter existed.
-    /// Existing-route-evaluation audit: measured directly for
-    /// BalancedGrowthStrategy too (still actively growing, unlike
-    /// NetworkOptimizerStrategy's plateaued state) and rejected - a real
-    /// 300-game sweep found it made Europe measurably worse (9.6%→12.2%)
-    /// for a noise-level NorthAmerica gain, confirming rather than
-    /// disproving the existing "fast-growing, thrashing network" caution
-    /// above. See docs/BASELINE_AI_ROADMAP.md's own "Existing-route
-    /// evaluation audit" section for the full numbers. Stays false there.
+    /// for the real evidence this exists for. NetworkOptimizerStrategy,
+    /// DistressStrategy, and BalancedGrowthStrategy pass true;
+    /// RapidExpansionStrategy and DomesticProfitOptimizerStrategy are
+    /// unaffected, unchanged, byte-identical to before this parameter
+    /// existed. Existing-route-evaluation audit: a first measurement for
+    /// BalancedGrowthStrategy reported a real regression (Europe
+    /// 9.6%→12.2%) and reverted it - that comparison's own baseline was
+    /// stale, predating this same audit's own fare-raise-loop fix
+    /// (above). Re-measured against the true concurrent baseline (also
+    /// 12.2%, from the fare-raise fix alone): this flag produces the
+    /// identical 12.2% for BalancedGrowthStrategy too, a real no-op, not
+    /// a regression - shipped there once measured correctly. See
+    /// docs/BASELINE_AI_ROADMAP.md's own "Existing-route evaluation
+    /// audit" section for the full numbers and the correction.
     /// </param>
     public static void ApplyManagementToolkit(StrategyContext context, List<QuarterOrder> orders, HashSet<int> reservedUnitIds, int spentBeforeToolkit, bool enableSustainedSingleAircraftClosure = false)
     {

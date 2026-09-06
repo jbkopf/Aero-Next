@@ -22,9 +22,10 @@ public class RapidExpansionStrategyTests
     private static StrategyContext MakeContext(
         IReadOnlyList<Route> routes, IReadOnlyList<City> cities, IReadOnlyList<AircraftType> eraTypes, Region homeRegion,
         AirlineFleet? fleet = null, int actionCap = 3, Money? cash = null, City? homeCity = null,
-        int quarterNumber = 1, System.Collections.Generic.IReadOnlyDictionary<(string OriginId, string DestinationId), AiRouteHistory>? routeHistoryByPair = null) =>
+        int quarterNumber = 1, System.Collections.Generic.IReadOnlyDictionary<(string OriginId, string DestinationId), AiRouteHistory>? routeHistoryByPair = null,
+        System.Collections.Generic.IReadOnlyDictionary<(string OriginId, string DestinationId), long>? lastQuarterSeatsCarriedByRoute = null) =>
         new(routes, actionCap, cities, DemandModel, eraTypes, fleet ?? AirlineFleet.Empty, homeRegion, HomeCity: homeCity ?? cities[0], AvailableCash: cash,
-            QuarterNumber: quarterNumber, RouteHistoryByPair: routeHistoryByPair);
+            QuarterNumber: quarterNumber, RouteHistoryByPair: routeHistoryByPair, LastQuarterSeatsCarriedByRoute: lastQuarterSeatsCarriedByRoute);
 
     [Fact]
     public void DecideOrders_TightBudget_PrefersOpeningANewPair_OverGrowingAnExistingRoute()

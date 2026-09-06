@@ -155,6 +155,15 @@ namespace AeroNext.Core.Ai;
 /// BalancedGrowthStrategy's own class doc comment for the extraction and
 /// for why ranking candidate pairs by this real profit figure is safe
 /// across pairs, not just within one.
+///
+/// Existing-route-evaluation audit follow-up: step 2 (grow the
+/// best-performing existing route) now passes
+/// enableRealProfitabilityGate: true to BaselineAi.FindBestPerformingRoute
+/// — never grows a route that's a real loser at its own current
+/// economics, and ranks survivors by their own real (competitively-
+/// resolved, when available) load factor rather than the fare/
+/// competition-agnostic solo estimate. See that method's own doc comment
+/// for the full reasoning.
 /// </summary>
 public sealed class NetworkOptimizerStrategy : IAiStrategy
 {
@@ -202,7 +211,9 @@ public sealed class NetworkOptimizerStrategy : IAiStrategy
         // cooldown exclusion.
         var bestExisting = BaselineAi.FindBestPerformingRoute(
             context.CurrentRoutes, context.DemandModel,
-            excludePairKeys: AiToolkit.RecentlyShrunkPairKeys(context, AiToolkit.GrowthCooldownQuarters));
+            excludePairKeys: AiToolkit.RecentlyShrunkPairKeys(context, AiToolkit.GrowthCooldownQuarters),
+            lastQuarterSeatsCarriedByRoute: context.LastQuarterSeatsCarriedByRoute,
+            enableRealProfitabilityGate: true);
         if (bestExisting is not null && spent + 1 <= context.ActionCap
             && BaselineAi.HasSlotAtEveryGateway(bestExisting.Origin, bestExisting.Destination, context.AvailableSlotsByCity, slotsReservedByCity)
             && AiToolkit.HasRoomAtEveryCity(bestExisting.Origin, bestExisting.Destination, context.CityWideSlotsRemaining, citySpendReservedByCity))
