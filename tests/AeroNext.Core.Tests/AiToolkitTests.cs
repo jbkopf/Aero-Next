@@ -775,6 +775,14 @@ public class AiToolkitTests
         // really only carrying a tiny fraction of that (losing a
         // competitive fight the solo estimate can't see), which should
         // now drive a cut the solo-only view never would have.
+        //
+        // Existing-route-evaluation audit follow-up: the raise loop used
+        // to read the naive solo estimate directly, so this same route
+        // (solo-saturated) would ALSO get a same-quarter raise alongside
+        // the real-data-driven cut - a real, self-contradictory
+        // fare-raise-and-cut-together outcome. The raise loop now uses
+        // the same real carried figure, so with real carried this tiny,
+        // no raise fires at all - just the one, correct cut.
         var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
         var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
         var route = new Route(a, b, Aircraft, AircraftCount: 1);
@@ -784,12 +792,40 @@ public class AiToolkitTests
 
         AiToolkit.ApplyManagementToolkit(context, orders, new System.Collections.Generic.HashSet<int>(), spentBeforeToolkit: 0);
 
-        // Contains, not Single: the route is also solo-saturated (fully
-        // sold under the naive estimate), so RaisedFare's own separate,
-        // untouched branch legitimately proposes a raise for the same
-        // pair at the same time - this test only cares that the real
-        // data also drove a genuine cut, not that it's the only order.
-        Assert.Contains(orders.OfType<SetFareOrder>(), o => o.FarePerPassenger < route.FarePerPassenger);
+        var order = Assert.Single(orders.OfType<SetFareOrder>());
+        Assert.True(order.FarePerPassenger < route.FarePerPassenger);
+    }
+
+    [Fact]
+    public void ApplyManagementToolkit_ContestedRouteSoloSaturatedButRealShareLow_DoesNotRaise()
+    {
+        // Existing-route-evaluation audit finding: a route that reads as
+        // sold out under the fare-agnostic solo estimate (RouteEvaluator's
+        // own min(demand, capacity)/capacity) but where this airline's own
+        // real, competitively-resolved carried volume is far below that
+        // (a rival winning most of the real share) must not get a fare
+        // raise - raising would only suppress demand further via
+        // FareCalculator.DemandDeltaFraction, on a route already losing
+        // the fight for it. Real carried set low enough that the real
+        // load factor is comfortably under SaturatedLoadFactorCeiling even
+        // though the solo estimate (Aircraft's own small capacity against
+        // this pair's real demand, per ProfitableRoute_DoesNotCutFare) is
+        // fully saturated, and high enough that the route stays real-profitable
+        // (no unwanted cut either) - isolates the raise-loop fix alone.
+        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
+        var route = new Route(a, b, Aircraft, AircraftCount: 1);
+        // 85% of capacity - comfortably above FareCalculator's own ~77%
+        // breakeven load factor at the default 30% margin (so no cut
+        // fires either), comfortably below SaturatedLoadFactorCeiling
+        // (0.95) (so this test isolates the raise-loop fix specifically).
+        var realCarried = new System.Collections.Generic.Dictionary<(string, string), long> { [QuarterEngine.NormalizedPairKey(a, b)] = (long)(route.SeatsPerQuarter * 0.85) };
+        var context = MakeContext(new[] { a, b }, a, routes: new[] { route }, lastQuarterSeatsCarriedByRoute: realCarried);
+        var orders = new System.Collections.Generic.List<QuarterOrder>();
+
+        AiToolkit.ApplyManagementToolkit(context, orders, new System.Collections.Generic.HashSet<int>(), spentBeforeToolkit: 0);
+
+        Assert.Empty(orders.OfType<SetFareOrder>());
     }
 
     [Fact]

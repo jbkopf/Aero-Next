@@ -2542,6 +2542,82 @@ all three prior rounds — didn't move at all. No region regressed, so the
 old cash-discipline machinery was not reinstated; it stays removed.
 300/300 clean games with a real win-condition winner, unchanged.
 
+---
+
+## Existing-route evaluation audit — a real fare-raise blind spot fixed, closure extension tested and rejected ✅
+
+**Origin:** the user's own direct request to review how all strategies
+evaluate already-served routes for profit/loss and how they respond to
+failing ones. Found: the failing-route side (`AiToolkit.ApplyManagementToolkit`'s
+own cut/shrink/close loop) is fully shared across every strategy and
+already real-profit-based since M54 — no gap there. Two real findings
+elsewhere:
+
+**Fixed: the saturated-route fare-raise loop used the wrong carried
+figure.** `ApplyManagementToolkit`'s raise loop checked `RouteLoad.LoadFactor`
+directly — `RouteEvaluator`'s own fare-agnostic, competition-blind solo
+estimate (`min(raw gravity demand, capacity)/capacity`) — while the
+unprofitable-route loop 14 lines below it had already switched to the
+real, competitively-resolved carried figure (`BestAvailableCarried`) for
+exactly the reason the loop above needed it too: a route genuinely
+losing a share fight to a rival can still read as "sold out" under the
+solo estimate and get its fare raised, which (via
+`FareCalculator.DemandDeltaFraction`) actively suppresses demand on a
+route already losing the fight for it. No comment anywhere justified the
+discrepancy the way the profit loop's own comment justified its choice —
+this reads as an M54 oversight, not a deliberate design split. Fixed by
+switching the raise loop to the same `BestAvailableCarried` figure.
+`ApplyManagementToolkit_RealCarriedData_OverridesSoloEstimate` (previously
+documented, as an accepted fact, a route getting a raise and a cut in the
+*same* quarter — a real, self-contradictory outcome the old code
+produced) now correctly gets only the cut; a new test,
+`ApplyManagementToolkit_ContestedRouteSoloSaturatedButRealShareLow_DoesNotRaise`,
+locks in the fixed behavior directly. Also flagged (not chased, deliberately):
+`BaselineAi.FindBestPerformingRoute` (growth-target selection for
+`RapidExpansionStrategy`/`NetworkOptimizerStrategy`/`BalancedGrowthStrategy`)
+shares the same fare/competition-agnostic `LoadFactor` signal with no
+profitability gate of its own — softened in practice by this game's
+cost-plus-margin fare model (load factor and profit cross zero at nearly
+the same point, ~77%, *at the default fare*) but not addressed this
+round; a genuinely bigger change than the contained raise-loop fix,
+filed here rather than folded in.
+
+**Tested and rejected: extending `enableSustainedSingleAircraftClosure`
+to `BalancedGrowthStrategy`.** Only `NetworkOptimizerStrategy`/`DistressStrategy`
+can ever close a permanently-dead single-aircraft route; `RapidExpansionStrategy`,
+`DomesticProfitOptimizerStrategy`, and `BalancedGrowthStrategy` all leave
+it at the default `false`, so a dead single-aircraft route under any of
+those three just gets fare-cut forever. The existing code comments
+already flagged this as deliberately narrow (M54/M55's own two
+regressions were measured in a fast-growing, thrashing network — the
+shape those three strategies still are, unlike `NetworkOptimizerStrategy`'s
+plateaued state), but `BalancedGrowthStrategy` postdates the fix and had
+never actually been measured with it on. Tested directly: same
+seed-1/300-game/244-quarter sweep, `DistressStrategy`'s dispatch
+bypassed, `enableSustainedSingleAircraftClosure: true` for
+`BalancedGrowthStrategy` only, against the current baseline (NorthAmerica
+0.4%, Europe 9.6%, EastAsia 4.5%, SouthWestAsia 1.0%, AustralAsia 29.9%,
+SouthAmerica 0.4%):
+
+| Region | Baseline | With closure enabled |
+|---|---|---|
+| NorthAmerica | 0.4% | 0.0% |
+| Europe | 9.6% | **12.2%** |
+| EastAsia | 4.5% | 4.5% |
+| SouthWestAsia | 1.0% | 1.0% |
+| AustralAsia | 29.9% | 29.9% |
+| SouthAmerica | 0.4% | 0.4% |
+
+NorthAmerica's own move (0.4%→0.0%) is a single bankruptcy event either
+way, not a real signal. Europe got measurably worse (9.6%→12.2%,
+19→24 bankruptcies), confirming the existing caution rather than
+disproving it — `BalancedGrowthStrategy` really is still actively
+opening new routes in a way `NetworkOptimizerStrategy`'s plateaued state
+isn't, so closure fires on routes that are genuinely still finding their
+footing, not just permanently dead ones. **Not shipped** — reverted
+after measuring, `enableSustainedSingleAircraftClosure` stays `false`
+for `BalancedGrowthStrategy`.
+
 - **`AllianceCourtOrder`** — deliberately excluded from every milestone
   above, carrying forward `BaselineAi`'s own existing reasoning (M9):
   the alliance mechanic has no consequence today that would change this

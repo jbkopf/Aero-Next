@@ -62,13 +62,26 @@ namespace AeroNext.Core.Ai;
 /// own real, *observed* load-factor ranking, a stronger signal than any
 /// estimate this class could compute for a pair no one has flown yet.
 /// The user's own two cases were both about *opening* routes.
+/// Existing-route-evaluation audit: that load-factor ranking is itself
+/// fare/competition-agnostic (RouteEvaluator's own solo estimate, no idea
+/// a rival exists or this route's fare has ever been touched) - flagged,
+/// not chased, softened in practice by this game's cost-plus-margin fare
+/// model but a real, open gap for a future round.
 ///
 /// Passes enableSustainedSingleAircraftClosure: false (the default) to
 /// AiToolkit.ApplyManagementToolkit, like every strategy except
-/// NetworkOptimizerStrategy - that mechanic is narrowly scoped to the
-/// specific plateaued-network evidence documented on its own
-/// SustainedSingleAircraftClosureThreshold, not something this class
-/// inherits without its own equally real justification.
+/// NetworkOptimizerStrategy/DistressStrategy - that mechanic is narrowly
+/// scoped to the specific plateaued-network evidence documented on its
+/// own SustainedSingleAircraftClosureThreshold, not something this class
+/// inherits without its own equally real justification. Existing-route-
+/// evaluation audit: measured directly with true here too and rejected -
+/// a real 300-game sweep made Europe measurably worse (9.6%→12.2%) for a
+/// noise-level NorthAmerica gain, confirming this class's own
+/// still-actively-growing shape is exactly the "fast-growing, thrashing
+/// network" case that mechanic was never meant for. See
+/// AiToolkit.ApplyManagementToolkit's own enableSustainedSingleAircraftClosure
+/// doc comment and docs/BASELINE_AI_ROADMAP.md's own writeup for the full
+/// numbers.
 ///
 /// Suitability is the direct complement of AiToolkit.NetworkTroubleRatio
 /// - see that method's own doc comment, and NetworkOptimizerStrategy's

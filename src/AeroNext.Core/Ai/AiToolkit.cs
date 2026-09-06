@@ -959,10 +959,18 @@ public static class AiToolkit
     /// "ablation lever, off is exactly old behavior" guarantee
     /// GravityDemandModel's own enableHubDemandBonus already established)
     /// - see SustainedSingleAircraftClosureThreshold's own doc comment
-    /// for the real evidence this exists for. Only NetworkOptimizerStrategy
-    /// passes true; RapidExpansionStrategy and DomesticProfitOptimizerStrategy
-    /// are unaffected, unchanged, byte-identical to before this parameter
-    /// existed.
+    /// for the real evidence this exists for. Only NetworkOptimizerStrategy/
+    /// DistressStrategy pass true; RapidExpansionStrategy and
+    /// DomesticProfitOptimizerStrategy are unaffected, unchanged,
+    /// byte-identical to before this parameter existed.
+    /// Existing-route-evaluation audit: measured directly for
+    /// BalancedGrowthStrategy too (still actively growing, unlike
+    /// NetworkOptimizerStrategy's plateaued state) and rejected - a real
+    /// 300-game sweep found it made Europe measurably worse (9.6%→12.2%)
+    /// for a noise-level NorthAmerica gain, confirming rather than
+    /// disproving the existing "fast-growing, thrashing network" caution
+    /// above. See docs/BASELINE_AI_ROADMAP.md's own "Existing-route
+    /// evaluation audit" section for the full numbers. Stays false there.
     /// </param>
     public static void ApplyManagementToolkit(StrategyContext context, List<QuarterOrder> orders, HashSet<int> reservedUnitIds, int spentBeforeToolkit, bool enableSustainedSingleAircraftClosure = false)
     {
@@ -972,15 +980,33 @@ public static class AiToolkit
 
         var routeLoads = RouteEvaluator.EvaluateNetwork(context.CurrentRoutes, context.DemandModel);
 
-        foreach (var saturated in routeLoads
-            .Where(load => load.LoadFactor >= BaselineAi.SaturatedLoadFactorCeiling)
-            .Select(load => load.Route))
+        // Existing-route-evaluation audit follow-up: this loop used to read
+        // load.LoadFactor directly - RouteEvaluator's own solo estimate,
+        // min(raw gravity demand, capacity)/capacity, with no idea a rival
+        // exists or that this route's own fare has ever been touched. The
+        // real-profit loop a few lines below already swaps to the real,
+        // competitively-resolved carried figure (BestAvailableCarried) for
+        // exactly that reason; this loop hadn't gotten the same fix, so a
+        // route genuinely losing a share fight to a rival could still read
+        // as "sold out" here and get its fare raised - which, via
+        // FareCalculator.DemandDeltaFraction, actively suppresses demand on
+        // a route already losing the fight for it. Now uses the same real
+        // figure both loops should have shared from the start.
+        foreach (var load in routeLoads)
         {
-            var target = BaselineAi.RaisedFare(saturated);
+            var realCarried = BestAvailableCarried(load.Route, load.PassengersCarried, context);
+            var realLoadFactor = load.SeatsPerQuarter == 0 ? 0.0 : (double)realCarried / load.SeatsPerQuarter;
 
-            if (saturated.FarePerPassenger < target)
+            if (realLoadFactor < BaselineAi.SaturatedLoadFactorCeiling)
             {
-                orders.Add(new SetFareOrder(saturated.Origin, saturated.Destination, target));
+                continue;
+            }
+
+            var target = BaselineAi.RaisedFare(load.Route);
+
+            if (load.Route.FarePerPassenger < target)
+            {
+                orders.Add(new SetFareOrder(load.Route.Origin, load.Route.Destination, target));
             }
         }
 
