@@ -2491,6 +2491,56 @@ own real, observed load-factor ranking, deliberately not folded into the
 same real-profit-estimate machinery (the user's own two cases were both
 about *opening* routes).
 
+---
+
+## NetworkOptimizerStrategy follow-up, round 3 — adopting the real profit-gated new-pair search ✅
+
+**Origin:** the user's own direct request — `BalancedGrowthStrategy`'s
+new `EstimatedRealProfit` search was live in exactly one place;
+`NetworkOptimizerStrategy`'s own step 3 (new pair) still ranked by raw
+demand/revenue behind the round-1/round-2 cash-discipline machinery
+above (`NewPairCashComfortMultiplier`, the no-lease-fallback rule).
+Wanted: the same real calculation there too.
+
+**Real risk, stated plainly before starting:** two of this class's own
+three prior regressions (see round 1 and its own follow-up above) live
+in exactly the machinery this change proposes to remove. Treated as a
+live regression risk requiring a real sweep, not a safe-by-reasoning
+refactor, given this history.
+
+**Shipped:** the shared search (`EstimatedRealProfit`/`EvaluateCandidate`/
+`FindMostProfitablePair`/`TryProposeCandidate`/`ProfitabilityFloor`)
+moved out of `BalancedGrowthStrategy` into `AiToolkit` as `public static`
+members — a pure extraction, verified byte-identical via
+`BalancedGrowthStrategyTests`'s own unchanged suite. `NetworkOptimizerStrategy`'s
+step 3 now calls `AiToolkit.FindMostProfitablePair` with an explicit
+same-region filter (preserving its own unbroken never-cross-region
+invariant), replacing the cash-comfort-multiplier/no-lease-fallback
+block entirely. `EstimatedRealProfit` prices a candidate's real lease
+fee *inside* its own profitability figure, making the old external
+multiplier and outright lease ban redundant rather than complementary —
+the same mechanism `BalancedGrowthStrategy`'s own round 2 already
+confirmed for an analogous unlimited-growth failure mode.
+
+**Measured: clean, no region worse, two improved.** Same seed-1/
+300-game/244-quarter sweep, `DistressStrategy`'s dispatch bypassed for
+an isolated read, against the pre-existing baseline (NorthAmerica 0.4%,
+Europe 9.6%, EastAsia 4.5%, SouthWestAsia 1.9%, AustralAsia 34.0%,
+SouthAmerica 0.4% bankrupt):
+
+| Region | Baseline | This round |
+|---|---|---|
+| NorthAmerica | 0.4% | **0.4%** (same single bankruptcy) |
+| Europe | 9.6% | **9.6%** |
+| EastAsia | 4.5% | **4.5%** |
+| SouthWestAsia | 1.9% | **1.0%** |
+| AustralAsia | 34.0% | **29.9%** |
+| SouthAmerica | 0.4% | **0.4%** |
+
+NorthAmerica — this class's own historically vulnerable region across
+all three prior rounds — didn't move at all. No region regressed, so the
+old cash-discipline machinery was not reinstated; it stays removed.
+300/300 clean games with a real win-condition winner, unchanged.
 
 - **`AllianceCourtOrder`** — deliberately excluded from every milestone
   above, carrying forward `BaselineAi`'s own existing reasoning (M9):

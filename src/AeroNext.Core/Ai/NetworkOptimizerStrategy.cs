@@ -26,14 +26,14 @@ namespace AeroNext.Core.Ai;
 /// steps 1-2 to do, which is exactly what makes step 3 rare in practice
 /// without needing a separate throttle.
 ///
-/// New-pair and gateway-negotiation logic is reused directly from
-/// DomesticProfitOptimizerStrategy (FindMostProfitableDomesticPairUsingIdleFleet/
-/// AcrossTypes, FindBestUnservedDomesticGateway/FindBestIdleContestableDomesticGateway
-/// — all flipped internal for exactly this, zero behavior change to that
-/// class) rather than re-derived: it's the same domestic-only,
-/// profit-aware (M40/M57) search this strategy wants too, already
-/// proven and already measured. Like that strategy, never proposes a
-/// cross-region RouteOrder or NegotiationOrder — "optimize what's
+/// Gateway-negotiation logic is reused directly from DomesticProfitOptimizerStrategy
+/// (FindBestUnservedDomesticGateway/FindBestIdleContestableDomesticGateway
+/// — flipped internal for exactly this, zero behavior change to that
+/// class) rather than re-derived. New-pair logic (step 3) originally
+/// reused that same class's own domestic search too — see the
+/// "NetworkOptimizerStrategy follow-up" paragraph below for why that
+/// stopped being true. Like DomesticProfitOptimizerStrategy, never
+/// proposes a cross-region RouteOrder or NegotiationOrder — "optimize what's
 /// already there," not expand into new territory.
 ///
 /// M58 resume: the intent, restated directly by the user - this strategy
@@ -126,30 +126,41 @@ namespace AeroNext.Core.Ai;
 /// real, different territory from M54/M55's own two failed closure
 /// attempts (both measured in a fast-growing, thrashing network this
 /// strategy's own plateaued state never reaches).
+///
+/// NetworkOptimizerStrategy follow-up, round 3: step 3 (new pair) now
+/// uses AiToolkit.FindMostProfitablePair/EstimatedRealProfit - the same
+/// real-cost-aware, lease-fee-and-competition-priced search
+/// BalancedGrowthStrategy already uses - domestic-only via an explicit
+/// region filter, in place of the round-1/round-2 machinery above
+/// (NewPairCashComfortMultiplier, NewPairComfortableOrderCost, the
+/// no-lease-fallback rule). That machinery existed only because the old
+/// demand/revenue-ranked search had no way to price a fresh unit's real
+/// recurring lease cost into the decision at all; EstimatedRealProfit
+/// prices the lease fee *inside* the profitability figure itself, making
+/// the external multiplier and the outright lease ban redundant rather
+/// than complementary. Given this class's own three-regression history
+/// above - two of them in this exact machinery - the removal was treated
+/// as a live regression risk, not a safe-by-reasoning refactor: verified
+/// by a real 300-game sweep (seed 1, 244 quarters) against the current
+/// baseline (post-BalancedGrowthStrategy) rather than assumed. Result:
+/// NorthAmerica - this class's own historically vulnerable region across
+/// all three prior rounds - unchanged at 0.4% bankrupt (the same single
+/// bankruptcy, same game); Europe and EastAsia also unchanged at 9.6%
+/// and 4.5%; SouthWestAsia improved 1.9%→1.0% and AustralAsia improved
+/// 34.0%→29.9%; SouthAmerica unchanged at 0.4%. No region regressed, so
+/// the old safety net was not reinstated. The shared search itself moved
+/// out to AiToolkit (EstimatedRealProfit/EvaluateCandidate/
+/// FindMostProfitablePair/TryProposeCandidate/ProfitabilityFloor, all
+/// public there now) rather than being re-derived here - see
+/// BalancedGrowthStrategy's own class doc comment for the extraction and
+/// for why ranking candidate pairs by this real profit figure is safe
+/// across pairs, not just within one.
 /// </summary>
 public sealed class NetworkOptimizerStrategy : IAiStrategy
 {
     public string Name => "Network Optimizer";
 
     public IReadOnlySet<GameEra> ApplicableEras { get; } = new HashSet<GameEra> { GameEra.MidGame, GameEra.LateGame };
-
-    /// <summary>
-    /// M58 follow-up (proposed, tunable) - stricter than BaselineAi's
-    /// shared ComfortableOrderCost (3x), mirroring RapidExpansionStrategy's
-    /// own precedent of overriding the shared multiplier for its own risk
-    /// posture (that one lower, 2x, for a more aggressive strategy; this
-    /// one higher, for a more cautious one). Real 100-game diagnostic
-    /// evidence: NorthAmerica's own dense city pool let step 3 (new pair)
-    /// keep finding "affordable" purchases for years under the old 3x bar
-    /// - aggregate purchase spend front-loaded into years 20-23 alone
-    /// ($130.6M→$3,349.4M→$6,180.0M→$2,880.0M by year), draining cash
-    /// from $372.9M (year 20) to $106.3M (year 26) right before the 1979
-    /// oil shock. Scoped to step 3 only, not step 2 (growing an existing,
-    /// already-flying route) - see the class doc comment.
-    /// </summary>
-    private const int NewPairCashComfortMultiplier = 6;
-
-    private static Money NewPairComfortableOrderCost(AircraftType type) => type.Cost * NewPairCashComfortMultiplier;
 
     /// <summary>
     /// BalancedGrowthStrategy follow-up: the actual troubled-network
@@ -233,46 +244,21 @@ public sealed class NetworkOptimizerStrategy : IAiStrategy
             }
         }
 
-        // 3. A new pair - last priority, only if budget remains. Reuses
-        // DomesticProfitOptimizerStrategy's own already-proven search
-        // unmodified; no MaxDomesticRoutes-style cap, since this
-        // strategy is only ever selected once the network already has
-        // real, plenty-sized substance (see Suitability above).
+        // 3. A new pair - last priority, only if budget remains.
+        // NetworkOptimizerStrategy follow-up: reuses AiToolkit.FindMostProfitablePair/
+        // TryProposeCandidate directly (see their own doc comments and
+        // this class's own doc comment for the real evidence chain) -
+        // domestic-only, this class's own unbroken invariant, preserved
+        // here via the region filter rather than by reusing
+        // DomesticProfitOptimizerStrategy's own domestic-scoped methods.
+        // No MaxDomesticRoutes-style cap, since this strategy is only
+        // ever selected once the network already has real, plenty-sized
+        // substance (see Suitability above).
         if (spent + 1 <= context.ActionCap)
         {
-            var idleBest = DomesticProfitOptimizerStrategy.FindMostProfitableDomesticPairUsingIdleFleet(context, reservedUnitIds, validOriginCityIds);
-
-            if (idleBest is not null && AiToolkit.TryOrientFromValidOrigin(idleBest.Value.Pair, validOriginCityIds, out var origin, out var destination)
-                && BaselineAi.HasSlotAtEveryGateway(origin, destination, context.AvailableSlotsByCity, slotsReservedByCity)
-                && AiToolkit.HasRoomAtEveryCity(origin, destination, context.CityWideSlotsRemaining, citySpendReservedByCity))
-            {
-                orders.Add(new RouteOrder(origin, destination, idleBest.Value.Aircraft));
-                BaselineAi.ReserveSlots(origin, destination, slotsReservedByCity);
-                AiToolkit.ReserveCityWideSlots(origin, destination, citySpendReservedByCity);
-                spent += 1;
-            }
-            else if (idleBest is null)
-            {
-                var bestOrdered = DomesticProfitOptimizerStrategy.FindMostProfitableDomesticPairAcrossTypes(context, context.EraAvailableTypes, validOriginCityIds);
-                var oriented = bestOrdered is not null && AiToolkit.TryOrientFromValidOrigin(bestOrdered.Value.Pair, validOriginCityIds, out var newOrigin, out var newDestination)
-                    ? (Origin: newOrigin, Destination: newDestination)
-                    : ((City Origin, City Destination)?)null;
-
-                // M58 follow-up: no lease fallback here (unlike step 2, and
-                // unlike this same search's own idle-fleet branch above) -
-                // see the class doc comment for the real evidence chain.
-                // Opening a brand new, unproven pair only happens with
-                // real, committed capital now; without it, step 3 does
-                // nothing this quarter rather than reaching for CLAUDE.md's
-                // own "expensive instant-metal escape hatch" on an
-                // unproven bet.
-                if (bestOrdered is not null && oriented is not null && context.AvailableCash is not null
-                    && FinancialState.CanAfford(context.AvailableCash.Value, NewPairComfortableOrderCost(bestOrdered.Value.Aircraft)))
-                {
-                    orders.Add(new AircraftOrder(bestOrdered.Value.Aircraft, Quantity: 1));
-                    spent += 1;
-                }
-            }
+            var best = AiToolkit.FindMostProfitablePair(context, reservedUnitIds, validOriginCityIds,
+                p => p.Origin.Region == context.HomeRegion && p.Destination.Region == context.HomeRegion);
+            AiToolkit.TryProposeCandidate(context, best, validOriginCityIds, orders, reservedUnitIds, slotsReservedByCity, citySpendReservedByCity, ref spent);
         }
 
         // 4. Negotiate a domestic gateway - never cross-region, same

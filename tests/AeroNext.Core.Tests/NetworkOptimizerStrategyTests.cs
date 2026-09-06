@@ -248,42 +248,48 @@ public class NetworkOptimizerStrategyTests
     }
 
     [Fact]
-    public void DecideOrders_NewPair_NothingIdle_CashComfortable_Orders()
+    public void DecideOrders_NewPair_NothingIdle_ProfitableEvenWithLeaseFee_LeasesRegardlessOfCash()
     {
-        // M58 follow-up: NewPairCashComfortMultiplier (6x) is stricter
-        // than BaselineAi's shared 3x - $6,000,000 is exactly 6x this
-        // $1M aircraft, so this proves "genuinely comfortable -> buys"
-        // against the new, real threshold.
+        // NetworkOptimizerStrategy follow-up: step 3 now reuses
+        // AiToolkit.FindMostProfitablePair/TryProposeCandidate directly -
+        // no cash-comfort multiplier and no cash gate on leasing at all
+        // (leasing has no upfront cost, per CLAUDE.md), only the real
+        // profitability floor. Pre-verified: this $1M aircraft's own real
+        // profit including the lease fee is $67,030.60 (100% load factor,
+        // distance 157km) - comfortably clears the floor, so it leases
+        // even with null cash, unlike the old 6x-cash-comfort design this
+        // replaced.
         var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
         var near = MakeCity("near", Region.NorthAmerica, 1, 1, 90);
         var cities = new[] { home, near };
         var aircraft = new AircraftType("t", "Test", Seats: 10, RangeKm: 2000, Cost: Money.FromDollars(1_000_000));
 
-        var context = MakeContext(Array.Empty<Route>(), cities, new[] { aircraft }, Region.NorthAmerica, cash: Money.FromDollars(6_000_000));
+        var context = MakeContext(Array.Empty<Route>(), cities, new[] { aircraft }, Region.NorthAmerica); // no idle fleet, no cash passed
 
         var orders = Strategy.DecideOrders(context);
 
-        var order = Assert.Single(orders.OfType<AircraftOrder>());
-        Assert.Equal("t", order.Type.Id);
-        Assert.Empty(orders.OfType<LeaseAircraftOrder>());
-        Assert.Empty(orders.OfType<RouteOrder>());
+        Assert.Empty(orders.OfType<AircraftOrder>());
+        var lease = Assert.Single(orders.OfType<LeaseAircraftOrder>());
+        Assert.Equal("t", lease.Type.Id);
+        var routeOrder = Assert.Single(orders.OfType<RouteOrder>());
+        Assert.Equal(new HashSet<string> { "home", "near" }, new HashSet<string> { routeOrder.Origin.Id, routeOrder.Destination.Id });
     }
 
     [Fact]
-    public void DecideOrders_NewPair_NothingIdle_CashNotComfortable_NoOp()
+    public void DecideOrders_NewPair_LeaseFeeMakesItUnprofitable_NoOp()
     {
-        // M58 follow-up: step 3's lease fallback was removed entirely
-        // (see the class doc comment - a same-bar lease gate would have
-        // been provably unreachable, and a weaker one measurably made
-        // things worse) - $500,000 falls short of NewPairComfortableOrderCost
-        // (6x $1M = $6,000,000), so step 3 now does nothing at all rather
-        // than leasing into an unproven pair, unlike before this fix.
+        // Real cost accounting, not a cash-comfort proxy: this $50M
+        // aircraft's own real profit including the lease fee is
+        // pre-verified negative (-$1,892,992.40, same 100%-load-factor
+        // pair as above) - step 3 proposes nothing at all, the same
+        // "genuinely too weak to serve profitably" outcome
+        // BalancedGrowthStrategy's own equivalent fixture establishes.
         var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
         var near = MakeCity("near", Region.NorthAmerica, 1, 1, 90);
         var cities = new[] { home, near };
-        var aircraft = new AircraftType("t", "Test", Seats: 10, RangeKm: 2000, Cost: Money.FromDollars(1_000_000));
+        var aircraft = new AircraftType("t", "Test", Seats: 10, RangeKm: 2000, Cost: Money.FromDollars(50_000_000));
 
-        var context = MakeContext(Array.Empty<Route>(), cities, new[] { aircraft }, Region.NorthAmerica, cash: Money.FromDollars(500_000));
+        var context = MakeContext(Array.Empty<Route>(), cities, new[] { aircraft }, Region.NorthAmerica, cash: Money.FromDollars(500_000_000));
 
         var orders = Strategy.DecideOrders(context);
 
@@ -293,22 +299,24 @@ public class NetworkOptimizerStrategyTests
     }
 
     [Fact]
-    public void DecideOrders_NewPair_NothingIdle_NullCash_NoOp()
+    public void DecideOrders_NewPair_CompetitionDerates_RejectsOnceRivalsTipItNegative()
     {
-        // M58 follow-up: a deliberate departure from the permissive-
-        // default convention used elsewhere (e.g. AiToolkit.ApplyMarketingCampaign) -
-        // mirrors the sibling AircraftOrder branch's own existing
-        // "must confirm affordability" contract instead. Null AvailableCash
-        // never happens in real gameplay (FullGameRunner/AeroNext.Sim
-        // always populate it), so this only changes behavior for a
-        // genuinely unknown-cash caller, not a real one - regression-lock
-        // for that intentional change, not accidental.
+        // Real numbers: a 1000-seat aircraft on this pair is profitable
+        // uncontested and even at 3 rivals (100%/90.5% load factor,
+        // +$3,634,280.00/+$2,140,148.96), but 4 rivals derates assumed
+        // captured demand (raw/(rivals+1)) below the ~77% breakeven
+        // (72.4% load factor, -$709,741.36) - the same real, previously
+        // impossible visibility BalancedGrowthStrategy's own
+        // RivalPresenceByPairKey established, now reachable through
+        // NetworkOptimizerStrategy's own domestic search too.
         var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
         var near = MakeCity("near", Region.NorthAmerica, 1, 1, 90);
         var cities = new[] { home, near };
-        var aircraft = new AircraftType("t", "Test", Seats: 10, RangeKm: 2000, Cost: Money.FromDollars(1_000_000));
+        var mid = new AircraftType("mid", "Mid", Seats: 1000, RangeKm: 2000, CostPerAvailableSeatKm: 0.1);
+        var rivalPresence = new System.Collections.Generic.Dictionary<(string, string), int> { [QuarterEngine.NormalizedPairKey(home, near)] = 4 };
 
-        var context = MakeContext(Array.Empty<Route>(), cities, new[] { aircraft }, Region.NorthAmerica); // no idle fleet, no cash passed
+        var context = new StrategyContext(Array.Empty<Route>(), ActionCap: 3, cities, DemandModel, new[] { mid }, AirlineFleet.Empty,
+            Region.NorthAmerica, home, RivalPresenceByPairKey: rivalPresence);
 
         var orders = Strategy.DecideOrders(context);
 

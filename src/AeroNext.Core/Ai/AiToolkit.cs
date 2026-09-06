@@ -209,6 +209,165 @@ public static class AiToolkit
         return Math.Max(unprofitableRatio, contestedRatio);
     }
 
+    /// <summary>
+    /// NetworkOptimizerStrategy follow-up: the real profitability bar
+    /// FindMostProfitablePair gates on. Originally BalancedGrowthStrategy's
+    /// own private constant (see its own class doc comment's REDESIGN
+    /// paragraph for the real evidence this exists for), moved here once
+    /// NetworkOptimizerStrategy needed the exact same search. Not M56's
+    /// own reverted Money.Zero floor in the same sense - that one applied
+    /// to an *arbitrary* candidate aircraft on every domestic pair every
+    /// quarter; this applies only after EstimatedRealProfit has already
+    /// picked each candidate's own best-fitting aircraft, so a candidate
+    /// only fails here when *no* available aircraft type can profitably
+    /// serve it at all.
+    /// </summary>
+    public static readonly Money ProfitabilityFloor = Money.Zero;
+
+    /// <summary>
+    /// The real cost accounting behind FindMostProfitablePair, for one
+    /// specific (pair, aircraft) combination: FareCalculator.EstimatedProfit
+    /// (real operating cost, M12, plus this aircraft's own prorated
+    /// salary share, M30, already folded in there) with
+    /// includeLeaseFee: requiresLease so a candidate needing a fresh unit
+    /// carries FinancialResolver.LeaseFeeRatePerQuarter's own real
+    /// recurring cost, and none is added when an idle unit already
+    /// covers it.
+    ///
+    /// Existing competition ("on the route, or in the region," the
+    /// user's own wording for BalancedGrowthStrategy's own original
+    /// request): StrategyContext.RivalPresenceByPairKey/RivalPresenceByRegion
+    /// are the real, previously-nonexistent visibility this needed (see
+    /// StrategyContext's own doc comment) - both derate this airline's
+    /// own assumed captured demand before the capacity cap is even
+    /// applied. Honestly a heuristic, not CompetitiveMarket.Resolve's own
+    /// real weighted-share formula (which depends on a rival's own
+    /// Quality/capacity this game has no visibility into for a pair this
+    /// airline doesn't fly) - an even split among (rival presence + 1)
+    /// is the plainest defensible assumption, documented as exactly that,
+    /// not offered as a precise model.
+    ///
+    /// Single-peaked in aircraft capacity for this one fixed pair (see
+    /// DomesticProfitOptimizerStrategy.EstimatedProfitForAircraft's own
+    /// doc comment for the proof) - callers use this to find each
+    /// candidate pair's own best-fitting aircraft *before* ever comparing
+    /// different pairs against each other, the real reason this stays
+    /// safe where docs/BASELINE_AI_ROADMAP.md's own M56 section's four
+    /// reverted attempts were not.
+    /// </summary>
+    public static Money EstimatedRealProfit(StrategyContext context, PairDemand pair, AircraftType aircraft, bool requiresLease)
+    {
+        var hypotheticalRoute = new Route(pair.Origin, pair.Destination, aircraft, AircraftCount: 1);
+        var pairKey = QuarterEngine.NormalizedPairKey(pair.Origin, pair.Destination);
+        var rivalPresence = (context.RivalPresenceByPairKey?.GetValueOrDefault(pairKey) ?? 0)
+            + (context.RivalPresenceByRegion?.GetValueOrDefault(pair.Destination.Region) ?? 0);
+        var assumedCaptured = pair.PassengersPerQuarter / (rivalPresence + 1);
+        var carried = Math.Min(assumedCaptured, hypotheticalRoute.SeatsPerQuarter);
+
+        return FareCalculator.EstimatedProfit(hypotheticalRoute, carried, includeLeaseFee: requiresLease);
+    }
+
+    /// <summary>Same real profit/floor treatment as FindMostProfitablePair, for a single already-identified (pair, aircraft) candidate - AiToolkit.FindBestUnservedPairTouchingWonSlot's own priority result specifically, which already picked its own aircraft type from this airline's own idle fleet.</summary>
+    public static (PairDemand Pair, AircraftType Aircraft, Money Profit, bool UsesIdleUnit)? EvaluateCandidate(
+        StrategyContext context, IReadOnlySet<int> reservedUnitIds, PairDemand pair, AircraftType aircraft)
+    {
+        var usesIdleUnit = context.OwnFleet.Idle.Any(u => u.Type.Id == aircraft.Id && !reservedUnitIds.Contains(u.Id));
+        var profit = EstimatedRealProfit(context, pair, aircraft, requiresLease: !usesIdleUnit);
+
+        return profit >= ProfitabilityFloor ? (pair, aircraft, profit, usesIdleUnit) : null;
+    }
+
+    /// <summary>
+    /// The real search behind BalancedGrowthStrategy's own two cases and
+    /// NetworkOptimizerStrategy's own step 3: every unserved, reachable,
+    /// caller-filtered candidate pair, evaluated at *every* era-available
+    /// aircraft type (using an idle unit when one exists - no lease fee -
+    /// otherwise assuming a fresh lease, per EstimatedRealProfit), then
+    /// the single best (pair, aircraft) combination by real profit,
+    /// gated by ProfitabilityFloor. Returns null when nothing clears it -
+    /// "does nothing" is a completely valid, expected outcome here, not a
+    /// search failure. regionFilter is how callers vary this: BalancedGrowthStrategy's
+    /// own two region-phase predicates, or NetworkOptimizerStrategy's own
+    /// domestic-only one (both endpoints equal to context.HomeRegion,
+    /// preserving that class's own unbroken never-cross-region invariant).
+    /// </summary>
+    public static (PairDemand Pair, AircraftType Aircraft, Money Profit, bool UsesIdleUnit)? FindMostProfitablePair(
+        StrategyContext context, IReadOnlySet<int> reservedUnitIds, IReadOnlySet<string> validOriginCityIds, Func<PairDemand, bool> regionFilter)
+    {
+        var served = context.CurrentRoutes
+            .SelectMany(r => new[] { (r.Origin.Id, r.Destination.Id), (r.Destination.Id, r.Origin.Id) })
+            .ToHashSet();
+        var recentlyClosed = RecentlyClosedPairKeys(context, ReopenCooldownQuarters);
+        var idleTypeIds = context.OwnFleet.Idle
+            .Where(u => !reservedUnitIds.Contains(u.Id))
+            .Select(u => u.Type.Id)
+            .ToHashSet(StringComparer.Ordinal);
+
+        var candidates = context.DemandModel.AllPairs(context.AllCities)
+            .Where(p => !served.Contains((p.Origin.Id, p.Destination.Id)))
+            .Where(p => !recentlyClosed.Contains(QuarterEngine.NormalizedPairKey(p.Origin, p.Destination)))
+            .Where(p => validOriginCityIds.Contains(p.Origin.Id) || validOriginCityIds.Contains(p.Destination.Id))
+            .Where(regionFilter)
+            .SelectMany(p => context.EraAvailableTypes
+                .Where(type => p.DistanceKm <= type.RangeKm)
+                .Select(type =>
+                {
+                    var usesIdleUnit = idleTypeIds.Contains(type.Id);
+                    var profit = EstimatedRealProfit(context, p, type, requiresLease: !usesIdleUnit);
+                    return (Pair: p, Aircraft: type, Profit: profit, UsesIdleUnit: usesIdleUnit);
+                }))
+            .ToList();
+
+        if (candidates.Count == 0)
+        {
+            return null;
+        }
+
+        var best = candidates
+            .OrderByDescending(c => c.Profit.Cents)
+            .ThenBy(c => c.Pair.Origin.Id, StringComparer.Ordinal)
+            .ThenBy(c => c.Pair.Destination.Id, StringComparer.Ordinal)
+            .ThenBy(c => c.Aircraft.Id, StringComparer.Ordinal)
+            .First();
+
+        return best.Profit >= ProfitabilityFloor ? best : null;
+    }
+
+    /// <summary>Builds the real order(s) for a winning candidate from FindMostProfitablePair - a RouteOrder alone against an idle unit (no fee, already ours), or a LeaseAircraftOrder alongside it otherwise (2 actions, real recurring fee already reflected in the profit this candidate already cleared).</summary>
+    public static void TryProposeCandidate(
+        StrategyContext context, (PairDemand Pair, AircraftType Aircraft, Money Profit, bool UsesIdleUnit)? best, IReadOnlySet<string> validOriginCityIds,
+        List<QuarterOrder> orders, HashSet<int> reservedUnitIds, Dictionary<string, int> slotsReservedByCity, Dictionary<string, int> citySpendReservedByCity, ref int spent)
+    {
+        if (best is null || !TryOrientFromValidOrigin(best.Value.Pair, validOriginCityIds, out var origin, out var destination)
+            || !BaselineAi.HasSlotAtEveryGateway(origin, destination, context.AvailableSlotsByCity, slotsReservedByCity)
+            || !HasRoomAtEveryCity(origin, destination, context.CityWideSlotsRemaining, citySpendReservedByCity))
+        {
+            return;
+        }
+
+        var actionsNeeded = best.Value.UsesIdleUnit ? 1 : 2;
+        if (spent + actionsNeeded > context.ActionCap)
+        {
+            return;
+        }
+
+        if (best.Value.UsesIdleUnit)
+        {
+            var idleUnit = context.OwnFleet.Idle.Where(u => u.Type.Id == best.Value.Aircraft.Id && !reservedUnitIds.Contains(u.Id)).OrderBy(u => u.Id).First();
+            orders.Add(new RouteOrder(origin, destination, best.Value.Aircraft));
+            reservedUnitIds.Add(idleUnit.Id);
+        }
+        else
+        {
+            orders.Add(new LeaseAircraftOrder(best.Value.Aircraft, Quantity: 1));
+            orders.Add(new RouteOrder(origin, destination, best.Value.Aircraft));
+        }
+
+        BaselineAi.ReserveSlots(origin, destination, slotsReservedByCity);
+        ReserveCityWideSlots(origin, destination, citySpendReservedByCity);
+        spent += actionsNeeded;
+    }
+
     /// <summary>M55 (proposed, tunable) — a route shrunk within this many quarters of context.QuarterNumber is excluded from being picked as "best performing" to grow. See RecentlyShrunkPairKeys.</summary>
     public const int GrowthCooldownQuarters = 2;
 
