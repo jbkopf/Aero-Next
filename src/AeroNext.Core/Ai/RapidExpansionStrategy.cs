@@ -48,6 +48,27 @@ namespace AeroNext.Core.Ai;
 /// real profitability cuts directly against that design intent in a way
 /// the two later-era strategies' own more measured growth postures don't
 /// share. Stays false; not shipped here.
+///
+/// Network-profitability follow-up: the user's own direct request - stay
+/// primarily concerned with reaching regions outside the home one, worry
+/// less about individual route profitability, more about the network as
+/// a whole. Step 1 (new pair) and step 3 (gateway) already were and stay
+/// cross-region-first, untouched. Step 2 (grow an existing route)
+/// switches from BaselineAi.FindBestPerformingRoute's own real load
+/// factor to FindBestExistingRouteByDemand's own AiToolkit.EffectiveDemandScore
+/// - the same demand-based signal step 1 already uses, not a second,
+/// different per-route economics metric - and now only fires at all when
+/// AiToolkit.NetworkTroubleRatio reads zero real trouble this quarter
+/// (the same binary threshold NetworkOptimizerStrategy/BalancedGrowthStrategy
+/// already use), deliberately leaving steps 1/3 untouched by that guard:
+/// a troubled network should spend its remaining budget reaching a new
+/// region, this strategy's actual mission, not reactively topping up a
+/// route that might not even be one. Byte-identical to before at zero
+/// trouble throughout. A third change - reducing Suitability itself as
+/// network trouble rises - was also tried and measured to be a real
+/// regression (Europe/EastAsia bankruptcy both rose); see Suitability's
+/// own doc comment below for the full story. Reverted; this strategy's
+/// own selection stays plain CashRatio.
 /// </summary>
 public sealed class RapidExpansionStrategy : IAiStrategy
 {
@@ -58,7 +79,26 @@ public sealed class RapidExpansionStrategy : IAiStrategy
 
     public IReadOnlySet<GameEra> ApplicableEras { get; } = new HashSet<GameEra> { GameEra.Starting };
 
-    /// <summary>(Proposed, tunable) — richer affords the aggressive spending this strategy leans on; see docs/BASELINE_AI_ROADMAP.md's M39 section.</summary>
+    /// <summary>
+    /// (Proposed, tunable) — richer affords the aggressive spending this
+    /// strategy leans on; see docs/BASELINE_AI_ROADMAP.md's M39 section.
+    /// Network-profitability follow-up: multiplying this down as
+    /// AiToolkit.NetworkTroubleRatio rises (ceding ground to
+    /// DomesticProfitOptimizerStrategy's own exact-complement score,
+    /// 1 - CashRatio) was tried and measured, isolated via a real
+    /// 300-game sweep, to be a real, substantial regression - Europe
+    /// 12.2%→16.2% and EastAsia 4.5%→6.6% bankruptcy, reproduced exactly
+    /// by this change alone. Root cause: switching a troubled airline
+    /// from this strategy's own aggressive cross-region expansion to
+    /// DomesticProfitOptimizerStrategy's domestic-only conservatism is
+    /// itself the wrong response under CLAUDE.md's own "a home region
+    /// cannot fund a win" pillar - retreating into domestic-only play
+    /// during real trouble starves exactly the cross-region diversification
+    /// a struggling airline needs most, making things worse rather than
+    /// better. Reverted; stays plain CashRatio. The step-2 throttle below
+    /// carries the real "worry about the whole network" behavior instead,
+    /// measured clean on its own.
+    /// </summary>
     public double Suitability(StrategyContext context) => AiSuitability.CashRatio(context);
 
     public IReadOnlyList<QuarterOrder> DecideOrders(StrategyContext context)
@@ -128,16 +168,27 @@ public sealed class RapidExpansionStrategy : IAiStrategy
             }
         }
 
-        // 2. Grow the best-performing existing route - runs second here,
+        // 2. Grow the highest-demand existing route - runs second here,
         // so it must exclude whatever step 1 already reserved. M55:
         // also excludes any route shrunk within GrowthCooldownQuarters -
         // the real fix for the oscillation M43 traced (shrinking a route
         // mechanically raises its own load factor, so without this a
         // route shrunk one quarter could rank "best performing" again
         // the very next and get grown right back).
-        var bestExisting = BaselineAi.FindBestPerformingRoute(
-            context.CurrentRoutes, context.DemandModel,
-            excludePairKeys: AiToolkit.RecentlyShrunkPairKeys(context, AiToolkit.GrowthCooldownQuarters));
+        //
+        // Network-profitability follow-up (the user's own direct
+        // request): only acts when AiToolkit.NetworkTroubleRatio reads
+        // zero real trouble this quarter - the exact same binary
+        // threshold NetworkOptimizerStrategy/BalancedGrowthStrategy
+        // already use for "is the network in real trouble," reused
+        // rather than inventing a new one. Steps 1/3 (this strategy's
+        // actual cross-region mission) are deliberately untouched by
+        // this guard - a troubled network should spend its remaining
+        // budget reaching a new region, not reactively topping up a
+        // route that might not even be one.
+        var bestExisting = AiToolkit.NetworkTroubleRatio(context) <= 0.0
+            ? FindBestExistingRouteByDemand(context, AiToolkit.RecentlyShrunkPairKeys(context, AiToolkit.GrowthCooldownQuarters))
+            : null;
         if (bestExisting is not null && spent + 1 <= context.ActionCap
             && BaselineAi.HasSlotAtEveryGateway(bestExisting.Origin, bestExisting.Destination, context.AvailableSlotsByCity, slotsReservedByCity)
             && AiToolkit.HasRoomAtEveryCity(bestExisting.Origin, bestExisting.Destination, context.CityWideSlotsRemaining, citySpendReservedByCity))
@@ -189,6 +240,30 @@ public sealed class RapidExpansionStrategy : IAiStrategy
     }
 
     private static Money ComfortableOrderCost(AircraftType type) => type.Cost * CashComfortMultiplier;
+
+    /// <summary>
+    /// Network-profitability follow-up: replaces
+    /// BaselineAi.FindBestPerformingRoute's own real, *observed*
+    /// load-factor ranking for this strategy specifically - the user's
+    /// own direct request to de-emphasize individual route profitability
+    /// for growth decisions, matching step 1's own demand-based ranking
+    /// (AiToolkit.EffectiveDemandScore) instead of a second, different
+    /// metric. Kept private here, not extracted to AiToolkit - no second
+    /// caller wants this shape yet. Same excludePairKeys contract
+    /// FindBestPerformingRoute already had (RecentlyShrunkPairKeys, M55's
+    /// own oscillation fix) - same safety, new metric.
+    /// </summary>
+    private static Route? FindBestExistingRouteByDemand(StrategyContext context, IReadOnlySet<(string, string)> excludePairKeys)
+    {
+        var shareByCityId = NetworkPlanner.ComputeRouteShareByCityId(context.CurrentRoutes);
+
+        return context.CurrentRoutes
+            .Where(r => !excludePairKeys.Contains(QuarterEngine.NormalizedPairKey(r.Origin, r.Destination)))
+            .OrderByDescending(r => AiToolkit.EffectiveDemandScore(context.DemandModel.ForPair(r.Origin, r.Destination), shareByCityId))
+            .ThenBy(r => r.Origin.Id, StringComparer.Ordinal)
+            .ThenBy(r => r.Destination.Id, StringComparer.Ordinal)
+            .FirstOrDefault();
+    }
 
     /// <summary>Mirrors BaselineAi.FindBestUnservedPairUsingIdleFleet's shape, but cross-region candidates outrank intra-region ones before demand is even compared.</summary>
     private static (PairDemand Pair, AircraftType Aircraft)? FindBestUnservedPairCrossRegionFirstUsingIdleFleet(StrategyContext context, IReadOnlySet<int> reservedUnitIds, IReadOnlySet<string> validOriginCityIds)

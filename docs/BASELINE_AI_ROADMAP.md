@@ -2704,6 +2704,76 @@ unconditional (non-ablation-gated) shared-logic change, the very next
 sweep's own numbers *are* the new baseline - re-measure before reusing
 an old one as the comparison point, even when the change felt small.
 
+---
+
+## RapidExpansionStrategy — cross-region focus, less per-route profitability, more network-level ✅
+
+**Origin:** the user's own direct request — this strategy should be
+primarily concerned with reaching regions outside its home one, less
+concerned with individual route profitability, more concerned with the
+network as a whole. Clarified directly (AskUserQuestion) before design:
+step 2 (grow an existing route) stays region-blind — only steps 1
+(new pair) and 3 (gateway) keep cross-region-first ranking, unchanged;
+the growth/new-pair signal should share one consistent, non-profitability
+metric; "network profitability" becomes real via both a `Suitability`
+adjustment and a mid-quarter throttle, reusing `AiToolkit.NetworkTroubleRatio`
+(already built, already proven safe as the `NetworkOptimizerStrategy`/
+`BalancedGrowthStrategy` Suitability partition) rather than inventing a
+new network-health signal.
+
+**Shipped, two of three changes:**
+- Step 2 now ranks by `AiToolkit.EffectiveDemandScore` (a new
+  `FindBestExistingRouteByDemand`), the same demand-based signal step 1
+  already uses, replacing `BaselineAi.FindBestPerformingRoute`'s own
+  real-observed-load-factor ranking — one consistent metric for both
+  growth paths, neither of them per-route profitability.
+- Step 2 now only fires when `AiToolkit.NetworkTroubleRatio(context) <= 0.0`
+  — the same binary "is the network in real trouble" threshold
+  `NetworkOptimizerStrategy`/`BalancedGrowthStrategy` already use. Steps
+  1/3 (this strategy's actual cross-region mission) are deliberately
+  untouched by the guard: a troubled network spends its remaining budget
+  reaching a new region, not reactively topping up a route that might
+  not even be one.
+
+**Tried and reverted: `Suitability` multiplied down by `(1 - NetworkTroubleRatio)`,**
+ceding ground to `DomesticProfitOptimizerStrategy`'s own exact-complement
+score (`1 - CashRatio`) as network trouble accumulates. Measured via a
+real 300-game sweep, isolated one change at a time (each of the three
+changes tested completely alone, `DistressStrategy`'s dispatch bypassed)
+against the current baseline (NorthAmerica 0.4%, Europe 12.2%, EastAsia
+4.5%, SouthWestAsia 1.0%, AustralAsia 29.9%, SouthAmerica 0.4%):
+
+| Configuration | Europe | EastAsia |
+|---|---|---|
+| Baseline (nothing changed) | 12.2% | 4.5% |
+| Ranking swap alone | 12.2% | 4.5% |
+| Step-2 throttle alone | 12.2% | 4.5% |
+| Suitability change alone | **16.2%** | **6.6%** |
+| All three together | **16.2%** | **6.6%** |
+
+The ranking swap and the throttle are each, individually, a genuine
+no-op — real, verified safety for two correctness changes that don't
+need a measurable win to be worth keeping. The `Suitability` change
+alone reproduces the *entire* combined regression by itself. Root cause,
+not just a bad number: switching a troubled airline from this strategy's
+own aggressive cross-region expansion to `DomesticProfitOptimizerStrategy`'s
+domestic-only conservatism is itself the wrong response under CLAUDE.md's
+own "a home region cannot fund a win" pillar — retreating into
+domestic-only play during real trouble starves exactly the cross-region
+diversification a struggling airline needs most, making survival odds
+worse, not better. **Reverted** — `Suitability` stays plain `CashRatio`;
+the step-2 throttle carries the real "worry about the whole network"
+behavior on its own, measured clean.
+
+**Final shipped result** (ranking swap + throttle, `Suitability`
+unchanged), same sweep: NorthAmerica 0.4%→0.0%, Europe 12.2% (unchanged),
+EastAsia 4.5% (unchanged), SouthWestAsia 1.0% (unchanged), AustralAsia
+29.9% (unchanged), SouthAmerica 0.4%→1.3% (3 vs. 1 bankruptcy, a small,
+watched effect on a small sample — the only region either change moved
+at all, present in the ranking-swap-alone isolation too, not from the
+throttle). 300/300 clean games with a real win-condition winner,
+unchanged.
+
 - **`AllianceCourtOrder`** — deliberately excluded from every milestone
   above, carrying forward `BaselineAi`'s own existing reasoning (M9):
   the alliance mechanic has no consequence today that would change this

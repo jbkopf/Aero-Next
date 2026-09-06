@@ -23,9 +23,11 @@ public class RapidExpansionStrategyTests
         IReadOnlyList<Route> routes, IReadOnlyList<City> cities, IReadOnlyList<AircraftType> eraTypes, Region homeRegion,
         AirlineFleet? fleet = null, int actionCap = 3, Money? cash = null, City? homeCity = null,
         int quarterNumber = 1, System.Collections.Generic.IReadOnlyDictionary<(string OriginId, string DestinationId), AiRouteHistory>? routeHistoryByPair = null,
-        System.Collections.Generic.IReadOnlyDictionary<(string OriginId, string DestinationId), long>? lastQuarterSeatsCarriedByRoute = null) =>
+        System.Collections.Generic.IReadOnlyDictionary<(string OriginId, string DestinationId), long>? lastQuarterSeatsCarriedByRoute = null,
+        System.Collections.Generic.IReadOnlyDictionary<(string OriginId, string DestinationId), int>? rivalCountByServedRoute = null) =>
         new(routes, actionCap, cities, DemandModel, eraTypes, fleet ?? AirlineFleet.Empty, homeRegion, HomeCity: homeCity ?? cities[0], AvailableCash: cash,
-            QuarterNumber: quarterNumber, RouteHistoryByPair: routeHistoryByPair, LastQuarterSeatsCarriedByRoute: lastQuarterSeatsCarriedByRoute);
+            QuarterNumber: quarterNumber, RouteHistoryByPair: routeHistoryByPair, LastQuarterSeatsCarriedByRoute: lastQuarterSeatsCarriedByRoute,
+            RivalCountByServedRoute: rivalCountByServedRoute);
 
     [Fact]
     public void DecideOrders_TightBudget_PrefersOpeningANewPair_OverGrowingAnExistingRoute()
@@ -435,6 +437,73 @@ public class RapidExpansionStrategyTests
         Assert.Equal(new HashSet<string> { "home", "near" }, new HashSet<string> { routeOrder.Origin.Id, routeOrder.Destination.Id });
         Assert.Empty(orders.OfType<AircraftOrder>());
         Assert.Empty(orders.OfType<LeaseAircraftOrder>());
+    }
+
+    [Fact]
+    public void DecideOrders_GrowExisting_PicksHigherDemandRoute_NotHigherLoadFactorOne()
+    {
+        // Network-profitability follow-up: home-near is capacity-matched
+        // to smallAircraft (100% load factor, real numbers verified via
+        // the scratchpad calculator: demand 151,654 against a 7,540-seat
+        // capacity) but has small absolute demand. home-far pairs a much
+        // higher-weight city with a bigger aircraft whose capacity
+        // outstrips even its own much larger demand (69.21% load factor,
+        // demand 971,770 - over 6x home-near's) - the old real-load-factor
+        // ranking would have picked home-near; the new demand-based one
+        // picks home-far instead. EraAvailableTypes empty and no idle
+        // fleet neutralize step 1 entirely (no idle unit, no fallback
+        // aircraft to lease/order with), and no cash forces the lease+route
+        // fallback so the winning pair is directly visible as a RouteOrder.
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
+        var near = MakeCity("near", Region.NorthAmerica, 1, 1, 5);
+        var far = MakeCity("far", Region.NorthAmerica, 5, 5, 800);
+        var cities = new[] { home, near, far };
+        var smallAircraft = new AircraftType("small", "Small", Seats: 10, RangeKm: 10_000, CruiseSpeedKmh: 900, CostPerAvailableSeatKm: 0.1);
+        var bigAircraft = new AircraftType("big", "Big", Seats: 3000, RangeKm: 10_000, CruiseSpeedKmh: 900, CostPerAvailableSeatKm: 0.1);
+        var existing = new[]
+        {
+            new Route(home, near, smallAircraft, AircraftCount: 1),
+            new Route(home, far, bigAircraft, AircraftCount: 1),
+        };
+
+        var context = MakeContext(existing, cities, Array.Empty<AircraftType>(), Region.NorthAmerica, actionCap: 2);
+
+        var orders = Strategy.DecideOrders(context);
+
+        var routeOrder = Assert.Single(orders.OfType<RouteOrder>());
+        Assert.Equal(new HashSet<string> { "home", "far" }, new HashSet<string> { routeOrder.Origin.Id, routeOrder.Destination.Id });
+        Assert.Single(orders.OfType<LeaseAircraftOrder>());
+    }
+
+    [Fact]
+    public void DecideOrders_GrowExisting_NetworkInRealTrouble_SkipsGrowthButStillOpensNewPair()
+    {
+        // Network-profitability follow-up: a served, contested route
+        // makes AiToolkit.NetworkTroubleRatio read real trouble (> 0.0),
+        // which should suppress step 2 (grow existing) entirely - but
+        // leave step 1 (new pair, this strategy's actual cross-region
+        // mission) running at full strength. "far" is a fresh, reachable,
+        // cross-region candidate step 1 should still open even though
+        // step 2's own target ("near") is left alone.
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
+        var near = MakeCity("near", Region.NorthAmerica, 1, 1, 90);
+        var far = MakeCity("far", Region.Europe, 5, 5, 20);
+        var cities = new[] { home, near, far };
+        var aircraft = new AircraftType("t", "Test", Seats: 140, RangeKm: 10_000);
+        var existing = new[] { new Route(home, near, aircraft, AircraftCount: 1) };
+        var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, aircraft, quantity: 1, FleetOwnershipMode.Owned); // one idle unit - step 1 claims it
+        var rivalCount = new System.Collections.Generic.Dictionary<(string, string), int> { [QuarterEngine.NormalizedPairKey(home, near)] = 1 };
+
+        var context = MakeContext(existing, cities, new[] { aircraft }, Region.NorthAmerica, fleet, rivalCountByServedRoute: rivalCount);
+
+        var orders = Strategy.DecideOrders(context);
+
+        // Contains, not an exact pair - "near" also validly originates a
+        // route to "far" (both network-connected), so the real claim is
+        // just that step 1 reached the new region; which of home/near
+        // supplies the other end isn't what this test exists to isolate.
+        var routeOrder = Assert.Single(orders.OfType<RouteOrder>());
+        Assert.Contains("far", new[] { routeOrder.Origin.Id, routeOrder.Destination.Id });
     }
 
     [Fact]
