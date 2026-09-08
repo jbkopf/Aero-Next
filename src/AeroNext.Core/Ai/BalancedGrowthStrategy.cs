@@ -95,6 +95,27 @@ namespace AeroNext.Core.Ai;
 /// class doc comment, for why a guaranteed non-overlapping partition
 /// (not two independently-tuned scores) is how this codebase already
 /// learned to let two MidGame/LateGame strategies coexist safely.
+///
+/// Win-condition-awareness follow-up: a real diagnostic found the reason
+/// some regions' own home airlines almost never win despite a real
+/// foothold abroad - nothing distinguished "a region I'm present in"
+/// from "a region I'm actually leading," so Case 1 opens one route into
+/// a new region and this class never escalated past that bare toehold.
+/// This class's whole purpose is region-reach, so it gets two
+/// mechanisms, both tuned to stay within its existing two-phase design
+/// rather than bolted on: the reinforce-what's-already-there step passes
+/// AiToolkit.RegionsNotYetLed to BaselineAi.FindBestPerformingRoute (see
+/// its own doc comment), and Case 2 now tries
+/// BothEndpointsTouchedAndAtLeastOneUnled before falling back to the
+/// original BothEndpointsTouched search. Case 1 (reach an untouched
+/// region) is untouched - its job is already win-condition progress
+/// (breadth); the gap closed here is specifically "touches but never
+/// leads," a reinforcement (depth) problem. Neither mechanism changes
+/// Suitability or whether either step fires - see
+/// StrategyContext.RegionsLedLastQuarter's own doc comment for why that
+/// distinction matters (a near-identical signal wired into Suitability
+/// instead is the exact thing this codebase's own M58 history already
+/// found and reverted once).
 /// </summary>
 public sealed class BalancedGrowthStrategy : IAiStrategy
 {
@@ -125,7 +146,8 @@ public sealed class BalancedGrowthStrategy : IAiStrategy
             context.CurrentRoutes, context.DemandModel,
             excludePairKeys: AiToolkit.RecentlyShrunkPairKeys(context, AiToolkit.GrowthCooldownQuarters),
             lastQuarterSeatsCarriedByRoute: context.LastQuarterSeatsCarriedByRoute,
-            enableRealProfitabilityGate: true);
+            enableRealProfitabilityGate: true,
+            regionsNotYetLed: AiToolkit.RegionsNotYetLed(context));
         if (bestExisting is not null && spent + 1 <= context.ActionCap
             && BaselineAi.HasSlotAtEveryGateway(bestExisting.Origin, bestExisting.Destination, context.AvailableSlotsByCity, slotsReservedByCity)
             && AiToolkit.HasRoomAtEveryCity(bestExisting.Origin, bestExisting.Destination, context.CityWideSlotsRemaining, citySpendReservedByCity))
@@ -172,9 +194,23 @@ public sealed class BalancedGrowthStrategy : IAiStrategy
         var newRegionGateway = FindBestUnservedGateway(context, c => !touchedRegions.Contains(c.Region)) ?? AiToolkit.FindBestIdleContestableGateway(context);
 
         // Case 2: within regions already touched, real profit again.
+        // Win-condition-awareness follow-up: tries a touched-but-not-yet-led
+        // region first - the real diagnosed gap, a region "touched" by one
+        // thin route but never reinforced into actual leadership - falling
+        // back to the original, broader any-touched-region search
+        // (including home) when nothing qualifies there, the same
+        // try-the-preferred-search-then-fall-back-to-the-broader-one idiom
+        // this class already uses twice (the won-slot check in Case 1;
+        // FindBestUnservedGateway ?? FindBestIdleContestableGateway below).
+        // A network already leading every touched region falls straight
+        // through to the exact original search - no regionsLed data
+        // (RegionsNotYetLed null) also falls straight through, since
+        // BothEndpointsTouchedAndAtLeastOneUnled can never match without it.
         if (spent + 1 <= context.ActionCap)
         {
-            var best = AiToolkit.FindMostProfitablePair(context, reservedUnitIds, validOriginCityIds, p => BothEndpointsTouched(p, touchedRegions));
+            var regionsNotYetLed = AiToolkit.RegionsNotYetLed(context);
+            var best = AiToolkit.FindMostProfitablePair(context, reservedUnitIds, validOriginCityIds, p => BothEndpointsTouchedAndAtLeastOneUnled(p, touchedRegions, regionsNotYetLed))
+                ?? AiToolkit.FindMostProfitablePair(context, reservedUnitIds, validOriginCityIds, p => BothEndpointsTouched(p, touchedRegions));
             AiToolkit.TryProposeCandidate(context, best, validOriginCityIds, orders, reservedUnitIds, slotsReservedByCity, citySpendReservedByCity, ref spent);
         }
 
@@ -196,6 +232,21 @@ public sealed class BalancedGrowthStrategy : IAiStrategy
 
     private static bool BothEndpointsTouched(PairDemand pair, IReadOnlySet<Region> touchedRegions) =>
         touchedRegions.Contains(pair.Origin.Region) && touchedRegions.Contains(pair.Destination.Region);
+
+    /// <summary>
+    /// Win-condition-awareness follow-up: Case 2's own preferred filter -
+    /// still within the "touched" scope BothEndpointsTouched already
+    /// defines (never opens a brand-new untouched region; that's Case
+    /// 1's own job), but requires at least one endpoint to be a region
+    /// this airline doesn't yet lead. Null regionsNotYetLed (no
+    /// visibility) always returns false, so the Case 2 caller's own
+    /// fallback to the plain BothEndpointsTouched search is exactly
+    /// today's behavior, never a silent "leads nothing" assumption.
+    /// </summary>
+    private static bool BothEndpointsTouchedAndAtLeastOneUnled(PairDemand pair, IReadOnlySet<Region> touchedRegions, IReadOnlySet<Region>? regionsNotYetLed) =>
+        BothEndpointsTouched(pair, touchedRegions)
+            && regionsNotYetLed is not null
+            && (regionsNotYetLed.Contains(pair.Origin.Region) || regionsNotYetLed.Contains(pair.Destination.Region));
 
     private static City? FindBestUnservedGateway(StrategyContext context, Func<City, bool> regionFilter)
     {

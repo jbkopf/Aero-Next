@@ -210,6 +210,21 @@ public static class AiToolkit
     }
 
     /// <summary>
+    /// Win-condition-awareness follow-up: the complement of
+    /// StrategyContext.RegionsLedLastQuarter - every HomeRegions.All
+    /// entry this airline does *not* currently hold sole leadership of.
+    /// Null propagates (no visibility means no bias, not "leads
+    /// nothing everywhere" - the same permissive-default convention
+    /// RegionsLedLastQuarter's own doc comment already establishes),
+    /// matching BaselineAi.FindBestPerformingRoute's own
+    /// regionsNotYetLed parameter this feeds directly. Shared here
+    /// rather than duplicated once both NetworkOptimizerStrategy and
+    /// BalancedGrowthStrategy needed the identical computation.
+    /// </summary>
+    public static IReadOnlySet<Region>? RegionsNotYetLed(StrategyContext context) =>
+        context.RegionsLedLastQuarter is null ? null : HomeRegions.All.Except(context.RegionsLedLastQuarter).ToHashSet();
+
+    /// <summary>
     /// NetworkOptimizerStrategy follow-up: the real profitability bar
     /// FindMostProfitablePair gates on. Originally BalancedGrowthStrategy's
     /// own private constant (see its own class doc comment's REDESIGN

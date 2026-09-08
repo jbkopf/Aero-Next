@@ -29,10 +29,13 @@ public class BalancedGrowthStrategyTests
         IReadOnlyList<City> cities, City homeCity, IReadOnlyList<Route>? routes = null, AirlineFleet? fleet = null,
         Money? availableCash = null, IReadOnlyList<AircraftType>? eraTypes = null,
         IReadOnlyDictionary<(string, string), int>? rivalPresenceByPairKey = null,
-        IReadOnlyDictionary<Region, int>? rivalPresenceByRegion = null) =>
-        new(routes ?? Array.Empty<Route>(), ActionCap: 3, cities, DemandModel, eraTypes ?? new[] { Wide, Small }, fleet ?? AirlineFleet.Empty,
+        IReadOnlyDictionary<Region, int>? rivalPresenceByRegion = null,
+        IReadOnlySet<Region>? regionsLed = null,
+        int actionCap = 3) =>
+        new(routes ?? Array.Empty<Route>(), actionCap, cities, DemandModel, eraTypes ?? new[] { Wide, Small }, fleet ?? AirlineFleet.Empty,
             homeCity.Region, homeCity, AvailableCash: availableCash,
-            RivalPresenceByPairKey: rivalPresenceByPairKey, RivalPresenceByRegion: rivalPresenceByRegion);
+            RivalPresenceByPairKey: rivalPresenceByPairKey, RivalPresenceByRegion: rivalPresenceByRegion,
+            RegionsLedLastQuarter: regionsLed);
 
     [Fact]
     public void ApplicableEras_CoversMidGameAndLateGame_NeverStarting()
@@ -254,6 +257,81 @@ public class BalancedGrowthStrategyTests
 
         var routeOrder = Assert.Single(orders.OfType<RouteOrder>());
         Assert.Equal(new HashSet<string> { "home", "euhub" }, new HashSet<string> { routeOrder.Origin.Id, routeOrder.Destination.Id });
+    }
+
+    [Fact]
+    public void DecideOrders_GrowsBestExistingRoute_PrefersUnledRegion_OverHigherLoadFactorLedOne()
+    {
+        // Win-condition-awareness follow-up: home-highlf reads 100% real
+        // load factor (real numbers verified via the scratchpad
+        // calculator: weight-200 city, profit $430,534.00 - real-profitable).
+        // home-lowlf reads only 93.34% (weight-8 city, profit $489,735.48 -
+        // also real-profitable). Without the region tier, highlf's own
+        // better load factor would win the reinforce step outright.
+        // NorthAmerica (home) and Europe are both already led (regionsLed)
+        // - only EastAsia isn't - so the region tier picks lowlf
+        // specifically. touchedRegions is already at TargetRegionCount
+        // (3: home + both existing routes' own regions), so Case 1 is a
+        // no-op; no idle fleet and no cash means the reinforce step's own
+        // lease+route fallback (2 actions) leaves no budget for Case 2's
+        // own 2-action fallback at the default actionCap (3), isolating
+        // the reinforce step's own choice cleanly.
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
+        var highLf = MakeCity("highlf", Region.Europe, 1, 1, 200);
+        var lowLf = MakeCity("lowlf", Region.EastAsia, 2, 2, 8);
+        var cities = new[] { home, highLf, lowLf };
+        var aircraft = new AircraftType("t", "Test", Seats: 100, RangeKm: 10_000, CruiseSpeedKmh: 900, CostPerAvailableSeatKm: 0.1);
+        var existing = new[]
+        {
+            new Route(home, highLf, aircraft, AircraftCount: 1),
+            new Route(home, lowLf, aircraft, AircraftCount: 1),
+        };
+        var regionsLed = new HashSet<Region> { Region.NorthAmerica, Region.Europe };
+        var context = MakeContext(cities, home, routes: existing, eraTypes: Array.Empty<AircraftType>(), regionsLed: regionsLed);
+
+        var orders = Strategy.DecideOrders(context);
+
+        Assert.Contains(orders.OfType<RouteOrder>(), o => new HashSet<string> { "home", "lowlf" }.SetEquals(new[] { o.Origin.Id, o.Destination.Id }));
+        Assert.DoesNotContain(orders.OfType<RouteOrder>(), o => new HashSet<string> { "home", "highlf" }.SetEquals(new[] { o.Origin.Id, o.Destination.Id }));
+    }
+
+    [Fact]
+    public void DecideOrders_Case2_PrefersUnledTouchedRegion_OverMoreProfitableLedOnlyOne()
+    {
+        // Win-condition-awareness follow-up: home-asia1 already served
+        // (EastAsia touched but not yet led - asia1 is also a valid
+        // origin for a new route, alongside home). home-dom (NorthAmerica
+        // only, both ends already led) is real and profitable
+        // (Wide, $785,668.00, real numbers verified via the scratchpad
+        // calculator) but has *no* unled endpoint at all, so it's
+        // excluded from the new preferred filter outright - under the
+        // original, broad BothEndpointsTouched filter it would have been
+        // evaluated (and would have lost anyway to asia1-dom below, but
+        // that's incidental to what this test isolates). asia1-dom
+        // (EastAsia + NorthAmerica, one real unled endpoint) is both the
+        // single most profitable candidate overall ($2,937,220.00, Wide)
+        // *and* legitimately qualifies for the preferred filter, so it
+        // wins Case 2 outright and the broader fallback search never even
+        // runs. Both candidate pairs already sit within touched regions,
+        // so Case 1 - whose own job is reaching an *untouched* region -
+        // finds neither and stays a no-op, isolating Case 2's own new
+        // preferred-then-fallback search. No idle fleet and no cash
+        // forces the lease+route fallback for both the reinforce step and
+        // Case 2, so actionCap 4 covers both without either starving the
+        // other.
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
+        var asia1 = MakeCity("asia1", Region.EastAsia, 10, 10, 10);
+        var asia2 = MakeCity("asia2", Region.EastAsia, 11, 11, 12);
+        var dom = MakeCity("dom", Region.NorthAmerica, 1, 1, 400);
+        var cities = new[] { home, asia1, asia2, dom };
+        var existing = new[] { new Route(home, asia1, Small, AircraftCount: 1) };
+        var regionsLed = new HashSet<Region> { Region.NorthAmerica };
+        var context = MakeContext(cities, home, routes: existing, regionsLed: regionsLed, actionCap: 4);
+
+        var orders = Strategy.DecideOrders(context);
+
+        Assert.Contains(orders.OfType<RouteOrder>(), o => new HashSet<string> { "asia1", "dom" }.SetEquals(new[] { o.Origin.Id, o.Destination.Id }));
+        Assert.DoesNotContain(orders.OfType<RouteOrder>(), o => new HashSet<string> { "home", "dom" }.SetEquals(new[] { o.Origin.Id, o.Destination.Id }));
     }
 
     [Fact]

@@ -117,6 +117,27 @@ namespace AeroNext.Core.Ai;
 /// permissive-default like everything else here — null means "no
 /// visibility," every candidate treated as uncontested, not "assume
 /// zero rivals everywhere" silently baked into a non-nullable default.
+///
+/// Win-condition-awareness follow-up: RegionsLedLastQuarter - which of
+/// HomeRegions.All this airline held sole leadership of (a real streak
+/// >= 1 in RegionalDominanceState, the same state WinConditionChecker
+/// itself reads) as of last quarter's own resolution. One-quarter
+/// lagged like every other real-competitive field above, computed from
+/// data both real loops (FullGameRunner.cs, AeroNext.Sim/Program.cs)
+/// already track for the win-condition check itself - no new tracking
+/// infrastructure, just read one step earlier. Nullable, permissive-
+/// default: null means "no visibility," read as "leads nothing," the
+/// same safe/conservative floor every field here already uses. Used
+/// only as a tie-break *within* a search a strategy already runs for
+/// its own reasons (see BaselineAi.FindBestPerformingRoute's own
+/// regionsNotYetLed parameter) - deliberately never wired into any
+/// Suitability score. A near-identical "close to winning" signal was
+/// tried once before, as a third Suitability trigger
+/// (NetworkOptimizerStrategy's own original design) - it dominated
+/// strategy *selection* 9-30x over the signal it was meant to
+/// complement and drove NorthAmerica's bankruptcy rate from 20.8% to
+/// 65.0%, removed entirely (see this file's own M58 note above). This
+/// field must never repeat that path.
 /// </summary>
 public sealed record StrategyContext(
     IReadOnlyList<Route> CurrentRoutes,
@@ -139,4 +160,5 @@ public sealed record StrategyContext(
     IReadOnlyDictionary<(string OriginId, string DestinationId), AiRouteHistory>? RouteHistoryByPair = null,
     bool InDistress = false,
     IReadOnlyDictionary<(string OriginId, string DestinationId), int>? RivalPresenceByPairKey = null,
-    IReadOnlyDictionary<Region, int>? RivalPresenceByRegion = null);
+    IReadOnlyDictionary<Region, int>? RivalPresenceByRegion = null,
+    IReadOnlySet<Region>? RegionsLedLastQuarter = null);

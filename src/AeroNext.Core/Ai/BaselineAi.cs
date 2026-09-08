@@ -591,10 +591,32 @@ public static class BaselineAi
     /// docs/BASELINE_AI_ROADMAP.md's own "Existing-route evaluation
     /// audit" section for the full numbers.
     /// </param>
+    /// <param name="regionsNotYetLed">
+    /// Win-condition-awareness follow-up (default null, same "ablation
+    /// lever, off is exactly old behavior" shape as
+    /// enableRealProfitabilityGate) - a real diagnostic found the reason
+    /// some regions' own home airlines almost never win despite a real
+    /// foothold abroad: nothing in growth selection ever distinguished
+    /// "a region I'm present in" from "a region I'm actually leading," so
+    /// a foreign route gets opened once and never reinforced past a bare
+    /// toehold. When provided, a route touching a region in this set
+    /// sorts strictly ahead of one that doesn't - a new leading tier,
+    /// with the existing ranking (real load factor, or the plain solo one
+    /// when enableRealProfitabilityGate is false) staying the tie-break
+    /// *within* that tier, never overridden. Null or empty (every
+    /// existing caller) makes the tier a no-op - every route reads as
+    /// "not preferred" equally, so the ordering degenerates to exactly
+    /// today's behavior. Never influences whether this method returns a
+    /// route at all, only which one wins among real candidates already
+    /// being ranked for their own reasons - deliberately never a
+    /// Suitability signal. See StrategyContext.RegionsLedLastQuarter's
+    /// own doc comment for why that distinction matters here specifically.
+    /// </param>
     internal static Route? FindBestPerformingRoute(
         IReadOnlyList<Route> currentRoutes, GravityDemandModel demandModel, IReadOnlySet<(string, string)>? excludePairKeys = null,
         IReadOnlyDictionary<(string OriginId, string DestinationId), long>? lastQuarterSeatsCarriedByRoute = null,
-        bool enableRealProfitabilityGate = false)
+        bool enableRealProfitabilityGate = false,
+        IReadOnlySet<Region>? regionsNotYetLed = null)
     {
         var routeLoads = RouteEvaluator.EvaluateNetwork(currentRoutes, demandModel)
             .Where(l => excludePairKeys is null || !excludePairKeys.Contains(QuarterEngine.NormalizedPairKey(l.Route.Origin, l.Route.Destination)));
@@ -602,7 +624,8 @@ public static class BaselineAi
         if (!enableRealProfitabilityGate)
         {
             return routeLoads
-                .OrderByDescending(l => l.LoadFactor)
+                .OrderByDescending(l => TouchesRegionNotYetLed(l.Route, regionsNotYetLed))
+                .ThenByDescending(l => l.LoadFactor)
                 .ThenBy(l => l.Route.Origin.Id, StringComparer.Ordinal)
                 .ThenBy(l => l.Route.Destination.Id, StringComparer.Ordinal)
                 .Select(l => l.Route)
@@ -612,12 +635,17 @@ public static class BaselineAi
         return routeLoads
             .Select(l => (Load: l, RealCarried: RealCarriedOrSoloEstimate(l, lastQuarterSeatsCarriedByRoute)))
             .Where(x => FareCalculator.EstimatedProfit(x.Load.Route, x.RealCarried) >= Money.Zero)
-            .OrderByDescending(x => x.Load.SeatsPerQuarter == 0 ? 0.0 : (double)x.RealCarried / x.Load.SeatsPerQuarter)
+            .OrderByDescending(x => TouchesRegionNotYetLed(x.Load.Route, regionsNotYetLed))
+            .ThenByDescending(x => x.Load.SeatsPerQuarter == 0 ? 0.0 : (double)x.RealCarried / x.Load.SeatsPerQuarter)
             .ThenBy(x => x.Load.Route.Origin.Id, StringComparer.Ordinal)
             .ThenBy(x => x.Load.Route.Destination.Id, StringComparer.Ordinal)
             .Select(x => x.Load.Route)
             .FirstOrDefault();
     }
+
+    /// <summary>Win-condition-awareness follow-up: true when either endpoint is a region FindBestPerformingRoute's own caller flagged as not yet led - see that parameter's own doc comment.</summary>
+    private static bool TouchesRegionNotYetLed(Route route, IReadOnlySet<Region>? regionsNotYetLed) =>
+        regionsNotYetLed is not null && (regionsNotYetLed.Contains(route.Origin.Region) || regionsNotYetLed.Contains(route.Destination.Region));
 
     /// <summary>
     /// Existing-route-evaluation audit follow-up: a deliberate, small

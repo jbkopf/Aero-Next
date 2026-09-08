@@ -2774,6 +2774,87 @@ at all, present in the ranking-swap-alone isolation too, not from the
 throttle). 300/300 clean games with a real win-condition winner,
 unchanged.
 
+---
+
+## Win-condition awareness for NetworkOptimizerStrategy and BalancedGrowthStrategy ✅ (shipped, honest result)
+
+**Origin:** a real diagnostic (temporary `FullGameRunner.cs` instrumentation,
+reverted after use) found why Europe's win share is the lowest of any
+region despite having the *most* cities (27) and *highest* total demand
+weight (1,443) of any region: Europe-home airlines hold their own home
+region's leadership 77-79% of the time, but had **never once, across
+~200 game-seats, reached 3 simultaneous regions led** — the bare minimum
+for the dominance win condition. The user's own direct request: make
+`NetworkOptimizerStrategy`/`BalancedGrowthStrategy` (non-Starting-era)
+aware of the win condition, with a mechanism to prioritize approaching
+it, tuned to each strategy's own core tenet. `DistressStrategy` excluded
+by the user's own explicit instruction (recovery stays its only
+priority); `RapidExpansionStrategy`/`DomesticProfitOptimizerStrategy`
+(Starting-only) out of scope by the user's own "non-Starting" framing.
+
+**Critical prior art respected:** a near-identical "close to winning"
+signal was tried once before as a third `Suitability` trigger on
+`NetworkOptimizerStrategy` (this file's own M58 section) — it dominated
+strategy *selection* 9-30x over the signal it was meant to complement
+and drove NorthAmerica's bankruptcy rate from 20.8% to 65.0%, reverted
+entirely. This round's own design deliberately never touches
+`Suitability` — the new `StrategyContext.RegionsLedLastQuarter` signal
+only re-ranks *which candidate wins* within a search a strategy already
+runs for its own reasons, never *whether* it runs.
+
+**Shipped:** `BaselineAi.FindBestPerformingRoute` gained a third,
+independent opt-in tier (`regionsNotYetLed`, same ablation-lever shape
+as `enableRealProfitabilityGate`) - a route touching a region not yet
+led sorts ahead of one that doesn't, real profit/load factor staying the
+tie-break within that tier. `NetworkOptimizerStrategy` (tenet:
+stabilize, never expand) gets exactly one mechanism - its own step 2
+(grow the best existing route) passes this tier, the only lever it has
+since it never opens anything new cross-region.
+`BalancedGrowthStrategy` (tenet: growth, phased by region-reach) gets
+two - the same reinforce-step tier, plus Case 2 (new pair within touched
+regions) now tries a `BothEndpointsTouchedAndAtLeastOneUnled` filter
+first, falling back to the original broad any-touched-region filter when
+nothing qualifies there.
+
+**Measured, and reported honestly even though it didn't fix the
+motivating problem.** Real 300-game sweep (seed 1, 244 quarters,
+`DistressStrategy` active - the real shipped game): every region's own
+bankruptcy/win-share number moved only at noise level (Europe bankruptcy
+13.7%→13.7% exactly, win share 2.7%→2.3%). Re-running the same
+diagnostic that found the original problem: **Europe-home airlines still
+reach 3 simultaneous led regions 0/197 times - completely unmoved.**
+Two further diagnostics (`MaxRegionsTouchedByName`,
+`StrategyQuarterCountByNameThenStrategy`, both temporary, both reverted
+after use) ruled out the two most obvious explanations before accepting
+the null result: Europe reaches 3+ *touched* regions 62% of the time -
+in line with NorthAmerica (70%) and EastAsia (72%), so it isn't a
+breadth problem; Europe spends 57% of its quarters on
+`BalancedGrowthStrategy` (both mechanisms) - in line with EastAsia (53%)
+and NorthAmerica (62%), both of which *do* reach 3 led regions 46% and
+26% of the time, so it isn't a strategy-selection problem either. Europe
+touches enough regions and runs the right strategy; it simply never
+converts a touched foreign region into a *led* one, because this
+mechanism only changes *which* candidate a strategy already picking a
+target reaches for - it cannot manufacture more investment. The real
+bottleneck is very plausibly scale: Europe is the single biggest,
+highest-demand prize in the game, drawing intense competition from every
+other airline too, which likely leaves Europe-home airlines
+disproportionately busy defending their own turf with less surplus to
+mount a real takeover of another region's entrenched incumbent -
+something a selection-priority nudge cannot fix on its own. Filed here
+as a real, open, harder problem - not solved by this round, and not
+pretended to be.
+
+**Shipped anyway, by the user's own explicit decision**, after this
+finding was presented plainly: the mechanism is a real, correct,
+harmless improvement that does exactly what was asked (win-condition-aware
+mechanisms, tuned per strategy, verified safe by measurement) - not
+withheld for failing to also solve a harder, separate problem it was
+never guaranteed to solve. A stronger lever (e.g. a concentrated,
+multi-action "surge" investment toward one target region) is the natural
+next candidate for whoever picks this up, filed here rather than
+attempted this round.
+
 - **`AllianceCourtOrder`** — deliberately excluded from every milestone
   above, carrying forward `BaselineAi`'s own existing reasoning (M9):
   the alliance mechanic has no consequence today that would change this

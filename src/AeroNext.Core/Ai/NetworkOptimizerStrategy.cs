@@ -164,6 +164,23 @@ namespace AeroNext.Core.Ai;
 /// resolved, when available) load factor rather than the fare/
 /// competition-agnostic solo estimate. See that method's own doc comment
 /// for the full reasoning.
+///
+/// Win-condition-awareness follow-up: this class never opens a new
+/// cross-region route or gateway at all (its own unbroken invariant,
+/// above) - step 2 is the *only* lever it has toward the win condition,
+/// so it's the only place this gets applied. Also passes
+/// regionsNotYetLed (AiToolkit.RegionsNotYetLed) - a real diagnostic
+/// found some regions' own home airlines almost never win despite
+/// holding a real, profitable foothold abroad, because nothing ever
+/// distinguished "a region I'm present in" from "a region I'm actually
+/// leading," so a foreign route opened once was never reinforced past a
+/// bare toehold. Tuned to this class's own stabilize-not-expand tenet:
+/// it changes *which already-served route* gets reinforced, never opens
+/// anything new, never changes whether step 2 fires at all, and never
+/// touches Suitability - see StrategyContext.RegionsLedLastQuarter's own
+/// doc comment for why that last point specifically matters here (a
+/// near-identical signal, wired into Suitability instead, is the exact
+/// thing this class's own M58 history already found and reverted once).
 /// </summary>
 public sealed class NetworkOptimizerStrategy : IAiStrategy
 {
@@ -213,7 +230,8 @@ public sealed class NetworkOptimizerStrategy : IAiStrategy
             context.CurrentRoutes, context.DemandModel,
             excludePairKeys: AiToolkit.RecentlyShrunkPairKeys(context, AiToolkit.GrowthCooldownQuarters),
             lastQuarterSeatsCarriedByRoute: context.LastQuarterSeatsCarriedByRoute,
-            enableRealProfitabilityGate: true);
+            enableRealProfitabilityGate: true,
+            regionsNotYetLed: AiToolkit.RegionsNotYetLed(context));
         if (bestExisting is not null && spent + 1 <= context.ActionCap
             && BaselineAi.HasSlotAtEveryGateway(bestExisting.Origin, bestExisting.Destination, context.AvailableSlotsByCity, slotsReservedByCity)
             && AiToolkit.HasRoomAtEveryCity(bestExisting.Origin, bestExisting.Destination, context.CityWideSlotsRemaining, citySpendReservedByCity))

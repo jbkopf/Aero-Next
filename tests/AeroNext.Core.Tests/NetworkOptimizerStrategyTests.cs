@@ -22,10 +22,11 @@ public class NetworkOptimizerStrategyTests
         System.Collections.Generic.IReadOnlyDictionary<(string OriginId, string DestinationId), int>? rivalCountByServedRoute = null,
         System.Collections.Generic.IReadOnlyDictionary<(string OriginId, string DestinationId), AiRouteHistory>? routeHistoryByPair = null,
         int quarterNumber = 1,
-        System.Collections.Generic.IReadOnlyDictionary<(string OriginId, string DestinationId), long>? lastQuarterSeatsCarriedByRoute = null) =>
+        System.Collections.Generic.IReadOnlyDictionary<(string OriginId, string DestinationId), long>? lastQuarterSeatsCarriedByRoute = null,
+        IReadOnlySet<Region>? regionsLed = null) =>
         new(routes, actionCap, cities, DemandModel, eraTypes, fleet ?? AirlineFleet.Empty, homeRegion, HomeCity: homeCity ?? cities[0], AvailableCash: cash,
             RivalCountByServedRoute: rivalCountByServedRoute, RouteHistoryByPair: routeHistoryByPair, QuarterNumber: quarterNumber,
-            LastQuarterSeatsCarriedByRoute: lastQuarterSeatsCarriedByRoute);
+            LastQuarterSeatsCarriedByRoute: lastQuarterSeatsCarriedByRoute, RegionsLedLastQuarter: regionsLed);
 
     /// <summary>Shorthand for a RouteHistoryByPair entry with only ConsecutiveUnprofitableQuarters set - the only field this strategy's own Suitability reads.</summary>
     private static AiRouteHistory Sustained(int consecutiveUnprofitableQuarters) =>
@@ -247,6 +248,75 @@ public class NetworkOptimizerStrategyTests
         var lease = Assert.Single(orders.OfType<LeaseAircraftOrder>());
         Assert.Equal("t", lease.Type.Id);
         Assert.Contains(orders.OfType<RouteOrder>(), o => new HashSet<string> { "home", "served" }.SetEquals(new[] { o.Origin.Id, o.Destination.Id }));
+    }
+
+    [Fact]
+    public void DecideOrders_GrowExisting_PrefersUnledRegion_OverHigherLoadFactorLedOne()
+    {
+        // Win-condition-awareness follow-up: home-highLf (Europe, already
+        // led) reads 100% real load factor (real numbers verified via the
+        // scratchpad calculator, same fixture shape as the audit test
+        // below: weight-200 city, profit $430,534.00 - real-profitable).
+        // home-lowLf (EastAsia, not yet led) reads only 93.34% (weight-8
+        // city, profit $489,735.48 - also real-profitable). Without the
+        // region tier, highLf's own better load factor would win step 2
+        // outright. NorthAmerica (home) and Europe are both already led
+        // (regionsLed) - only EastAsia isn't - so the region tier picks
+        // lowLf specifically, not merely "any foreign region" (both
+        // routes touch a foreign region; only one touches an *unled*
+        // one). lowLf's own route is built origin-first (lowLf, home),
+        // not home-first like highLf's - covers
+        // TouchesRegionNotYetLed's own "unled region is the Origin, not
+        // just the Destination" branch directly, not just by inspection.
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
+        var highLf = MakeCity("highlf", Region.Europe, 1, 1, 200);
+        var lowLf = MakeCity("lowlf", Region.EastAsia, 2, 2, 8);
+        var cities = new[] { home, highLf, lowLf };
+        var aircraft = new AircraftType("t", "Test", Seats: 100, RangeKm: 10_000, CruiseSpeedKmh: 900, CostPerAvailableSeatKm: 0.1);
+        var existing = new[]
+        {
+            new Route(home, highLf, aircraft, AircraftCount: 1),
+            new Route(lowLf, home, aircraft, AircraftCount: 1),
+        };
+        var regionsLed = new HashSet<Region> { Region.NorthAmerica, Region.Europe };
+
+        var context = MakeContext(existing, cities, Array.Empty<AircraftType>(), Region.NorthAmerica, actionCap: 2, regionsLed: regionsLed);
+
+        var orders = Strategy.DecideOrders(context);
+
+        var routeOrder = Assert.Single(orders.OfType<RouteOrder>());
+        Assert.Equal(new HashSet<string> { "home", "lowlf" }, new HashSet<string> { routeOrder.Origin.Id, routeOrder.Destination.Id });
+    }
+
+    [Fact]
+    public void DecideOrders_GrowExisting_AlreadyLeadsEverywhereTouched_UnchangedFromPlainLoadFactorRanking()
+    {
+        // Win-condition-awareness follow-up, the degenerate/no-op case:
+        // both regions already led means the region tier can never
+        // distinguish these two candidates, so the plain real-load-factor
+        // ranking decides - exactly today's pre-existing behavior,
+        // reproduced directly rather than only argued by inspection.
+        // Same fixture as the test above, just with EastAsia also marked
+        // led - highLf's own better load factor (100% vs. 93.34%) should
+        // now win.
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
+        var highLf = MakeCity("highlf", Region.Europe, 1, 1, 200);
+        var lowLf = MakeCity("lowlf", Region.EastAsia, 2, 2, 8);
+        var cities = new[] { home, highLf, lowLf };
+        var aircraft = new AircraftType("t", "Test", Seats: 100, RangeKm: 10_000, CruiseSpeedKmh: 900, CostPerAvailableSeatKm: 0.1);
+        var existing = new[]
+        {
+            new Route(home, highLf, aircraft, AircraftCount: 1),
+            new Route(home, lowLf, aircraft, AircraftCount: 1),
+        };
+        var regionsLed = new HashSet<Region> { Region.NorthAmerica, Region.Europe, Region.EastAsia };
+
+        var context = MakeContext(existing, cities, Array.Empty<AircraftType>(), Region.NorthAmerica, actionCap: 2, regionsLed: regionsLed);
+
+        var orders = Strategy.DecideOrders(context);
+
+        var routeOrder = Assert.Single(orders.OfType<RouteOrder>());
+        Assert.Equal(new HashSet<string> { "home", "highlf" }, new HashSet<string> { routeOrder.Origin.Id, routeOrder.Destination.Id });
     }
 
     [Fact]
