@@ -74,23 +74,28 @@ public class StartingConditionsTests
     }
 
     [Fact]
-    public void Resolve_PrefersSmallestAircraftThatReachesAValidDestination()
+    public void Resolve_PicksTheMostProfitableAircraftAndDestinationCombination()
     {
-        // A tiny same-region pair, both cities well within the shorter
-        // aircraft's range: the resolver should not reach for the larger one.
-        var a = new City("a", "A", Region.Europe, 0, 0, 60, false, null);
-        var b = new City("b", "B", Region.Europe, 0, 1, 60, false, null); // ~111 km away
-        var cities = new[] { a, b };
+        // Guaranteed-route profitability follow-up: two eligible
+        // destinations - "near" is close and thin (its route can't fill a
+        // plane); "far" is farther but has heavy demand. The
+        // profitability-blind alphabetical rule would have picked "far"
+        // anyway here (f < n), but with the demand flipped it would have
+        // picked the loss-making one. The new rule always lands on the
+        // profitable combination regardless of city id ordering.
+        var home = new City("home", "HOME", Region.Europe, 0, 0, 40, false, null);
+        var thin = new City("aaa", "AAA", Region.Europe, 0, 3, 3, false, null);   // alphabetically first, tiny demand
+        var rich = new City("zzz", "ZZZ", Region.Europe, 0, 2, 400, false, null); // alphabetically last, heavy demand
+        var cities = new[] { home, thin, rich };
 
-        var small = new AircraftType("small", "Small", Seats: 40, RangeKm: 2000, ManufacturerRegion: Region.Europe);
-        var large = new AircraftType("large", "Large", Seats: 200, RangeKm: 10_000, ManufacturerRegion: Region.Europe);
-        var fleet = new[] { large, small }; // deliberately out of range order
+        var small = new AircraftType("small", "Small", Seats: 40, RangeKm: 5000, ManufacturerRegion: Region.Europe, CostPerAvailableSeatKm: 0.1, CruiseSpeedKmh: 500);
+        var large = new AircraftType("large", "Large", Seats: 200, RangeKm: 5000, ManufacturerRegion: Region.Europe, CostPerAvailableSeatKm: 0.1, CruiseSpeedKmh: 500);
+        var fleet = new[] { small, large };
 
-        var seat = new AirlineSeat("Test", IsHuman: true, Region.Europe, a);
+        var seat = new AirlineSeat("Test", IsHuman: true, Region.Europe, home);
         var conditions = StartingConditionsResolver.Resolve(seat, cities, fleet);
 
-        Assert.Equal("small", conditions.StartingAircraft.Id);
-        Assert.Equal("b", conditions.GuaranteedRouteDestination.Id);
+        Assert.Equal("zzz", conditions.GuaranteedRouteDestination.Id); // profitable, not alphabetically-first
     }
 
     [Fact]
