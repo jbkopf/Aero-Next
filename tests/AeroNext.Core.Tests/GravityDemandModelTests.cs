@@ -53,6 +53,42 @@ public class GravityDemandModelTests
     }
 
     [Fact]
+    public void ForPair_IntraRegionMultiplier_Absent_IsExactlyDefaultBehavior()
+    {
+        var baseline = new GravityDemandModel();
+        var tuned = new GravityDemandModel(intraRegionMultipliers: new Dictionary<Region, double>()); // empty map
+        var a = MakeCity("a", 0, 0, 50, Region.AustralAsia);
+        var b = MakeCity("b", 5, 0, 50, Region.AustralAsia);
+
+        Assert.Equal(baseline.ForPair(a, b).PassengersPerQuarter, tuned.ForPair(a, b).PassengersPerQuarter);
+    }
+
+    [Fact]
+    public void ForPair_IntraRegionMultiplier_ScalesOnlySameRegionPairsInTheKeyedRegion()
+    {
+        var multiplier = 2.0;
+        var baseline = new GravityDemandModel();
+        var tuned = new GravityDemandModel(intraRegionMultipliers: new Dictionary<Region, double> { [Region.AustralAsia] = multiplier });
+
+        var aa1 = MakeCity("aa1", 0, 0, 50, Region.AustralAsia);
+        var aa2 = MakeCity("aa2", 5, 0, 50, Region.AustralAsia);
+        var ea1 = MakeCity("ea1", 0, 0, 50, Region.EastAsia);
+        var ea2 = MakeCity("ea2", 5, 0, 50, Region.EastAsia);
+        var aaToEa = MakeCity("x", 5, 0, 50, Region.EastAsia); // cross-region from aa1
+
+        // Intra-AustralAsia pair: scaled.
+        Assert.InRange(tuned.ForPair(aa1, aa2).PassengersPerQuarter,
+            baseline.ForPair(aa1, aa2).PassengersPerQuarter * multiplier - 1,
+            baseline.ForPair(aa1, aa2).PassengersPerQuarter * multiplier + 1);
+
+        // Intra-EastAsia pair (not the keyed region): untouched.
+        Assert.Equal(baseline.ForPair(ea1, ea2).PassengersPerQuarter, tuned.ForPair(ea1, ea2).PassengersPerQuarter);
+
+        // Cross-region pair touching AustralAsia: untouched (cross-region multiplier only).
+        Assert.Equal(baseline.ForPair(aa1, aaToEa).PassengersPerQuarter, tuned.ForPair(aa1, aaToEa).PassengersPerQuarter);
+    }
+
+    [Fact]
     public void ForPair_AppliesCrossRegionMultiplier_OnlyAcrossRegionBoundary()
     {
         var model = new GravityDemandModel(crossRegionMultiplier: 6.0);

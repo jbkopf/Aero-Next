@@ -55,8 +55,10 @@ public static class FullGameRunner
     public static FullGameResult Run(
         int gameIndex, int configSeed, int campaignSeed, int quarters,
         IReadOnlyList<AirlineSeat> seats,
-        IReadOnlyList<City> cities, IReadOnlyList<AircraftType> fleetCatalog, IReadOnlyList<DemandGrowthPoint> growthSchedule)
+        IReadOnlyList<City> cities, IReadOnlyList<AircraftType> fleetCatalog, IReadOnlyList<DemandGrowthPoint> growthSchedule,
+        ExperimentTuning? tuning = null)
     {
+        tuning ??= ExperimentTuning.Baseline;
         var violations = new List<GameViolation>();
         var campaignRng = new SimRng(campaignSeed);
 
@@ -72,7 +74,9 @@ public static class FullGameRunner
             violations.Add(new GameViolation(0, "-", "Seats did not have distinct starting cities."));
         }
 
-        var conditionsByName = seats.ToDictionary(s => s.AirlineName, s => StartingConditionsResolver.Resolve(s, cities, fleetCatalog));
+        var conditionsByName = seats.ToDictionary(
+            s => s.AirlineName,
+            s => tuning.ApplyTo(s, StartingConditionsResolver.Resolve(s, cities, fleetCatalog), cities, fleetCatalog));
         var seatByName = seats.ToDictionary(s => s.AirlineName);
         var homeRegionByName = seats.ToDictionary(s => s.AirlineName, s => s.HomeRegion);
         var startingCityIdByName = seats.ToDictionary(s => s.AirlineName, s => s.StartingCity.Id);
@@ -114,7 +118,9 @@ public static class FullGameRunner
         // M46: each city's own 1955 total demand becomes the fixed
         // reference point periodic expansion measures growth against -
         // computed once, here, before any quarter runs.
-        var capacityBoard = CityCapacityBoard.Initialize(cities, new GravityDemandModel(schedule: growthSchedule, year: Timeline.StartYear, enableHubDemandBonus: true));
+        var capacityBoard = CityCapacityBoard.Initialize(cities, new GravityDemandModel(
+            schedule: growthSchedule, year: Timeline.StartYear, enableHubDemandBonus: true,
+            intraRegionMultipliers: tuning.IntraRegionDemandMultipliers));
         var dominanceState = RegionalDominanceState.Empty;
         string? winner = null;
         int? winQuarter = null;
@@ -125,7 +131,9 @@ public static class FullGameRunner
         {
             var year = Timeline.YearForQuarter(q);
             var availableFleet = Timeline.AvailableAircraft(fleetCatalog, year);
-            var yearDemandModel = new GravityDemandModel(schedule: growthSchedule, year: year, enableHubDemandBonus: true); // M20: model resolves global (and any region/city-scoped) growth itself
+            var yearDemandModel = new GravityDemandModel(
+                schedule: growthSchedule, year: year, enableHubDemandBonus: true,
+                intraRegionMultipliers: tuning.IntraRegionDemandMultipliers); // M20: model resolves global (and any region/city-scoped) growth itself
             var appliedOrdersByName = new Dictionary<string, IReadOnlyList<QuarterOrder>>();
             var retiredUnitsByName = new Dictionary<string, IReadOnlyList<FleetUnit>>();
 

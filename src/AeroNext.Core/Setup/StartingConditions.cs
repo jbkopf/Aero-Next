@@ -106,6 +106,40 @@ public static class StartingConditionsResolver
             $"from {seat.StartingCity.Id} to any other eligible city in the region.");
     }
 
+    /// <summary>
+    /// Factor A (docs/AUSTRALASIA_TUNING_EXPERIMENTS.md): the most
+    /// profitable starting (aircraft, destination) combination outright —
+    /// no smallest-aircraft / alphabetical-first heuristic, just the pick
+    /// <see cref="Resolve"/> already falls back to when its heuristic pick
+    /// loses money, applied unconditionally. Same option set, same
+    /// tie-break, same "nothing reachable" throw as <see cref="Resolve"/>.
+    /// </summary>
+    public static (AircraftType Aircraft, City Destination) MostProfitableRoute(
+        AirlineSeat seat, IReadOnlyList<City> allCities, IReadOnlyList<AircraftType> fleet)
+    {
+        var demandModel = new GravityDemandModel(enableHubDemandBonus: true);
+        var aircraftOptions = RegionalFleet.AppropriateAircraft(seat.HomeRegion, fleet, Timeline.StartYear)
+            .OrderBy(a => a.RangeKm)
+            .ThenBy(a => a.Id, StringComparer.Ordinal)
+            .ToList();
+        var destinationOptions = HomeRegions.EligibleStartingCities(seat.HomeRegion, allCities)
+            .Where(c => c.Id != seat.StartingCity.Id)
+            .ToList();
+
+        var anyReachable = aircraftOptions.Any(a => destinationOptions.Any(c =>
+            GreatCircle.DistanceKm(seat.StartingCity, c) <= a.RangeKm &&
+            demandModel.ForPair(seat.StartingCity, c).PassengersPerQuarter > 0));
+
+        if (!anyReachable)
+        {
+            throw new InvalidOperationException(
+                $"No appropriate {Timeline.StartYear} aircraft for {seat.HomeRegion} can open a positive-demand route " +
+                $"from {seat.StartingCity.Id} to any other eligible city in the region.");
+        }
+
+        return MostProfitableCombination(seat, destinationOptions, aircraftOptions, demandModel);
+    }
+
     private static long RouteProfit(City origin, City destination, AircraftType aircraft, GravityDemandModel demandModel)
     {
         var route = new Route(origin, destination, aircraft, AircraftCount: 1);

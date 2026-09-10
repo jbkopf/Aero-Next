@@ -140,6 +140,16 @@ public sealed class GravityDemandModel
     private readonly bool _hubDemandBonusEnabled;
 
     /// <summary>
+    /// Factor D (docs/AUSTRALASIA_TUNING_EXPERIMENTS.md): a flat multiplier
+    /// applied to a pair whose endpoints are *both* in the keyed region -
+    /// the intra-region sibling of <see cref="_crossRegionMultiplier"/>.
+    /// Absent region = 1.0 (no change); an empty map is exactly today's
+    /// behavior. Distinct from <see cref="_regionMultiplierByRegion"/>,
+    /// which is the M20 growth schedule's per-endpoint factor.
+    /// </summary>
+    private readonly IReadOnlyDictionary<Region, double> _intraRegionMultipliers;
+
+    /// <summary>
     /// globalMultiplier is M13's historical growth knob — the campaign
     /// constructs a new model each year with the era's multiplier from
     /// Timeline.DemandMultiplierForYear, reusing the same tuned scale,
@@ -148,6 +158,8 @@ public sealed class GravityDemandModel
     /// provided (the richer, scope-aware path); leave them null to keep
     /// today's exact flat-multiplier behavior. M63: enableHubDemandBonus
     /// defaults false, same "off is exactly old behavior" guarantee.
+    /// intraRegionMultipliers (factor D) defaults null/empty, same
+    /// guarantee.
     /// </summary>
     public GravityDemandModel(
         double scale = DefaultScale,
@@ -156,13 +168,15 @@ public sealed class GravityDemandModel
         double globalMultiplier = DefaultGlobalMultiplier,
         IReadOnlyList<DemandGrowthPoint>? schedule = null,
         int? year = null,
-        bool enableHubDemandBonus = false)
+        bool enableHubDemandBonus = false,
+        IReadOnlyDictionary<Region, double>? intraRegionMultipliers = null)
     {
         _scale = scale;
         _exponent = exponent;
         _crossRegionMultiplier = crossRegionMultiplier;
         _globalMultiplier = globalMultiplier;
         _hubDemandBonusEnabled = enableHubDemandBonus;
+        _intraRegionMultipliers = intraRegionMultipliers ?? new Dictionary<Region, double>();
 
         if (schedule is null || year is null)
         {
@@ -204,6 +218,10 @@ public sealed class GravityDemandModel
         if (a.Region != b.Region)
         {
             raw *= _crossRegionMultiplier;
+        }
+        else if (_intraRegionMultipliers.TryGetValue(a.Region, out var intraRegionMultiplier))
+        {
+            raw *= intraRegionMultiplier;
         }
 
         raw *= _resolvedGlobalMultiplier;
