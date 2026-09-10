@@ -189,19 +189,30 @@ doc **byte-identical** before trusting any delta.
 
 ## Phases
 
-### Phase 0 — Instrumentation
+### Phase 0 — Instrumentation ✅ (done)
 
-1. Make the by-starting-city breakdown a permanent (non-TEMP) field on
-   `FullGameResult` — `IReadOnlyDictionary<string,string> StartingCityIdByName`.
-   The QaHarness is a dev tool; this is genuinely load-bearing for the whole
-   investigation and re-adding it as TEMP every session is waste. Small clean
-   commit.
-2. Add the four factor knobs, all off-by-default, each guarded so baseline is
-   byte-identical. One commit per factor, each with the "knob off = no-op"
-   test.
-3. Build the batch runner (scratchpad): takes a list of `(S,A,D,C)` tuples,
-   runs a sweep per tuple, appends a CSV row. Re-runnable, resumable.
-4. Run the baseline row. Diff against the top-of-doc table. Gate: must match.
+1. ~~By-starting-city breakdown as a permanent `FullGameResult` field.~~
+   `StartingCityIdByName` — commit `c5ce839`.
+2. ~~The factor knobs, off-by-default, byte-identical baseline.~~
+   `ExperimentTuning` (S, A, D) + first `AeroNext.QaHarness.Tests` project —
+   commits `2f7b782`, `05e05de`. **Factor C carries no knob**: it is
+   caller-side (merge a city file before building seats) and blocked on data
+   authoring — folded into Phase 1's C step. The batch runner takes a
+   `citiesFile` per combo.
+3. ~~Batch runner.~~ Scratchpad `m45sweep` — `Combo(label, ExperimentTuning,
+   extraCitiesFile?)` list, one sweep each, appends a row to
+   `austral-experiments.csv` plus a console AA-by-starting-city block.
+4. ~~Baseline row vs the top-of-doc table.~~ Reproduces **exactly**:
+   AustralAsia 97 / 19.6% / 1.0%, total 4.2%, avg quarter 146.0, every other
+   region to the seat.
+
+**Sweep-infra discipline (learned the hard way in Phase 0):** a force-killed
+`dotnet run` / `dotnet exec` leaves the *app* process orphaned and burning a
+core; several orphans accumulating is what makes later sweeps look "hung"
+(they are just starved 4–8×). Run one sweep at a time, let it finish on its
+own (the completion notification), never `TaskStop` a running sweep. If one
+must be killed, `Get-Process dotnet | Stop-Process -Force` and confirm zero
+before the next run.
 
 ### Phase 1 — One factor at a time (OFAT)
 
