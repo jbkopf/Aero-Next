@@ -75,6 +75,7 @@ public static class FullGameRunner
         var conditionsByName = seats.ToDictionary(s => s.AirlineName, s => StartingConditionsResolver.Resolve(s, cities, fleetCatalog));
         var seatByName = seats.ToDictionary(s => s.AirlineName);
         var homeRegionByName = seats.ToDictionary(s => s.AirlineName, s => s.HomeRegion);
+        var startingCityIdByName = seats.ToDictionary(s => s.AirlineName, s => s.StartingCity.Id);
         var routes = names.ToDictionary(n => n, _ => (IReadOnlyList<Route>)Array.Empty<Route>());
         var caps = names.ToDictionary(n => n, _ => QuarterEngine.BaseActionCap);
         var finances = names.ToDictionary(n => n, n => FinancialState.Start(conditionsByName[n].StartingCash, DefaultStartingDebt, DefaultInterestRatePerQuarter));
@@ -517,6 +518,6 @@ public static class FullGameRunner
 
         return new FullGameResult(
             gameIndex, configSeed, campaignSeed, humanCount, winQuarter ?? quarters, violations,
-            finalCash, bankruptcyQuarter, homeRegionByName, winner, winQuarter, finalRanking);
+            finalCash, bankruptcyQuarter, homeRegionByName, startingCityIdByName, winner, winQuarter, finalRanking);
     }
 }

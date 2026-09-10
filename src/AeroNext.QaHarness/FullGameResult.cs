@@ -15,6 +15,12 @@ public sealed record FullGameResult(
     IReadOnlyDictionary<string, Money> FinalCash,
     IReadOnlyDictionary<string, int?> BankruptcyQuarter,
     IReadOnlyDictionary<string, Region> HomeRegionByName,
+    // Each airline's quarter-1 starting city id. Bankruptcy and win share
+    // vary sharply by starting city within a region (e.g. AustralAsia:
+    // Papeete/Auckland ~100% bankrupt, Sydney/Melbourne ~0%), so
+    // region-level aggregates hide the real signal - this lets a sweep
+    // break outcomes down per starting city.
+    IReadOnlyDictionary<string, string> StartingCityIdByName,
     string? Winner,
     int? WinQuarter,
     IReadOnlyList<string> FinalRanking)
