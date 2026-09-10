@@ -30,6 +30,24 @@ public class ExperimentTuningTests
     // --- Baseline / no-op ---
 
     [Fact]
+    public void Baseline_IsExactlyADefaultConstructedInstance()
+    {
+        Assert.Equal(new ExperimentTuning(), ExperimentTuning.Baseline);
+        Assert.NotEqual(new ExperimentTuning { AustralAsiaCashFloorFactor = 1.0 }, ExperimentTuning.Baseline);
+    }
+
+    [Fact]
+    public void With_ExpressionChangesOnlyTheNamedKnob()
+    {
+        var single = ExperimentTuning.Baseline with { AustralAsiaAircraft = AustralAsiaAircraftMode.MostProfitable };
+
+        Assert.Equal(AustralAsiaAircraftMode.MostProfitable, single.AustralAsiaAircraft);
+        Assert.Null(single.AustralAsiaCashFloorFactor);
+        Assert.Equal(1.0, single.AustralAsiaIntraRegionDemandMultiplier);
+        Assert.NotEqual(ExperimentTuning.Baseline, single);
+    }
+
+    [Fact]
     public void Baseline_ApplyTo_IsANoOp()
     {
         var conditions = Fake(15_100_000);

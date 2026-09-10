@@ -130,4 +130,18 @@ public class StartingConditionsTests
 
         Assert.Throws<InvalidOperationException>(() => StartingConditionsResolver.Resolve(seat, cities, fleet));
     }
+
+    [Fact]
+    public void MostProfitableRoute_NoReachableNeighborForAnyAppropriateAircraft_Throws()
+    {
+        var a = new City("a", "A", Region.Europe, 0, 0, 60, false, null);
+        var b = new City("b", "B", Region.Europe, 60, 60, 60, false, null); // unreachably far
+        var cities = new[] { a, b };
+
+        var tooSmall = new AircraftType("small", "Small", Seats: 40, RangeKm: 500, ManufacturerRegion: Region.Europe);
+        var seat = new AirlineSeat("Test", IsHuman: true, Region.Europe, a);
+
+        Assert.Throws<InvalidOperationException>(
+            () => StartingConditionsResolver.MostProfitableRoute(seat, cities, new[] { tooSmall }));
+    }
 }
