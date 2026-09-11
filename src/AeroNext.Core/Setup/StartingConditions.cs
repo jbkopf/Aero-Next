@@ -140,6 +140,64 @@ public static class StartingConditionsResolver
         return MostProfitableCombination(seat, destinationOptions, aircraftOptions, demandModel);
     }
 
+    /// <summary>
+    /// A generalized guaranteed-route selection, bracketing the two
+    /// already-measured extremes (docs/OPEN_WORK.md's filler-seat
+    /// investigation): keeps the heuristic pick — the same
+    /// smallest-aircraft / alphabetical-first choice <see cref="Resolve"/>
+    /// itself uses — only when its profit is at least
+    /// <paramref name="minProfitFraction"/> of the best available
+    /// (aircraft, destination) combination's profit; otherwise uses the
+    /// best combination outright. <c>minProfitFraction</c> near 0.0
+    /// reduces to (but is not byte-identical with — see the degenerate
+    /// both-non-positive case below) <see cref="Resolve"/>'s own shipped
+    /// "keep if profit ≥ $0" rule; 1.0 reduces to
+    /// <see cref="MostProfitableRoute"/> always winning (the "V1" variant
+    /// the AustralAsia investigation measured and rejected as a universal
+    /// policy — see docs/AUSTRALASIA_TUNING_EXPERIMENTS.md). A separate,
+    /// parallel method — never touches <see cref="Resolve"/>, which stays
+    /// real, shipped, unconditional behavior.
+    /// </summary>
+    public static AirlineStartingConditions ResolveWithMinProfitFraction(
+        AirlineSeat seat, IReadOnlyList<City> allCities, IReadOnlyList<AircraftType> fleet, double minProfitFraction)
+    {
+        var cash = Money.FromDollars((long)Math.Round(
+            BaseStartingCashDollars * RegionalEconomics.Factor(seat.HomeRegion, allCities), MidpointRounding.AwayFromZero));
+
+        var demandModel = new GravityDemandModel(enableHubDemandBonus: true);
+        var (bestAircraft, bestDestination) = MostProfitableRoute(seat, allCities, fleet); // throws if nothing reachable at all
+
+        var aircraftOptions = RegionalFleet.AppropriateAircraft(seat.HomeRegion, fleet, Timeline.StartYear)
+            .OrderBy(a => a.RangeKm)
+            .ThenBy(a => a.Id, StringComparer.Ordinal)
+            .ToList();
+        var destinationOptions = HomeRegions.EligibleStartingCities(seat.HomeRegion, allCities)
+            .Where(c => c.Id != seat.StartingCity.Id)
+            .ToList();
+
+        // The same heuristic pick Resolve itself makes; guaranteed to find
+        // something, since MostProfitableRoute above didn't throw and uses
+        // the identical reachability condition.
+        var (heuristicAircraft, heuristicDestination) = aircraftOptions
+            .Select(aircraft => (aircraft, destination: destinationOptions
+                .Where(c => GreatCircle.DistanceKm(seat.StartingCity, c) <= aircraft.RangeKm)
+                .Where(c => demandModel.ForPair(seat.StartingCity, c).PassengersPerQuarter > 0)
+                .OrderBy(c => c.Id, StringComparer.Ordinal)
+                .FirstOrDefault()))
+            .First(x => x.destination is not null);
+
+        var heuristicProfit = RouteProfit(seat.StartingCity, heuristicDestination!, heuristicAircraft, demandModel);
+        var bestProfit = RouteProfit(seat.StartingCity, bestDestination, bestAircraft, demandModel);
+
+        var keepHeuristic = bestProfit <= 0
+            ? heuristicProfit >= bestProfit
+            : heuristicProfit >= minProfitFraction * bestProfit;
+
+        return keepHeuristic
+            ? new AirlineStartingConditions(cash, heuristicAircraft, StartingAircraftQuantity, heuristicDestination!)
+            : new AirlineStartingConditions(cash, bestAircraft, StartingAircraftQuantity, bestDestination);
+    }
+
     private static long RouteProfit(City origin, City destination, AircraftType aircraft, GravityDemandModel demandModel)
     {
         var route = new Route(origin, destination, aircraft, AircraftCount: 1);

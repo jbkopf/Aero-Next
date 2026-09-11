@@ -84,6 +84,19 @@ public sealed record ExperimentTuning
     /// </summary>
     public double SouthAmericaIntraRegionDemandMultiplier { get; init; } = 1.0;
 
+    /// <summary>
+    /// Global Q1 under-provisioning threshold (docs/OPEN_WORK.md's
+    /// filler-seat investigation) — unlike every other knob here, this
+    /// applies to <em>every</em> seat, not one region. null = off,
+    /// <see cref="StartingConditionsResolver.Resolve"/>'s own shipped pick,
+    /// byte-identical. When set, every seat's guaranteed route comes from
+    /// <see cref="StartingConditionsResolver.ResolveWithMinProfitFraction"/>
+    /// at this fraction instead — see that method's own doc comment for
+    /// what the value means (0.0 ≈ shipped Resolve; 1.0 = always the best
+    /// available combination, the already-rejected "V1" policy).
+    /// </summary>
+    public double? GlobalMinProfitFraction { get; init; }
+
     /// <summary>Baseline: all knobs off.</summary>
     public static ExperimentTuning Baseline { get; } = new();
 
@@ -106,19 +119,27 @@ public sealed record ExperimentTuning
     /// tuning applied. <paramref name="baseline"/> is what
     /// <see cref="StartingConditionsResolver.Resolve"/> returned untouched;
     /// <paramref name="allCities"/> and <paramref name="fleet"/> are the
-    /// same lists that resolver was handed. A no-op for any seat outside
-    /// AustralAsia and for <see cref="Baseline"/>.
+    /// same lists that resolver was handed. A no-op for
+    /// <see cref="Baseline"/>; a no-op for any seat outside AustralAsia
+    /// unless <see cref="GlobalMinProfitFraction"/> is set (the one knob
+    /// here that isn't AustralAsia-scoped).
     /// </summary>
     public AirlineStartingConditions ApplyTo(
         AirlineSeat seat, AirlineStartingConditions baseline,
         IReadOnlyList<City> allCities, IReadOnlyList<AircraftType> fleet)
     {
-        if (seat.HomeRegion != Region.AustralAsia)
+        var result = baseline;
+
+        if (GlobalMinProfitFraction is { } fraction)
         {
-            return baseline;
+            var tuned = StartingConditionsResolver.ResolveWithMinProfitFraction(seat, allCities, fleet, fraction);
+            result = result with { StartingAircraft = tuned.StartingAircraft, GuaranteedRouteDestination = tuned.GuaranteedRouteDestination };
         }
 
-        var result = baseline;
+        if (seat.HomeRegion != Region.AustralAsia)
+        {
+            return result;
+        }
 
         if (AustralAsiaAircraft == AustralAsiaAircraftMode.MostProfitable)
         {

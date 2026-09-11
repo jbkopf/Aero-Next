@@ -1,4 +1,6 @@
+using AeroNext.Core;
 using AeroNext.Core.Airlines;
+using AeroNext.Core.Finance;
 using AeroNext.Core.Setup;
 using AeroNext.Core.Turns;
 using AeroNext.Core.World;
@@ -143,5 +145,102 @@ public class StartingConditionsTests
 
         Assert.Throws<InvalidOperationException>(
             () => StartingConditionsResolver.MostProfitableRoute(seat, cities, new[] { tooSmall }));
+    }
+
+    // --- ResolveWithMinProfitFraction (docs/OPEN_WORK.md's filler-seat investigation) ---
+
+    private static (City Home, City Thin, City Rich, AircraftType Aircraft) ThinVsRichFixture()
+    {
+        // "thin" is alphabetically first with positive (but small) demand,
+        // so the heuristic always lands there; "rich" is the real best pick.
+        var home = new City("home", "HOME", Region.Europe, 0, 0, 40, false, null);
+        var thin = new City("aaa", "THIN", Region.Europe, 0, 3, 15, false, null); // alphabetically first; small but real positive profit ($21,743)
+        var rich = new City("zzz", "RICH", Region.Europe, 0, 2, 400, false, null);
+        var aircraft = new AircraftType("ac", "AC", Seats: 100, RangeKm: 5000, ManufacturerRegion: Region.Europe, CostPerAvailableSeatKm: 0.1, CruiseSpeedKmh: 500);
+        return (home, thin, rich, aircraft);
+    }
+
+    private static long ProfitFor(City origin, City destination, AircraftType aircraft, GravityDemandModel demandModel)
+    {
+        var route = new Route(origin, destination, aircraft, AircraftCount: 1);
+        var carried = Math.Min(demandModel.ForPair(origin, destination).PassengersPerQuarter, route.SeatsPerQuarter);
+        return FareCalculator.EstimatedProfit(route, carried).Cents;
+    }
+
+    [Fact]
+    public void ResolveWithMinProfitFraction_AtOne_AlwaysMatchesMostProfitableRoute()
+    {
+        var (home, thin, rich, aircraft) = ThinVsRichFixture();
+        var cities = new[] { home, thin, rich };
+        var fleet = new[] { aircraft };
+        var seat = new AirlineSeat("Test", IsHuman: true, Region.Europe, home);
+
+        var expected = StartingConditionsResolver.MostProfitableRoute(seat, cities, fleet);
+        var result = StartingConditionsResolver.ResolveWithMinProfitFraction(seat, cities, fleet, minProfitFraction: 1.0);
+
+        Assert.Equal(expected.Aircraft, result.StartingAircraft);
+        Assert.Equal(expected.Destination, result.GuaranteedRouteDestination);
+        Assert.Equal("zzz", result.GuaranteedRouteDestination.Id);
+    }
+
+    [Fact]
+    public void ResolveWithMinProfitFraction_AtZero_KeepsAnyNonNegativeHeuristicPick()
+    {
+        var (home, thin, rich, aircraft) = ThinVsRichFixture();
+        var cities = new[] { home, thin, rich };
+        var fleet = new[] { aircraft };
+        var seat = new AirlineSeat("Test", IsHuman: true, Region.Europe, home);
+
+        var result = StartingConditionsResolver.ResolveWithMinProfitFraction(seat, cities, fleet, minProfitFraction: 0.0);
+
+        Assert.Equal("aaa", result.GuaranteedRouteDestination.Id); // the heuristic's own (alphabetically-first) pick, kept
+    }
+
+    [Fact]
+    public void ResolveWithMinProfitFraction_SwitchesAtTheMeasuredRatio()
+    {
+        var (home, thin, rich, aircraft) = ThinVsRichFixture();
+        var cities = new[] { home, thin, rich };
+        var fleet = new[] { aircraft };
+        var seat = new AirlineSeat("Test", IsHuman: true, Region.Europe, home);
+        var demandModel = new GravityDemandModel(enableHubDemandBonus: true);
+
+        var heuristicProfit = ProfitFor(home, thin, aircraft, demandModel);
+        var bestProfit = ProfitFor(home, rich, aircraft, demandModel);
+        var ratio = (double)heuristicProfit / bestProfit;
+        Assert.InRange(ratio, 0.0, 0.99); // sanity: thin really is much weaker than rich
+
+        var justBelow = StartingConditionsResolver.ResolveWithMinProfitFraction(seat, cities, fleet, ratio - 0.01);
+        var justAbove = StartingConditionsResolver.ResolveWithMinProfitFraction(seat, cities, fleet, ratio + 0.01);
+
+        Assert.Equal("aaa", justBelow.GuaranteedRouteDestination.Id);
+        Assert.Equal("zzz", justAbove.GuaranteedRouteDestination.Id);
+    }
+
+    [Fact]
+    public void ResolveWithMinProfitFraction_Cash_MatchesResolve()
+    {
+        var cities = RealCities;
+        var seat = new AirlineSeat("Test", IsHuman: true, Region.EastAsia, HomeRegions.EligibleStartingCities(Region.EastAsia, cities)[0]);
+
+        var resolved = StartingConditionsResolver.Resolve(seat, cities, RealFleet);
+        var tuned = StartingConditionsResolver.ResolveWithMinProfitFraction(seat, cities, RealFleet, 0.5);
+
+        Assert.Equal(resolved.StartingCash, tuned.StartingCash);
+        Assert.Equal(resolved.AircraftQuantity, tuned.AircraftQuantity);
+    }
+
+    [Fact]
+    public void ResolveWithMinProfitFraction_NoReachableNeighborForAnyAppropriateAircraft_Throws()
+    {
+        var a = new City("a", "A", Region.Europe, 0, 0, 60, false, null);
+        var b = new City("b", "B", Region.Europe, 60, 60, 60, false, null); // unreachably far
+        var cities = new[] { a, b };
+
+        var tooSmall = new AircraftType("small", "Small", Seats: 40, RangeKm: 500, ManufacturerRegion: Region.Europe);
+        var seat = new AirlineSeat("Test", IsHuman: true, Region.Europe, a);
+
+        Assert.Throws<InvalidOperationException>(
+            () => StartingConditionsResolver.ResolveWithMinProfitFraction(seat, cities, new[] { tooSmall }, 0.5));
     }
 }

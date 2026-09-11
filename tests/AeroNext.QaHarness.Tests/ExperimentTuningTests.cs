@@ -182,4 +182,59 @@ public class ExperimentTuningTests
         var tuning = new ExperimentTuning { SouthAmericaIntraRegionDemandMultiplier = 1.0 };
         Assert.Same(GravityDemandModel.AustralAsiaTunedIntraRegionMultipliers, tuning.IntraRegionDemandMultipliers);
     }
+
+    // --- Global Q1 under-provisioning threshold (docs/OPEN_WORK.md) ---
+
+    [Fact]
+    public void GlobalMinProfitFraction_Null_IsANoOp_ForEveryRegion()
+    {
+        var cities = RealCities;
+        var fleet = RealFleet;
+
+        foreach (var region in HomeRegions.All)
+        {
+            var startingCity = HomeRegions.EligibleStartingCities(region, cities)[0];
+            var seat = new AirlineSeat("T", IsHuman: true, region, startingCity);
+            var baseline = StartingConditionsResolver.Resolve(seat, cities, fleet);
+
+            Assert.Equal(baseline, ExperimentTuning.Baseline.ApplyTo(seat, baseline, cities, fleet));
+        }
+    }
+
+    [Fact]
+    public void GlobalMinProfitFraction_AppliesToNonAustralAsiaSeats_UnlikeEveryOtherKnob()
+    {
+        var cities = RealCities;
+        var fleet = RealFleet;
+        // Europe's own filler-default city (docs/OPEN_WORK.md): Paris's V2
+        // pick (Athens) is a known, large under-provisioning gap.
+        var seat = new AirlineSeat("T", IsHuman: true, Region.Europe,
+            HomeRegions.EligibleStartingCities(Region.Europe, cities).First(c => c.Id == "cdg"));
+        var baseline = StartingConditionsResolver.Resolve(seat, cities, fleet);
+        var expected = StartingConditionsResolver.ResolveWithMinProfitFraction(seat, cities, fleet, 1.0);
+
+        var result = new ExperimentTuning { GlobalMinProfitFraction = 1.0 }.ApplyTo(seat, baseline, cities, fleet);
+
+        Assert.Equal(expected.StartingAircraft, result.StartingAircraft);
+        Assert.Equal(expected.GuaranteedRouteDestination, result.GuaranteedRouteDestination);
+        Assert.NotEqual(baseline.GuaranteedRouteDestination.Id, result.GuaranteedRouteDestination.Id);
+    }
+
+    [Fact]
+    public void GlobalMinProfitFraction_ComposesWithAustralAsiaOnlyKnobs()
+    {
+        var cities = RealCities;
+        var fleet = RealFleet;
+        var seat = new AirlineSeat("AA", IsHuman: true, Region.AustralAsia,
+            HomeRegions.EligibleStartingCities(Region.AustralAsia, cities).First(c => c.Id == "cgk"));
+        var baseline = StartingConditionsResolver.Resolve(seat, cities, fleet);
+
+        var tuning = new ExperimentTuning { GlobalMinProfitFraction = 1.0, AustralAsiaCashFloorFactor = 1.0 };
+        var result = tuning.ApplyTo(seat, baseline, cities, fleet);
+
+        // The global knob picks the route; the AustralAsia-only cash floor still applies on top.
+        var expectedRoute = StartingConditionsResolver.ResolveWithMinProfitFraction(seat, cities, fleet, 1.0);
+        Assert.Equal(expectedRoute.GuaranteedRouteDestination, result.GuaranteedRouteDestination);
+        Assert.Equal(Money.FromDollars(StartingConditionsResolver.BaseStartingCashDollars), result.StartingCash);
+    }
 }
