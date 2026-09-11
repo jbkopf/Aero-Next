@@ -67,6 +67,23 @@ public class RegionalEconomicsTests
     }
 
     [Fact]
+    public void Factor_SouthAmerica_StaysAboveEurope_OnTheRepoDataset()
+    {
+        // docs/SOUTHAMERICA_TUNING_EXPERIMENTS.md: adding Belo Horizonte
+        // (a lower-weight city) to SouthAmerica risked dropping its Factor
+        // below Europe's, which flips GameSetup's AI-filler ranking and
+        // silently reassigns seats between the two regions - a real,
+        // measured confound at a lower weight choice (35) than the one
+        // shipped (45). This locks the ordering so a future SouthAmerica
+        // (or Europe) city edit can't quietly re-break it.
+        var cities = CityCatalog.LoadFile(CitiesDataPath);
+
+        Assert.True(
+            RegionalEconomics.Factor(Region.SouthAmerica, cities) > RegionalEconomics.Factor(Region.Europe, cities),
+            "SouthAmerica's Factor must stay above Europe's, or GameSetup's richest-unclaimed-region filler ranking silently reassigns seats between them.");
+    }
+
+    [Fact]
     public void Factor_IgnoresGatewayCities()
     {
         var withoutGateway = new[]

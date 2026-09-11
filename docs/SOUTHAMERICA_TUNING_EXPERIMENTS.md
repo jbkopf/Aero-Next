@@ -1,8 +1,9 @@
 # SouthAmerica tuning — exploratory experiment plan
 
-Status: **Phase 1 (OFAT) done. D killed; C shows a real, targeted fix for
-Rio but a muted aggregate effect and an unexplained side effect — decision
-point reached, not yet landed.** See "Phase 1 — OFAT results" below. Sibling investigation to
+Status: **closed out. C (Belo Horizonte) landed as real data**
+(`data/cities.json`'s "plu" entry). D was killed. Landed by explicit user
+decision despite the muted aggregate effect and the unexplained
+game-length side effect — see "Outcome" at the bottom. Sibling investigation to
 `docs/AUSTRALASIA_TUNING_EXPERIMENTS.md` (M65) — same rigor (OFAT ->
 factorial -> confirmation, pillar-checked), a **different problem shape**,
 so only two of the four AustralAsia factors carry over. Read the "Why S and
@@ -345,13 +346,51 @@ Two separable findings, not one:
    geography.
 
 Not proceeding to Phase 2 (a D×C factorial) since D is dead — there's
-nothing to combine C with. The open question is whether to (a) land C
-alone despite its muted aggregate effect, accepting it as a real, if
-partial, fix for the subset of games it actually helps; (b) first
-understand the average-game-length/dominance-quality side effect before
-trusting C at all; or (c) treat the filler-seat field-toughness finding as
-the higher-leverage, separate investigation and set this one aside pending
-that.
+nothing to combine C with.
+
+## Outcome
+
+**Landed, by explicit user decision** (option (a) above): Belo Horizonte
+(`plu`, weight 45, `data/cities.json`) as real, permanent city data — not
+an `ExperimentTuning` knob at all, since factor C was never gated behind
+one (the AustralAsia investigation's own C attempt was rejected, so no
+precedent for a caller-side merge knob was ever built out; this one goes
+straight into the shipped dataset once decided). Rio's own win rate in the
+clean (random-human) comparison: 0.0%→15.0%, confirmed reproducible on the
+real dataset (canonical 300-game sweep, seed 1, 244 quarters):
+
+| Region | Seats | Bankruptcy | Win share |
+|---|---|---|---|
+| AustralAsia | 97 | 5.2% | 5.0% |
+| EastAsia | 290 | 4.5% | 53.0% |
+| Europe | 197 | 5.1% | 6.3% |
+| NorthAmerica | 274 | 0.0% | 18.0% |
+| SouthAmerica | 237 | 0.8% | 4.7% *(was 4.3%)* |
+| SouthWestAsia | 105 | 1.0% | 13.0% |
+
+Total bankruptcy 2.58% (was 3.00%). Avg quarter 169.7 (was 146.3) — the
+unexplained game-length increase accepted knowingly, not resolved.
+
+**Explicitly accepted, not resolved, by landing anyway:**
+- The average-game-length rise (+16%) and the region-wide (not
+  SouthAmerica-specific) drop in dominance-win quality it coincides with
+  (EastAsia's dominance fraction: 91%→~70% across these sweeps). If this
+  turns out to matter for pacing or win-quality elsewhere, it should be
+  revisited starting from this doc's own Phase 1 data, not re-discovered
+  from scratch.
+- **D killed** for SouthAmerica (`SouthAmericaIntraRegionDemandMultiplier`
+  stays in `ExperimentTuning`, off by default, as tested-but-rejected
+  scaffolding — same treatment `AustralAsiaCashFloorFactor`/
+  `AustralAsiaAircraft` got after M65).
+
+**Deliberately not pursued here, flagged instead in
+`docs/OPEN_WORK.md`**: the filler-seat field-toughness finding (AI-filler
+seats systematically face tougher fields because `GameSetup` assigns
+richest-unclaimed-region-first, so the strongest regions get each other as
+opponents disproportionately) — bigger than this investigation's scope,
+likely affects every region's filler seats, and is a stronger candidate
+lever on the aggregate regional-balance picture than any single region's
+own geography.
 
 ## Open question
 

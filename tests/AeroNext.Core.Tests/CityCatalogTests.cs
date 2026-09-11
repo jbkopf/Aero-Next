@@ -50,6 +50,34 @@ public class CityCatalogTests
     }
 
     [Fact]
+    public void LoadFile_IncludesBeloHorizonte()
+    {
+        // docs/SOUTHAMERICA_TUNING_EXPERIMENTS.md: Rio de Janeiro (gig) was
+        // geographically isolated from the rest of SouthAmerica - its best
+        // domestic pair was 35-55% weaker than every other SouthAmerica
+        // city's own best pair, and Rio is the region's deterministic
+        // AI-filler default city (highest non-gateway demand weight), so
+        // this dragged the whole region's aggregate win share down. Belo
+        // Horizonte, a real city 330km from Rio, closes that gap - measured
+        // via the random-human-seeded comparison (a population independent
+        // of the AI-filler ranking): Rio's own win rate rose 0.0% -> 15.0%.
+        // Weight (45) deliberately kept below Rio's (60), so Rio stays the
+        // region's filler-default city, and high enough that SouthAmerica's
+        // own RegionalEconomics.Factor stays above Europe's (a lower first
+        // choice, 35, dropped it below Europe's and reassigned ~39 seats in
+        // GameSetup's AI-filler ranking - a real, measured confound).
+        var cities = CityCatalog.LoadFile(DataPath);
+        var ids = cities.Select(c => c.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        Assert.Contains("plu", ids);
+        var plu = cities.Single(c => c.Id == "plu");
+        Assert.Equal(Region.SouthAmerica, plu.Region);
+        Assert.False(plu.IsGateway);
+        Assert.True(plu.DemandWeight < cities.Single(c => c.Id == "gig").DemandWeight,
+            "Belo Horizonte's weight must stay below Rio's so Rio remains SouthAmerica's AI-filler default city.");
+    }
+
+    [Fact]
     public void LoadFile_IncludesEuropeExpansionCities()
     {
         // Europe already had 5 eligible cities (parity, not a gap like

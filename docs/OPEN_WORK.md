@@ -20,8 +20,14 @@ M15–M19 (`GAME_SETUP_ROADMAP.md`), M20–M22 (`HISTORICAL_DYNAMICS_ROADMAP.md`
 M23–M24 (`WIN_CONDITIONS_ROADMAP.md`), M25–M30/M34
 (`FINANCIAL_MODEL_ROADMAP.md`, M31 retired), M31/M35–M44/M49–M58
 (`BASELINE_AI_ROADMAP.md`), M32–M33/M45–M46/M59 (`ROUTE_CAPACITY_ROADMAP.md`),
-M47–M48 (`MARKETING_ROADMAP.md`), M61-M64 (`HUB_DEMAND_ROADMAP.md`). M64 is
-the current highest *shipped* number (M60 was attempted, measured, and
+M47–M48 (`MARKETING_ROADMAP.md`), M61-M65 (`HUB_DEMAND_ROADMAP.md`; M65 is
+a regional-balance change, not hub-and-spoke, logged there only because it
+touches `GravityDemandModel` — see `docs/AUSTRALASIA_TUNING_EXPERIMENTS.md`
+for the real write-up, and its sibling
+`docs/SOUTHAMERICA_TUNING_EXPERIMENTS.md` for a second, separately-landed
+regional-balance fix — `data/cities.json`'s Belo Horizonte entry — that
+never got its own M-number since it shipped as a plain data change). M65
+is the current highest *shipped* number (M60 was attempted, measured, and
 fully reverted — see below, not a shipped number). M56 shipped no code
 change (four route-opening-quality designs tried and reverted); M57
 followed with a real, contained fix. **M58 (`NetworkOptimizerStrategy`, a
@@ -643,6 +649,24 @@ un-scoped question if it's ever revisited.
    `BaselineAi`/`RapidExpansionStrategy`'s own decision logic, not
    something a gentler curve reliably calms. Directly relevant to the
    active-priority item below.
+4. **AI-filler seat assignment systematically hands the strongest regions
+   each other as opponents, compounding their advantage.**
+   `docs/SOUTHAMERICA_TUNING_EXPERIMENTS.md`'s Rio investigation: filler
+   regions are assigned richest-`RegionalEconomics.Factor`-first
+   (`GameSetup.CreateSeats`), so a region's filler seat systematically
+   co-occurs with NorthAmerica's and EastAsia's own filler seats (the two
+   always-richest regions) far more than a random seed would — a
+   structural field-toughness disadvantage for every *other* region's
+   filler seats, unrelated to any one region's own geography or economics.
+   Discovered while measuring a Belo Horizonte city fix for SouthAmerica:
+   it swamped that fix's aggregate effect (Rio's own win rate fixed
+   cleanly in the random-human-seeded comparison, 0.0%→15.0%, but
+   filler-AI-seeded Rio games stayed near 0% because their field is
+   *always* tougher, city fix or not). Likely a bigger lever on the
+   overall regional-balance picture (`EastAsia`'s persistently outsized
+   win share, in particular) than any single region's own city geography —
+   not designed or scoped here, flagged for whoever picks up regional
+   balance next.
 
 ---
 

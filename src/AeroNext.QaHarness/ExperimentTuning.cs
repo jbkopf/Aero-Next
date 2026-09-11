@@ -35,11 +35,13 @@ public enum AustralAsiaAircraftMode
 /// and were kept here, off by default, as harmless, already-tested
 /// scaffolding rather than removed outright.
 ///
-/// A second, independent region can be screened for the same
-/// intra-region-multiplier mechanism at once — see
+/// A second, independent region was screened for the same
+/// intra-region-multiplier mechanism — see
 /// <see cref="SouthAmericaIntraRegionDemandMultiplier"/> and
 /// docs/SOUTHAMERICA_TUNING_EXPERIMENTS.md — without touching AustralAsia's
-/// own shipped entry.
+/// own shipped entry. Rejected there (SouthAmerica's real problem was one
+/// geographically-isolated city, not a region-wide demand shortfall);
+/// the real fix landed as a data change (Belo Horizonte) instead.
 /// </summary>
 public sealed record ExperimentTuning
 {
@@ -70,12 +72,15 @@ public sealed record ExperimentTuning
     /// <summary>
     /// SouthAmerica's own factor D (docs/SOUTHAMERICA_TUNING_EXPERIMENTS.md),
     /// screening the same intra-region demand multiplier mechanism M65
-    /// shipped for AustralAsia — but for a different problem shape
-    /// (SouthAmerica isn't bankrupt; Rio is geographically isolated from
-    /// the rest of its own region and drags the aggregate win share down).
-    /// 1.0 = no change. Merges with, and never replaces,
-    /// <see cref="GravityDemandModel.AustralAsiaTunedIntraRegionMultipliers"/>,
+    /// shipped for AustralAsia. 1.0 = no change. Merges with, and never
+    /// replaces, <see cref="GravityDemandModel.AustralAsiaTunedIntraRegionMultipliers"/>,
     /// which stays real and unconditional regardless of this knob.
+    /// Measured (3 levels, 1.25/1.5/2.0): Rio's own win rate never moved
+    /// (0.0% flat) — a flat regional multiplier scales every pair together
+    /// and doesn't touch Rio's *relative* disadvantage, which was the real
+    /// problem (see the real, landed fix: Belo Horizonte,
+    /// data/cities.json's own "plu" entry). Not adopted; kept here, off by
+    /// default, as harmless, already-tested scaffolding.
     /// </summary>
     public double SouthAmericaIntraRegionDemandMultiplier { get; init; } = 1.0;
 
