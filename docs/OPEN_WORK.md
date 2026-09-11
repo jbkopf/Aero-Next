@@ -664,9 +664,67 @@ un-scoped question if it's ever revisited.
    filler-AI-seeded Rio games stayed near 0% because their field is
    *always* tougher, city fix or not). Likely a bigger lever on the
    overall regional-balance picture (`EastAsia`'s persistently outsized
-   win share, in particular) than any single region's own city geography —
-   not designed or scoped here, flagged for whoever picks up regional
-   balance next.
+   win share, in particular) than any single region's own city geography.
+
+   **Follow-up round, real diagnostic data.** A full sweep across all six
+   regions (`GameSetup.CreateSeats`'s own richest-first ranking) confirmed
+   and sharpened this: AustralAsia and SouthWestAsia are excluded from
+   filler *entirely* (0 filler seats across 300 games each — they rank last
+   and 5th by `RegionalEconomics.Factor`, so the top-4 cut never reaches
+   them; they appear in only 28%/29% of games, exclusively via random human
+   picks). Among regions that do get filler seats, the effect cuts both
+   ways: EastAsia-filler *out*performs EastAsia-random (65.4% vs 35.3% win
+   rate) because it's deterministically always Beijing, EastAsia's richest
+   eligible city and a genuinely dense cluster (Seoul 950km, Shanghai
+   1,100km, both $950K+/qtr pairs) — while NorthAmerica-filler (14.6% vs
+   28.2%), SouthAmerica-filler (0.0% vs 14.1%), and Europe-filler (0.0% vs
+   19.8%) all *under*perform their own random counterpart, despite strong
+   cities in some cases (Atlanta, NorthAmerica's filler default, has the
+   highest `hubQuality` in the dataset). Europe-filler's games are the
+   starkest evidence for the co-occurrence theory over a per-city one: when
+   Europe is filler, the other 3 seats are *always* EastAsia+NorthAmerica+
+   SouthAmerica (100% each) — Europe only reaches the filler cut when the
+   3 richer regions already have too, so Europe-filler literally never gets
+   an easy field.
+
+   **A second, entangled finding, also chased to a rejection.** Every
+   region's filler-default city gets a badly under-provisioned Q1
+   guaranteed route from `StartingConditionsResolver.Resolve`'s own "keep
+   the heuristic pick if profit ≥ $0" rule — even Paris (Europe's filler
+   default) gets sent to Athens on Q1 despite 8 genuinely strong domestic
+   pairs ($500K–$840K/qtr) sitting right there; $270K–$820K/quarter left on
+   the table at every region's filler-default city, universally. A new
+   generalized resolver, `ResolveWithMinProfitFraction` (keep the heuristic
+   only when it clears a given fraction of the best available, instead of
+   just $0), was tested at 0.3/0.5/0.7 against this exact hypothesis — and
+   rejected: it's a cliff, not a dial. Below 0.3 it's inert. At 0.5+ total
+   bankruptcy nearly quadruples (2.58%→9.50%) and the damage lands hardest
+   on EastAsia specifically (4.5%→25.9% bankrupt) — giving *everyone* a
+   bigger, pricier starting aircraft reproduces the AustralAsia factor-A
+   failure mode (higher fixed costs break previously-safe airlines)
+   universally rather than in one region. And even at 0.7,
+   AustralAsia/SouthAmerica/SouthWestAsia's own filler seats stay at
+   exactly 0.0% — their own Q1 dollar gaps were the smallest of the six
+   regions measured, so this mechanism was never going to reach them
+   anyway; their problem really is the co-occurrence effect above, not
+   under-provisioning. Kept as `ExperimentTuning.GlobalMinProfitFraction`,
+   off by default, tested-but-rejected scaffolding — same treatment every
+   other rejected factor in this investigation got.
+
+   **Net position, both rounds done**: the co-occurrence effect (richest-
+   region-first filler assignment handing EastAsia/NorthAmerica each other
+   disproportionately, and locking AustralAsia/SouthWestAsia out of filler
+   entirely) is now the *only* live explanation left standing — the
+   per-city-quality theory (which the Rio and Q1-threshold work both
+   partially chased) accounts for real, separate effects (Rio's own
+   isolation, fixed; Q1 under-provisioning, confirmed real but not a safe
+   lever) without resolving the core imbalance. The actual fix, if pursued,
+   touches `GameSetup.CreateSeats` itself — real, live gameplay code, not a
+   QA-harness knob — and needs its own careful design pass (randomizing
+   filler region choice weakens the "richest AI" flavor; randomizing filler
+   *city* choice only is a narrower option) rather than another drive-by
+   experiment. Not designed or scoped here, flagged for whoever picks up
+   regional balance next.
 
 ---
 

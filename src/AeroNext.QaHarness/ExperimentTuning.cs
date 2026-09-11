@@ -94,6 +94,21 @@ public sealed record ExperimentTuning
     /// at this fraction instead — see that method's own doc comment for
     /// what the value means (0.0 ≈ shipped Resolve; 1.0 = always the best
     /// available combination, the already-rejected "V1" policy).
+    ///
+    /// Measured (4 levels, 0.3/0.5/0.7 vs baseline, 300 games): a cliff, not
+    /// a dial. Below 0.3 it's inert (most heuristic picks already clear
+    /// that bar). At 0.5+ total bankruptcy nearly quadruples (2.58%→9.50%),
+    /// and the damage lands hardest on EastAsia specifically — previously
+    /// the most bankruptcy-resistant region (4.5%) becomes the *most*
+    /// (25.9%) once its filler seat gets pushed onto a bigger, pricier
+    /// aircraft — the same "bigger starting aircraft, higher fixed cost"
+    /// failure mode AustralAsia's factor A hit, but universal instead of
+    /// scoped. Worse: even at 0.7, AustralAsia/SouthAmerica/SouthWestAsia's
+    /// own filler seats stay at exactly 0.0% win rate — their problem was
+    /// never really Q1 under-provisioning (their own dollar gaps were the
+    /// smallest of the six regions measured); it's the deeper filler
+    /// co-occurrence effect this knob was never going to reach. Not
+    /// adopted at any level.
     /// </summary>
     public double? GlobalMinProfitFraction { get; init; }
 
