@@ -120,7 +120,7 @@ public static class FullGameRunner
         // computed once, here, before any quarter runs.
         var capacityBoard = CityCapacityBoard.Initialize(cities, new GravityDemandModel(
             schedule: growthSchedule, year: Timeline.StartYear, enableHubDemandBonus: true,
-            intraRegionMultipliers: tuning.IntraRegionDemandMultipliers));
+            intraRegionMultipliers: GravityDemandModel.AustralAsiaTunedIntraRegionMultipliers));
         var dominanceState = RegionalDominanceState.Empty;
         string? winner = null;
         int? winQuarter = null;
@@ -133,7 +133,7 @@ public static class FullGameRunner
             var availableFleet = Timeline.AvailableAircraft(fleetCatalog, year);
             var yearDemandModel = new GravityDemandModel(
                 schedule: growthSchedule, year: year, enableHubDemandBonus: true,
-                intraRegionMultipliers: tuning.IntraRegionDemandMultipliers); // M20: model resolves global (and any region/city-scoped) growth itself
+                intraRegionMultipliers: GravityDemandModel.AustralAsiaTunedIntraRegionMultipliers); // M20: model resolves global (and any region/city-scoped) growth itself
             var appliedOrdersByName = new Dictionary<string, IReadOnlyList<QuarterOrder>>();
             var retiredUnitsByName = new Dictionary<string, IReadOnlyList<FleetUnit>>();
 
@@ -524,8 +524,12 @@ public static class FullGameRunner
             ? CampaignRanking.Rank(dominanceState, lastMarket!, netWorth).Select(r => r.AirlineName).ToList()
             : new List<string> { winner };
 
+        var winnerRegionsDominated = winner is null ? 0 : HomeRegions.All.Count(r =>
+            dominanceState.StreakFor(winner, r) >= WinConditionChecker.RequiredStreakQuarters);
+
         return new FullGameResult(
             gameIndex, configSeed, campaignSeed, humanCount, winQuarter ?? quarters, violations,
-            finalCash, bankruptcyQuarter, homeRegionByName, startingCityIdByName, winner, winQuarter, finalRanking);
+            finalCash, bankruptcyQuarter, homeRegionByName, startingCityIdByName, winner, winQuarter, finalRanking,
+            winnerRegionsDominated, lastEligibleNames.Count);
     }
 }

@@ -84,6 +84,35 @@ public class FullGameRunnerTuningTests
     {
         var text = ExperimentTuning.Baseline.ToString();
         Assert.Contains(nameof(ExperimentTuning.AustralAsiaAircraft), text);
-        Assert.Contains(nameof(ExperimentTuning.AustralAsiaIntraRegionDemandMultiplier), text);
+        Assert.Contains(nameof(ExperimentTuning.AustralAsiaCashFloorFactor), text);
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(7)]
+    public void NoWinnerYet_ImpliesZeroRegionsDominated(int seed)
+    {
+        // 16 quarters is far too short for any real win path - the M65
+        // win-classification fields should read as their null-winner defaults.
+        var result = Run(seed, null);
+
+        if (result.Winner is null)
+        {
+            Assert.Equal(0, result.WinnerRegionsDominated);
+        }
+    }
+
+    [Fact]
+    public void RealWinner_HasAValidRegionCount_AndAtLeastOneSolventAirline()
+    {
+        // A full-length campaign, long enough that a real win path
+        // (dominance, sole-survivor, or end-of-campaign ranking) is reached.
+        var seed = 1;
+        var result = FullGameRunner.Run(seed, seed, seed + 500_000, 244, Seats(seed), Cities, Fleet, Growth, null);
+
+        Assert.NotNull(result.Winner);
+        Assert.InRange(result.WinnerRegionsDominated, 0, HomeRegions.All.Count);
+        Assert.True(result.SolventAtEnd >= 1, "A declared winner implies at least one solvent airline when the game ended.");
     }
 }

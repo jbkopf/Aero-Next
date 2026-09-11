@@ -23,6 +23,15 @@ public enum AustralAsiaAircraftMode
 /// byte-identical result. Each knob is deliberately AustralAsia-scoped;
 /// this is scaffolding for deciding which (if any) of these become real
 /// changes, not a general game-configuration surface.
+///
+/// Factor D (intra-region demand multiplier) started here and graduated to
+/// real, unconditional gameplay behavior once the experiment confirmed it —
+/// see <see cref="GravityDemandModel.AustralAsiaTunedIntraRegionMultipliers"/>.
+/// It no longer has a knob: every real per-quarter call site applies it
+/// directly, not gated by this record. Factors S (this file) and A were
+/// measured *not* to help once D shipped (see the plan doc's Phase 2/3
+/// results) and were kept here, off by default, as harmless, already-tested
+/// scaffolding rather than removed outright.
 /// </summary>
 public sealed record ExperimentTuning
 {
@@ -34,32 +43,24 @@ public sealed record ExperimentTuning
     /// drives the AI filler-region ranking in
     /// <see cref="Core.Setup.GameSetup"/>, and bumping it there silently
     /// reassigns ~100 seats to AustralAsia and invalidates the comparison.
+    /// Measured: no bankruptcy benefit on top of factor D, and it
+    /// measurably reduces AustralAsia's win share and the fraction of
+    /// those wins that are genuine 3-region dominance rather than
+    /// end-of-campaign ranking. Not adopted.
     /// </summary>
     public double? AustralAsiaCashFloorFactor { get; init; }
 
-    /// <summary>Factor A. How AustralAsia's starting aircraft + destination is picked.</summary>
-    public AustralAsiaAircraftMode AustralAsiaAircraft { get; init; } = AustralAsiaAircraftMode.Keep;
-
     /// <summary>
-    /// Factor D. Flat demand multiplier on pairs with both endpoints in
-    /// AustralAsia. 1.0 = no change. ⚠ Pushes against the CLAUDE.md pillar
-    /// that a home region cannot fund a win — see the plan's stop
-    /// condition for D.
+    /// Factor A. How AustralAsia's starting aircraft + destination is
+    /// picked. Measured: net regression on its own (fixes the
+    /// capital-starved cities but the larger starting aircraft's higher
+    /// operating cost breaks several previously-safe ones — total
+    /// bankruptcy rose). Not adopted.
     /// </summary>
-    public double AustralAsiaIntraRegionDemandMultiplier { get; init; } = 1.0;
+    public AustralAsiaAircraftMode AustralAsiaAircraft { get; init; } = AustralAsiaAircraftMode.Keep;
 
     /// <summary>Baseline: all knobs off.</summary>
     public static ExperimentTuning Baseline { get; } = new();
-
-    /// <summary>
-    /// The factor-D map to hand <see cref="GravityDemandModel"/>, or null
-    /// when D is off (multiplier 1.0) — null keeps the model byte-identical
-    /// to today.
-    /// </summary>
-    public IReadOnlyDictionary<Region, double>? IntraRegionDemandMultipliers =>
-        AustralAsiaIntraRegionDemandMultiplier == 1.0
-            ? null
-            : new Dictionary<Region, double> { [Region.AustralAsia] = AustralAsiaIntraRegionDemandMultiplier };
 
     /// <summary>
     /// The starting conditions for <paramref name="seat"/> with this

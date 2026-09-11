@@ -373,3 +373,18 @@ confirmed pre-existing dead code in the unrelated `TryOrientFromValidOrigin`
 
 Branch `m64-route-opening-consolidation` (which also carries the M63
 re-enable, made as part of this same decision), merged to `main`.
+
+## M65 — `GravityDemandModel.AustralAsiaTunedIntraRegionMultipliers` ✅
+
+Not a hub-and-spoke change — `GravityDemandModel` gained a second real,
+unconditional constructor argument (`intraRegionMultipliers`, alongside
+`enableHubDemandBonus`) as part of a *regional-balance* investigation
+(AustralAsia's bankruptcy/win-share problem, unrelated to hub selection).
+Full design, the 4-factor screen (starting cash, starting-aircraft
+selection, this multiplier, extra cities), and the evidence are in
+`docs/AUSTRALASIA_TUNING_EXPERIMENTS.md` — logged here only because it
+touches this file's own class. One line: AustralAsia's intra-region pairs
+get a real ×1.5 demand multiplier now, every real per-quarter call site
+passes it explicitly, and it measurably fixed the region's bankruptcy
+(19.6%→5.2%) and win share (1.0%→4.3%) with zero collateral to any other
+region, confirmed at 900 games.

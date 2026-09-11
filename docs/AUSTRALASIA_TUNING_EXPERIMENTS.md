@@ -1,8 +1,9 @@
 # AustralAsia tuning — exploratory experiment plan
 
-Status: **plan only, nothing run past Phase 1 factor S.** This document is the
-shared script for working through a set of candidate fixes for AustralAsia's
-two problems, measured against the current shipped baseline.
+Status: **closed out. Factor D shipped** (M65:
+`GravityDemandModel.AustralAsiaTunedIntraRegionMultipliers`, ×1.5). Factors
+S, A, C were each measured and not adopted. See "Outcome" at the bottom for
+the full decision trail and the new shipped baseline numbers.
 
 ## The problem being tuned
 
@@ -214,61 +215,133 @@ own (the completion notification), never `TaskStop` a running sweep. If one
 must be killed, `Get-Process dotnet | Stop-Process -Force` and confirm zero
 before the next run.
 
-### Phase 1 — One factor at a time (OFAT)
+### Phase 1 — One factor at a time (OFAT) ✅ (done)
 
-Each factor alone, every level, vs baseline. **S is done** (table above).
-Remaining: A (3 levels), D (3 levels), C (1–2 city sets).
+Each factor alone vs baseline (300 games):
 
-Output: per-factor dose-response curve. Identify which factors move which
-metric, and the shape (S was a cliff — expect others may be non-linear too).
-Kill any factor that trips a stop condition at every level.
+| Factor | AA bankruptcy | Total bankruptcy | AA win share | Verdict |
+|---|---|---|---|---|
+| baseline | 19.6% | 4.2% | 1.0% | — |
+| **A** = MostProfitable | **33.0%** ↑↑ | 5.2% ↑ | 1.7% | **killed** |
+| **D** = 1.25 | 12.4% | 3.6% | 2.3% | carried |
+| **D** = 1.5 | **5.2%** | **3.0%** | **4.3%** | **carried — best** |
+| D = 2.0 | 5.2% | 3.0% | 2.3% | carried as alt |
+| D = 3.0 | 5.2% | 3.2% | 2.3% | minor collateral — capped D at 1.5 |
+| **S** = 0.95/1.00/1.117 | 9.3% (all three) | 3.3% | 1.7–2.0% | carried |
 
-**Decision gate:** carry only factors with a real effect into Phase 2.
+**A killed**: fixes the capital-starved cities (cgk, sin) but the bigger
+starting aircraft's higher operating cost breaks several previously-safe
+ones (spn, ceb, gum: 0%→100%) — net regression, total bankruptcy rose.
 
-### Phase 2 — Combinations
+**D pillar check** (docs' own stop condition: reject if AA wins by fattening
+on its home region instead of real dominance) — for every AA win, is
+`WinnerRegionsDominated >= 3` (real 3-region dominance) or a weaker
+end-of-campaign ranking win?
 
-Full `2^k` factorial over the surviving factors, each at {off, its best Phase-1
-level}. With all four surviving: 16 cells (~40–60 min of sweeps — acceptable
-as one scripted batch). With three: 8 cells.
+| D level | AA wins | dominance | ranking | dominance share |
+|---|---|---|---|---|
+| baseline | 3 | 3 | 0 | 100% |
+| 1.25 | 7 | 6 | 1 | 86% |
+| **1.5** | 13 | 11 | 2 | **85%** |
+| 2.0 | 7 | 3 | 4 | 43% |
 
-Reading the results:
-- **Main effects** — does each factor still help in the presence of the others?
-- **Interactions** — the hypotheses to test explicitly:
-  - **S × A**: A picks the right aircraft, S funds the runway to operate it.
-    Expect the best *survival* cell.
-  - **D alone vs S alone**: do they fix different starting cities (D→akl/nou,
-    S→cgk/sin)? If so they're additive.
-  - **C makes S redundant?** Adding cities raises the raw factor; if C alone
-    gets AA cash near the cliff, S may add nothing on top.
-  - **D × (anything)** for win share — D is the only factor expected to move
-    it; does a combo unlock a real title run, and does it stay pillar-legal?
+Clean at 1.5; degrades at 2.0 — extra wins shift toward the weaker
+ranking-declared path. **This, not just the bankruptcy/win-share numbers,
+is why D is capped at 1.5.**
 
-**Decision gate:** pick the 1–2 combinations that best fix survival without
-collateral, and (separately) the best combination for win share if any.
+### Phase 2 — Combinations ✅ (done)
 
-### Phase 3 — Confirmation
+`2^3` factorial over D, S, C (A already killed), each {off, best level}. C's
+cash-dilution confound neutralized by pinning AA cash to the pre-C factor
+(0.755) whenever C is on and S is off, so C tests network shape only:
 
-- Re-run the 1–2 chosen combinations at higher replication: seeds 1..600 or
-  1..1000, to check the deltas are stable and not seed artefacts.
-- Full per-region collateral table.
-- The win-share needle specifically: is AA's rise real and pillar-legal?
-- If a combination wins, write it up in the relevant roadmap
-  (`GAME_SETUP_ROADMAP.md` / `BASELINE_AI_ROADMAP.md` / a demand-model doc),
-  land the data/code changes as real commits, and re-run the canonical
-  300-game sweep as the new baseline.
+| D | S | C | AA bankrupt | AA win share | Total bankrupt |
+|---|---|---|---|---|---|
+| 0 | 0 | 0 | 19.6% | 1.0% | 4.2% |
+| 0 | 0 | 1 | 20.6% | 1.3% | 3.7% |
+| 0 | 1 | 0 | 9.3% | 1.7% | 3.3% |
+| 0 | 1 | 1 | 16.5% | 3.3% | 3.4% |
+| **1** | **0** | **0** | **5.2%** | **4.3%** | **3.0%** |
+| 1 | 0 | 1 | 15.5% | 2.3% | 3.4% |
+| 1 | 1 | 0 | 6.2% | 3.3% | 3.0% |
+| 1 | 1 | 1 | 12.4% | 3.7% | 3.3% |
+
+**D alone (D=1.5, S off, C off) is the winning cell** — best on every metric.
+Adding S or C on top only makes it worse.
+
+**C rejected** — raises AA bankruptcy in all four D×S comparisons despite
+the cash-dilution fix. By-city evidence: Nadi (previously 0%) →100%
+bankrupt with C on; Singapore's D=1.5 fix (0%) gets undone (→80% with C);
+Port Moresby 80%, Darwin 25–50%. The 7 invented cities' weight/distance
+calibration likely pulls mid-game AI route-selection into candidates that
+look attractive by point-estimate but perform worse in practice, displacing
+capacity that used to go to safer cities. Not chased further — recalibrating
+against real traffic data (OurAirports/OpenFlights) is separate, larger
+work; C is investigated and rejected as authored, not iterated on blind.
+
+**S adds nothing on top of D** — D1S1 (6.2%/3.3%) is *worse* than D1S0
+(5.2%/4.3%) on both bankruptcy and win share, at 300 games. Small enough to
+be noise at this replication → Phase 3 settles it.
+
+### Phase 3 — Confirmation ✅ (done)
+
+900 games (3× replication), baseline vs D=1.5 vs D=1.5+S=1.0:
+
+| Combo | AA bankrupt | AA win share | Total bankrupt | AA wins (dominance / ranking) |
+|---|---|---|---|---|
+| baseline | 22.0% | 2.1% | 4.5% | 19 (12 / 7 = 63%) |
+| **D=1.5** | **5.5%** | **5.1%** | **3.1%** | **46 (29 / 17 = 63%)** |
+| D=1.5+S=1.0 | 5.5% | 3.2% | 3.1% | 29 (11 / 18 = **38%**) |
+
+**Confirmed, at 3× the sample**: D alone and D+S tie on bankruptcy, but
+D+S has a **lower win share (5.1%→3.2%) and a lower dominance-win fraction
+(63%→38%)** — S doesn't just fail to add value on top of D, it measurably
+degrades win quality (more wins settle by end-of-campaign ranking, fewer by
+real 3-region dominance). **S not adopted.**
+
+Baseline at 900 games also surfaced two smaller AA trouble cities invisible
+at 300 (bkk 11.1%, per 4.3% — below the noise floor of a 300-game sample);
+D=1.5 improves both (bkk→5.6%, per→0%), though bkk isn't fully zeroed —
+the one small residual beyond Papeete's unfixable 100%.
+
+No collateral to any other region at 900 games (Europe 5.8%→5.8%, EastAsia
+3.4%→3.3%, NorthAmerica 0.7%→0.7%, SouthAmerica 2.4%→2.4%, SouthWestAsia
+2.3%→2.3%, all D=1.5 vs baseline).
 
 ---
 
-## Open questions to resolve before Phase 2
+## Outcome
 
-- Does factor C's ranking confound get handled by "freeze ranking to raw
-  pre-C factors" or by "recompute and re-pin"? (Affects whether C results are
-  comparable to S results.)
-- For factor D, flat multiplier vs distance-decay softening — decide after
-  Phase 1 D shows whether the flat version is enough.
-- Is there a fifth factor worth screening — `RapidExpansionStrategy`
-  profitability-gating on new-route opens for low-cash airlines? It's the
-  direct fix for Auckland (which S/A/C only partially help), but it's an
-  AI-logic change, not an AustralAsia-scoped data knob, so it's a different
-  kind of intervention. Hold as a candidate; add if Phase 1 leaves Auckland
-  unsolved.
+**Shipped**: `GravityDemandModel.AustralAsiaTunedIntraRegionMultipliers`
+(×1.5 on pairs with both endpoints in AustralAsia) — every real per-quarter
+demand-model construction site (`FullGameRunner.cs`,
+`AeroNext.Sim/Program.cs`) passes it unconditionally, the same pattern as
+`enableHubDemandBonus: true`. No longer a toggle in `ExperimentTuning` —
+the "D factor" question is resolved, so it graduated from experiment
+scaffolding to real, permanent gameplay behavior.
+
+**Not adopted**: S (starting-cash floor) and A (aircraft-selection bar)
+stay in `ExperimentTuning` as off-by-default, fully-tested scaffolding —
+harmless to keep, not real behavior. C (extra cities) is rejected as
+authored; the 7-city file lives only in the scratchpad, not the repo.
+
+**New shipped canonical baseline** (300 games, seed 1, 244 quarters,
+supersedes the table at the top of this doc):
+
+| Region | Seats | Bankruptcy | Win share |
+|---|---|---|---|
+| AustralAsia | 97 | 5.2% *(was 19.6%)* | 4.3% *(was 1.0%)* |
+| EastAsia | 290 | 4.5% | 48.0% |
+| Europe | 197 | 7.1% | 5.3% |
+| NorthAmerica | 274 | 0.0% | 26.7% |
+| SouthAmerica | 237 | 1.3% | 4.3% |
+| SouthWestAsia | 105 | 1.0% | 11.3% |
+
+Total bankruptcy: 3.0% (was 4.2%). Avg quarter 146.3.
+
+**Open, not pursued here**: `RapidExpansionStrategy` profitability-gating
+on new-route opens for low-cash airlines — the direct fix for Auckland's
+"exactly one profitable route" trap. D=1.5 fixed Auckland's specific
+bankruptcy (thicker intra-region demand made its other routes viable too),
+so this is no longer blocking, but it's a real, separate AI-logic
+improvement if revisited later.

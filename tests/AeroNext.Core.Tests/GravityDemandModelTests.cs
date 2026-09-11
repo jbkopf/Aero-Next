@@ -12,6 +12,17 @@ public class GravityDemandModelTests
         new(id, id.ToUpperInvariant(), region, lat, lon, weight, false, null);
 
     [Fact]
+    public void AustralAsiaTunedIntraRegionMultipliers_IsTheShippedM65Value()
+    {
+        // Locks the real, shipped tuning constant every real per-quarter
+        // GravityDemandModel construction site passes explicitly
+        // (FullGameRunner.cs, AeroNext.Sim/Program.cs) - see this
+        // constant's own doc comment for the evidence.
+        Assert.Equal(1.5, GravityDemandModel.AustralAsiaTunedIntraRegionMultipliers[Region.AustralAsia]);
+        Assert.Single(GravityDemandModel.AustralAsiaTunedIntraRegionMultipliers);
+    }
+
+    [Fact]
     public void ForPair_IsSymmetric()
     {
         var model = new GravityDemandModel();

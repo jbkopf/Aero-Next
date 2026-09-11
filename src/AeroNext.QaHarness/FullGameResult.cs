@@ -23,7 +23,21 @@ public sealed record FullGameResult(
     IReadOnlyDictionary<string, string> StartingCityIdByName,
     string? Winner,
     int? WinQuarter,
-    IReadOnlyList<string> FinalRanking)
+    IReadOnlyList<string> FinalRanking,
+    // How the winner actually won - the M65 AustralAsia investigation's own
+    // "pillar check": a rising win share is only healthy if it comes from
+    // real WinConditionChecker.RequiredRegionCount-region dominance, not
+    // sole-survival or (weakest) an end-of-campaign CampaignRanking
+    // tie-break. WinnerRegionsDominated is the count of regions the winner
+    // held with a >=RequiredStreakQuarters streak when the game ended (0
+    // when Winner is null); SolventAtEnd is how many airlines were still
+    // solvent at that point (1 => the win path was sole-survivor, not
+    // necessarily dominance). Classify a game's win as dominance when
+    // WinnerRegionsDominated >= WinConditionChecker.RequiredRegionCount,
+    // sole-survivor when that's false and SolventAtEnd <= 1, else
+    // end-of-campaign ranking.
+    int WinnerRegionsDominated = 0,
+    int SolventAtEnd = 0)
 {
     public bool Success => Violations.Count == 0;
 }

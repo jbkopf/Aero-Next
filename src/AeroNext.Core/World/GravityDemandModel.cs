@@ -116,6 +116,31 @@ namespace AeroNext.Core.World;
 /// </summary>
 public sealed class GravityDemandModel
 {
+    /// <summary>
+    /// M65 (docs/AUSTRALASIA_TUNING_EXPERIMENTS.md): AustralAsia's real,
+    /// shipped intra-region demand multiplier — every real per-quarter
+    /// call site passes this to <c>intraRegionMultipliers</c> explicitly,
+    /// the same way they already pass <c>enableHubDemandBonus: true</c>.
+    /// Tuned by a 4-factor experiment (starting-cash floor, starting-aircraft
+    /// selection bar, this multiplier, 7 additional cities) run as an OFAT
+    /// screen, a 2^3 factorial, then a 900-game confirmation sweep: this was
+    /// the only factor that helped without collateral damage, and 1.5 was
+    /// the best level (1.25 under-corrects; 2.0+ trades genuine 3-region
+    /// dominance wins for weaker end-of-campaign-ranking ones - see the
+    /// plan doc's pillar check). At 900 games: AustralAsia bankruptcy
+    /// 22.0%→5.5%, win share 2.1%→5.1%, total bankruptcy 4.5%→3.1%, every
+    /// other region unchanged to within noise. The starting-cash floor and
+    /// starting-aircraft levers were measured *not* to help once this
+    /// shipped (cash: no bankruptcy improvement on top, and it measurably
+    /// *reduces* win-share and dominance-win quality; aircraft: net
+    /// regression, breaks previously-safe cities) and were not adopted —
+    /// see docs/AUSTRALASIA_TUNING_EXPERIMENTS.md's Phase 2/3 results.
+    /// Papeete stays unprofitable regardless (genuinely isolated, not
+    /// under-demanded — nearest neighbor 3,492km at 185 pax/quarter).
+    /// </summary>
+    public static readonly IReadOnlyDictionary<Region, double> AustralAsiaTunedIntraRegionMultipliers =
+        new Dictionary<Region, double> { [Region.AustralAsia] = 1.5 };
+
     private const double DefaultScale = 7.5e6;
     private const double DefaultExponent = 2.0;
     private const double DefaultCrossRegionMultiplier = 6.0;

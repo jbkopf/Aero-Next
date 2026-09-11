@@ -43,7 +43,6 @@ public class ExperimentTuningTests
 
         Assert.Equal(AustralAsiaAircraftMode.MostProfitable, single.AustralAsiaAircraft);
         Assert.Null(single.AustralAsiaCashFloorFactor);
-        Assert.Equal(1.0, single.AustralAsiaIntraRegionDemandMultiplier);
         Assert.NotEqual(ExperimentTuning.Baseline, single);
     }
 
@@ -136,25 +135,6 @@ public class ExperimentTuningTests
         Assert.Equal(baseline.StartingCash, result.StartingCash); // A alone doesn't touch cash
         // Singapore's untuned start is a token Il-14; the profitable pick is a bigger aircraft.
         Assert.NotEqual(baseline.StartingAircraft.Id, result.StartingAircraft.Id);
-    }
-
-    // --- Factor D: intra-region demand multiplier ---
-
-    [Fact]
-    public void IntraRegionDemandMultiplier_OfOne_ProducesNoMap()
-    {
-        Assert.Null(ExperimentTuning.Baseline.IntraRegionDemandMultipliers);
-        Assert.Null(new ExperimentTuning { AustralAsiaIntraRegionDemandMultiplier = 1.0 }.IntraRegionDemandMultipliers);
-    }
-
-    [Fact]
-    public void IntraRegionDemandMultiplier_AboveOne_MapsAustralAsiaOnly()
-    {
-        var map = new ExperimentTuning { AustralAsiaIntraRegionDemandMultiplier = 1.5 }.IntraRegionDemandMultipliers;
-
-        Assert.NotNull(map);
-        Assert.Equal(1.5, map![Region.AustralAsia]);
-        Assert.Single(map);
     }
 
     [Fact]

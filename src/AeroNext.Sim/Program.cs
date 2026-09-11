@@ -27,7 +27,7 @@ foreach (var city in cities)
     Console.WriteLine($"{city.Id,-5} {city.Name,-16} {city.Region,-13} {city.DemandWeight,6} {gateway,-7} {cap,3}");
 }
 
-var demandModel = new GravityDemandModel(enableHubDemandBonus: true);
+var demandModel = new GravityDemandModel(enableHubDemandBonus: true, intraRegionMultipliers: GravityDemandModel.AustralAsiaTunedIntraRegionMultipliers);
 var allPairs = demandModel.AllPairs(cities);
 
 Console.WriteLine();
@@ -708,7 +708,9 @@ for (var q = 1; q <= campaignQuarters; q++)
 {
     var year = Timeline.YearForQuarter(q);
     var availableFleet = Timeline.AvailableAircraft(fleetCatalog, year);
-    var yearDemandModel = new GravityDemandModel(schedule: growthSchedule, year: year, enableHubDemandBonus: true); // M20: model resolves global (and any region/city-scoped) growth itself
+    var yearDemandModel = new GravityDemandModel(
+        schedule: growthSchedule, year: year, enableHubDemandBonus: true,
+        intraRegionMultipliers: GravityDemandModel.AustralAsiaTunedIntraRegionMultipliers); // M20: model resolves global (and any region/city-scoped) growth itself; M65: real AustralAsia tuning
     var appliedOrdersByAirline = new Dictionary<string, IReadOnlyList<QuarterOrder>>();
     var retiredUnitsByAirline = new Dictionary<string, IReadOnlyList<FleetUnit>>();
 
