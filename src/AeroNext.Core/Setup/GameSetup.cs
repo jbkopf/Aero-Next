@@ -1,3 +1,4 @@
+using AeroNext.Core;
 using AeroNext.Core.World;
 
 namespace AeroNext.Core.Setup;
@@ -43,7 +44,21 @@ public sealed record AirlineSeat(string AirlineName, bool IsHuman, Region HomeRe
 /// </summary>
 public static class GameSetup
 {
-    public static IReadOnlyList<AirlineSeat> CreateSeats(IReadOnlyList<HumanPlayerChoice> humanChoices, IReadOnlyList<City> allCities)
+    /// <param name="fillerRegionRng">
+    /// docs/OPEN_WORK.md's filler-seat investigation: null (the default)
+    /// keeps this method's own long-shipped behavior — richest-unclaimed-
+    /// region-first, deterministic, byte-identical. When supplied, each
+    /// remaining slot instead draws a region by weighted random (weight =
+    /// <see cref="RegionalEconomics.Factor"/>) without replacement, via
+    /// <see cref="WeightedRandomRegionsWithoutReplacement"/> — richer
+    /// regions stay more likely, but AustralAsia/SouthWestAsia are no
+    /// longer excluded from filler outright, and EastAsia/NorthAmerica no
+    /// longer co-occur as filler in almost every AI-heavy game. Per
+    /// CLAUDE.md's determinism rules, the caller's own seeded
+    /// <see cref="SimRng"/> — never a new ambient random source.
+    /// </param>
+    public static IReadOnlyList<AirlineSeat> CreateSeats(
+        IReadOnlyList<HumanPlayerChoice> humanChoices, IReadOnlyList<City> allCities, SimRng? fillerRegionRng = null)
     {
         if (humanChoices.Count > 4)
         {
@@ -89,14 +104,17 @@ public static class GameSetup
 
         var seats = new List<AirlineSeat>(humanSeats);
         var remainingSlots = 4 - seats.Count;
+        var unclaimedRegions = HomeRegions.All.Where(r => !claimedRegions.Contains(r)).ToList();
 
-        var aiRegions = HomeRegions.All
-            .Where(r => !claimedRegions.Contains(r))
-            .Select(r => (Region: r, Factor: RegionalEconomics.Factor(r, allCities)))
-            .OrderByDescending(x => x.Factor)
-            .ThenBy(x => x.Region.ToString(), StringComparer.Ordinal)
-            .Take(remainingSlots)
-            .Select(x => x.Region);
+        var aiRegions = fillerRegionRng is null
+            ? unclaimedRegions
+                .Select(r => (Region: r, Factor: RegionalEconomics.Factor(r, allCities)))
+                .OrderByDescending(x => x.Factor)
+                .ThenBy(x => x.Region.ToString(), StringComparer.Ordinal)
+                .Take(remainingSlots)
+                .Select(x => x.Region)
+            : WeightedRandomRegionsWithoutReplacement(unclaimedRegions, allCities, remainingSlots, fillerRegionRng)
+                .OrderBy(r => r.ToString(), StringComparer.Ordinal);
 
         foreach (var region in aiRegions)
         {
@@ -118,5 +136,45 @@ public static class GameSetup
             .OrderBy(s => s.HomeRegion.ToString(), StringComparer.Ordinal)
             .ThenBy(s => s.AirlineName, StringComparer.Ordinal)
             .ToList();
+    }
+
+    /// <summary>
+    /// Weighted sampling without replacement: repeatedly draws one region
+    /// from whatever remains, with probability proportional to its own
+    /// <see cref="RegionalEconomics.Factor"/>, removes it, and repeats.
+    /// Richer regions stay more likely per draw, but every candidate has a
+    /// real, nonzero chance — unlike a strict ranked cut. <paramref
+    /// name="candidates"/> must already be in a stable, deterministic order
+    /// (it is — <see cref="HomeRegions.All"/> filtered by a `Where`) so the
+    /// same <paramref name="rng"/> sequence always reproduces the same draw.
+    /// </summary>
+    private static IReadOnlyList<Region> WeightedRandomRegionsWithoutReplacement(
+        IReadOnlyList<Region> candidates, IReadOnlyList<City> allCities, int count, SimRng rng)
+    {
+        var pool = candidates.Select(r => (Region: r, Weight: RegionalEconomics.Factor(r, allCities))).ToList();
+        var chosen = new List<Region>();
+
+        while (chosen.Count < count && pool.Count > 0)
+        {
+            var totalWeight = pool.Sum(x => x.Weight);
+            var roll = rng.NextDouble() * totalWeight;
+            var cumulative = 0.0;
+            var pickIndex = pool.Count - 1; // floating-point fallback: last item absorbs any rounding slop
+
+            for (var i = 0; i < pool.Count; i++)
+            {
+                cumulative += pool[i].Weight;
+                if (roll < cumulative)
+                {
+                    pickIndex = i;
+                    break;
+                }
+            }
+
+            chosen.Add(pool[pickIndex].Region);
+            pool.RemoveAt(pickIndex);
+        }
+
+        return chosen;
     }
 }

@@ -1,3 +1,4 @@
+using AeroNext.Core;
 using AeroNext.Core.Setup;
 using AeroNext.Core.World;
 using Xunit;
@@ -271,5 +272,93 @@ public class GameSetupTests
         var choices = new[] { new HumanPlayerChoice("NorthAmerica Air", "cdg") };
 
         Assert.Throws<ArgumentException>(() => GameSetup.CreateSeats(choices, RealCities));
+    }
+
+    // --- fillerRegionRng (docs/OPEN_WORK.md's filler-seat investigation) ---
+
+    [Fact]
+    public void CreateSeats_NullFillerRng_MatchesTheTwoArgOverloadExactly()
+    {
+        var withExplicitNull = GameSetup.CreateSeats(Array.Empty<HumanPlayerChoice>(), RealCities, fillerRegionRng: null);
+        var twoArg = GameSetup.CreateSeats(Array.Empty<HumanPlayerChoice>(), RealCities);
+
+        Assert.Equal(twoArg, withExplicitNull);
+    }
+
+    [Fact]
+    public void CreateSeats_WithFillerRng_IsDeterministic_ForTheSameSeed()
+    {
+        var first = GameSetup.CreateSeats(Array.Empty<HumanPlayerChoice>(), RealCities, new SimRng(42));
+        var second = GameSetup.CreateSeats(Array.Empty<HumanPlayerChoice>(), RealCities, new SimRng(42));
+
+        Assert.Equal(first, second);
+    }
+
+    [Fact]
+    public void CreateSeats_WithFillerRng_StillProducesFourValidDistinctSeats_AcrossManySeeds()
+    {
+        for (var seed = 0; seed < 200; seed++)
+        {
+            var seats = GameSetup.CreateSeats(Array.Empty<HumanPlayerChoice>(), RealCities, new SimRng(seed));
+
+            Assert.Equal(4, seats.Count);
+            Assert.All(seats, s => Assert.False(s.IsHuman));
+            Assert.Equal(4, seats.Select(s => s.HomeRegion).Distinct().Count());
+            Assert.Equal(4, seats.Select(s => s.StartingCity.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count());
+        }
+    }
+
+    [Fact]
+    public void CreateSeats_WithFillerRng_EveryRegionCanAppear_AcrossManySeeds()
+    {
+        // The whole point: AustralAsia and SouthWestAsia are permanently
+        // excluded from the deterministic richest-first draft (see
+        // CreateSeats_ZeroHumans_AllFourSeatsAreDeterministicAi above) -
+        // weighted-random must give them a real, nonzero chance instead.
+        var seenRegions = new HashSet<Region>();
+        for (var seed = 0; seed < 300; seed++)
+        {
+            var seats = GameSetup.CreateSeats(Array.Empty<HumanPlayerChoice>(), RealCities, new SimRng(seed));
+            foreach (var s in seats) seenRegions.Add(s.HomeRegion);
+        }
+
+        Assert.Contains(Region.AustralAsia, seenRegions);
+        Assert.Contains(Region.SouthWestAsia, seenRegions);
+        Assert.Equal(HomeRegions.All.ToHashSet(), seenRegions);
+    }
+
+    [Fact]
+    public void CreateSeats_WithFillerRng_RicherRegionsAreStillChosenMoreOften()
+    {
+        var appearances = HomeRegions.All.ToDictionary(r => r, _ => 0);
+        const int trials = 500;
+        for (var seed = 0; seed < trials; seed++)
+        {
+            var seats = GameSetup.CreateSeats(Array.Empty<HumanPlayerChoice>(), RealCities, new SimRng(seed));
+            foreach (var s in seats) appearances[s.HomeRegion]++;
+        }
+
+        // EastAsia/NorthAmerica (the two richest by RegionalEconomics.Factor)
+        // should appear more often than AustralAsia (the poorest) - weighted,
+        // not uniform, random.
+        Assert.True(appearances[Region.EastAsia] > appearances[Region.AustralAsia]);
+        Assert.True(appearances[Region.NorthAmerica] > appearances[Region.AustralAsia]);
+        // But AustralAsia must appear a real, non-trivial fraction of the
+        // time too - not just a rare fluke.
+        Assert.True(appearances[Region.AustralAsia] > trials / 20);
+    }
+
+    [Fact]
+    public void CreateSeats_WithFillerRng_StillExcludesHumanClaimedRegions()
+    {
+        var choices = new[] { new HumanPlayerChoice("Human One", "cdg") }; // Europe
+
+        for (var seed = 0; seed < 50; seed++)
+        {
+            var seats = GameSetup.CreateSeats(choices, RealCities, new SimRng(seed));
+
+            Assert.Equal(4, seats.Count);
+            Assert.Equal(1, seats.Count(s => s.HomeRegion == Region.Europe)); // only the human's own seat
+        }
     }
 }
