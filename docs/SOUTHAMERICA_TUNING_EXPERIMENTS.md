@@ -1,6 +1,8 @@
 # SouthAmerica tuning — exploratory experiment plan
 
-Status: **plan only, nothing run.** Sibling investigation to
+Status: **Phase 1 (OFAT) done. D killed; C shows a real, targeted fix for
+Rio but a muted aggregate effect and an unexplained side effect — decision
+point reached, not yet landed.** See "Phase 1 — OFAT results" below. Sibling investigation to
 `docs/AUSTRALASIA_TUNING_EXPERIMENTS.md` (M65) — same rigor (OFAT ->
 factorial -> confirmation, pillar-checked), a **different problem shape**,
 so only two of the four AustralAsia factors carry over. Read the "Why S and
@@ -259,6 +261,97 @@ as a real `data/cities.json` addition with its own doc trail (if C), and
 re-run the canonical 300-game sweep as the new baseline.
 
 ---
+
+## Phase 1 — OFAT results
+
+### D — killed
+
+| Level | SA bankrupt | SA win share | Rio (random-human) win rate | Total bankrupt | Avg quarter |
+|---|---|---|---|---|---|
+| baseline | 1.3% | 4.3% | 0.0% | 3.00% | 146.3 |
+| 1.25 | 0.0% | 3.3% | 0.0% | 2.42% | 146.8 |
+| 1.5 | 0.4% | 3.3% | 0.0% | 2.42% | 147.0 |
+| 2.0 | 0.8% | 3.3% | 0.0% | 2.58% | 158.2 |
+
+Confirms the doc's own prediction exactly: **Rio's own win rate never moves
+at any level** (0.0% flat) — a flat regional multiplier scales every pair
+together and does not touch Rio's *relative* disadvantage. SouthAmerica's
+aggregate win share actually **drops** slightly (4.3%→3.3%) at every level,
+and D=2.0 additionally inflates average game length (+12 quarters) and
+pushes EastAsia's win share up further (48.0%→52.3%). **Killed — no level
+helps the diagnosed problem, and it has real side effects.**
+
+### C (Belo Horizonte) — real, targeted effect on Rio; mixed on the aggregate
+
+First pass used weight 35, which dropped SouthAmerica's
+`RegionalEconomics.Factor` below Europe's (1.081→1.019 vs Europe's 1.027) —
+a real confound: SouthAmerica lost ~39 seats to Europe in the AI-filler
+ranking, invalidating a direct seat-count comparison. **Fixed by raising the
+weight to 45** (factor 1.049, safely above Europe's 1.027; SouthAmerica's
+seat count held at 237, matching baseline exactly) — the same
+"pin the factor" discipline M65's AustralAsia C used, just via weight choice
+instead of a cash floor (SA isn't cash-constrained, so a cash floor
+wouldn't apply here).
+
+| | Rio, random-human | Rio, filler-AI | SA aggregate win share | Avg quarter |
+|---|---|---|---|---|
+| baseline | 0.0% (0/21) | 0.7% (1/138) | 4.3% | 146.3 |
+| **C=plu (w=45)** | **15.0% (3/20)** | 0.0% (0/138) | 4.7% | 169.7 |
+
+**The clean comparison says the fix works**: random-human-seeded Rio games
+are a genuinely apples-to-apples population before/after (the "QA Human"
+generator is uniform and independent of `RegionalEconomics.Factor`, so
+adding plu doesn't bias *which* games get a random Rio seat) — and Rio's
+win rate there jumps from 0.0% to 15.0%, in line with lim's 14.3% and ahead
+of scl's 0.0%. This is real evidence the diagnosed problem (Rio's
+geographic isolation) is fixable.
+
+**But filler-AI-seeded Rio games don't improve at all (still ~0%), and
+that's 58% of SouthAmerica's total seats** — discovered mid-investigation:
+filler-AI seats are not a neutral-field sample. `GameSetup.CreateSeats`
+assigns filler regions richest-first, so SouthAmerica-as-filler
+systematically co-occurs with NorthAmerica-as-filler and EastAsia-as-filler
+(the two strongest, always-richest regions) far more often than a random
+seed would — a structural field-toughness disadvantage baked into the
+filler mechanism itself, unrelated to Rio's own economics, and not
+something adding a city to SouthAmerica was ever going to fix. This is why
+the aggregate SouthAmerica win share barely moves (4.3%→4.7%) even though
+the *diagnosed* problem is genuinely closed for the subset of games where
+it was the binding constraint.
+
+**A second, broader concern, not yet understood**: average game length
+rose sharply (146.3→169.7 quarters, +16%) with C on, and this coincides
+with a *region-wide* decline in dominance-win quality — EastAsia's
+dominance fraction (real 3-region wins ÷ total wins) fell from 91% to 70%
+even though EastAsia's win share kept climbing. This isn't scoped to
+SouthAmerica; something about the merged city set is slowing the whole
+simulation's convergence to a decisive winner. **Not yet diagnosed** —
+needs understanding before C is trusted, independent of whether Rio's own
+number looks good.
+
+### Decision point
+
+Two separable findings, not one:
+1. **Rio's isolation is real and fixable** — confirmed cleanly via the
+   random-human comparison. If SouthAmerica's problem were "the region's
+   only weakness is Rio," this would be enough.
+2. **A second, distinct, and larger problem exists**: AI-filler seat
+   assignment systematically hands the same regions (NorthAmerica, EastAsia)
+   the easiest fields, compounding their existing strength — visible here
+   because it's swamping C's benefit for SouthAmerica specifically, but
+   this is almost certainly not SouthAmerica-specific; it would affect
+   every region's filler seats to some degree, and may be a bigger lever on
+   the overall regional-balance problem than any single region's city
+   geography.
+
+Not proceeding to Phase 2 (a D×C factorial) since D is dead — there's
+nothing to combine C with. The open question is whether to (a) land C
+alone despite its muted aggregate effect, accepting it as a real, if
+partial, fix for the subset of games it actually helps; (b) first
+understand the average-game-length/dominance-quality side effect before
+trusting C at all; or (c) treat the filler-seat field-toughness finding as
+the higher-leverage, separate investigation and set this one aside pending
+that.
 
 ## Open question
 
