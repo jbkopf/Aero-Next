@@ -157,4 +157,29 @@ public class ExperimentTuningTests
         Assert.Equal(expected.Destination, result.GuaranteedRouteDestination);
         Assert.Equal(Money.FromDollars(StartingConditionsResolver.BaseStartingCashDollars), result.StartingCash);
     }
+
+    // --- SouthAmerica's own factor D: intra-region demand multiplier ---
+
+    [Fact]
+    public void IntraRegionDemandMultipliers_Baseline_IsExactlyTheShippedAustralAsiaMap()
+    {
+        Assert.Same(GravityDemandModel.AustralAsiaTunedIntraRegionMultipliers, ExperimentTuning.Baseline.IntraRegionDemandMultipliers);
+    }
+
+    [Fact]
+    public void IntraRegionDemandMultipliers_SouthAmericaFactor_MergesWithoutReplacingAustralAsia()
+    {
+        var map = new ExperimentTuning { SouthAmericaIntraRegionDemandMultiplier = 1.5 }.IntraRegionDemandMultipliers;
+
+        Assert.Equal(1.5, map[Region.SouthAmerica]);
+        Assert.Equal(GravityDemandModel.AustralAsiaTunedIntraRegionMultipliers[Region.AustralAsia], map[Region.AustralAsia]);
+        Assert.Equal(2, map.Count);
+    }
+
+    [Fact]
+    public void IntraRegionDemandMultipliers_SouthAmericaFactorAtOne_IsANoOp()
+    {
+        var tuning = new ExperimentTuning { SouthAmericaIntraRegionDemandMultiplier = 1.0 };
+        Assert.Same(GravityDemandModel.AustralAsiaTunedIntraRegionMultipliers, tuning.IntraRegionDemandMultipliers);
+    }
 }
