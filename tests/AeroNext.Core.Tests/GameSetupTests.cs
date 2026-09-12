@@ -361,4 +361,55 @@ public class GameSetupTests
             Assert.Equal(1, seats.Count(s => s.HomeRegion == Region.Europe)); // only the human's own seat
         }
     }
+
+    [Fact]
+    public void CreateSeats_FillerWeightExponentZero_IsUniformRandom_RegardlessOfFactor()
+    {
+        var appearances = HomeRegions.All.ToDictionary(r => r, _ => 0);
+        const int trials = 600;
+        for (var seed = 0; seed < trials; seed++)
+        {
+            var seats = GameSetup.CreateSeats(Array.Empty<HumanPlayerChoice>(), RealCities, new SimRng(seed), fillerWeightExponent: 0.0);
+            foreach (var s in seats) appearances[s.HomeRegion]++;
+        }
+
+        // Every region equally likely (weight = Factor^0 = 1 for all) -
+        // AustralAsia (poorest) and EastAsia (richest) should land within a
+        // generous band of each other; not the ~3x spread real weighting gives.
+        var ratio = (double)appearances[Region.EastAsia] / appearances[Region.AustralAsia];
+        Assert.InRange(ratio, 0.7, 1.4);
+    }
+
+    [Fact]
+    public void CreateSeats_HigherFillerWeightExponent_SharpensTheBiasTowardRicherRegions()
+    {
+        double AustralAsiaShareAt(double exponent)
+        {
+            var appearances = HomeRegions.All.ToDictionary(r => r, _ => 0);
+            const int trials = 400;
+            for (var seed = 0; seed < trials; seed++)
+            {
+                var seats = GameSetup.CreateSeats(Array.Empty<HumanPlayerChoice>(), RealCities, new SimRng(seed), exponent);
+                foreach (var s in seats) appearances[s.HomeRegion]++;
+            }
+            return appearances[Region.AustralAsia];
+        }
+
+        var atExponentOne = AustralAsiaShareAt(1.0);
+        var atExponentFour = AustralAsiaShareAt(4.0);
+
+        // A steeper exponent pushes AustralAsia (the poorest region) toward
+        // its old near-total exclusion; a flatter one (already covered by
+        // the exponent-0 test above) pushes the other way.
+        Assert.True(atExponentFour < atExponentOne);
+    }
+
+    [Fact]
+    public void CreateSeats_FillerWeightExponent_DefaultsToOne_MatchingPriorBehavior()
+    {
+        var withDefault = GameSetup.CreateSeats(Array.Empty<HumanPlayerChoice>(), RealCities, new SimRng(7));
+        var withExplicitOne = GameSetup.CreateSeats(Array.Empty<HumanPlayerChoice>(), RealCities, new SimRng(7), fillerWeightExponent: 1.0);
+
+        Assert.Equal(withExplicitOne, withDefault);
+    }
 }

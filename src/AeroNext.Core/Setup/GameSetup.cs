@@ -49,7 +49,8 @@ public static class GameSetup
     /// keeps this method's own long-shipped behavior — richest-unclaimed-
     /// region-first, deterministic, byte-identical. When supplied, each
     /// remaining slot instead draws a region by weighted random (weight =
-    /// <see cref="RegionalEconomics.Factor"/>) without replacement, via
+    /// <see cref="RegionalEconomics.Factor"/> raised to
+    /// <paramref name="fillerWeightExponent"/>) without replacement, via
     /// <see cref="WeightedRandomRegionsWithoutReplacement"/> — richer
     /// regions stay more likely, but AustralAsia/SouthWestAsia are no
     /// longer excluded from filler outright, and EastAsia/NorthAmerica no
@@ -57,8 +58,17 @@ public static class GameSetup
     /// CLAUDE.md's determinism rules, the caller's own seeded
     /// <see cref="SimRng"/> — never a new ambient random source.
     /// </param>
+    /// <param name="fillerWeightExponent">
+    /// Only read when <paramref name="fillerRegionRng"/> is supplied. 1.0
+    /// (the default) weights draws by the raw Factor. 0.0 makes every
+    /// unclaimed region equally likely regardless of wealth (pure uniform
+    /// random). Above 1.0 sharpens the bias back toward richer regions
+    /// without returning to a strict deterministic cut — e.g. 2.0 squares
+    /// each region's own Factor before weighting.
+    /// </param>
     public static IReadOnlyList<AirlineSeat> CreateSeats(
-        IReadOnlyList<HumanPlayerChoice> humanChoices, IReadOnlyList<City> allCities, SimRng? fillerRegionRng = null)
+        IReadOnlyList<HumanPlayerChoice> humanChoices, IReadOnlyList<City> allCities,
+        SimRng? fillerRegionRng = null, double fillerWeightExponent = 1.0)
     {
         if (humanChoices.Count > 4)
         {
@@ -113,7 +123,7 @@ public static class GameSetup
                 .ThenBy(x => x.Region.ToString(), StringComparer.Ordinal)
                 .Take(remainingSlots)
                 .Select(x => x.Region)
-            : WeightedRandomRegionsWithoutReplacement(unclaimedRegions, allCities, remainingSlots, fillerRegionRng)
+            : WeightedRandomRegionsWithoutReplacement(unclaimedRegions, allCities, remainingSlots, fillerRegionRng, fillerWeightExponent)
                 .OrderBy(r => r.ToString(), StringComparer.Ordinal);
 
         foreach (var region in aiRegions)
@@ -141,17 +151,18 @@ public static class GameSetup
     /// <summary>
     /// Weighted sampling without replacement: repeatedly draws one region
     /// from whatever remains, with probability proportional to its own
-    /// <see cref="RegionalEconomics.Factor"/>, removes it, and repeats.
-    /// Richer regions stay more likely per draw, but every candidate has a
-    /// real, nonzero chance — unlike a strict ranked cut. <paramref
+    /// <see cref="RegionalEconomics.Factor"/> raised to
+    /// <paramref name="weightExponent"/>, removes it, and repeats. Richer
+    /// regions stay more likely per draw, but every candidate has a real,
+    /// nonzero chance — unlike a strict ranked cut. <paramref
     /// name="candidates"/> must already be in a stable, deterministic order
     /// (it is — <see cref="HomeRegions.All"/> filtered by a `Where`) so the
     /// same <paramref name="rng"/> sequence always reproduces the same draw.
     /// </summary>
     private static IReadOnlyList<Region> WeightedRandomRegionsWithoutReplacement(
-        IReadOnlyList<Region> candidates, IReadOnlyList<City> allCities, int count, SimRng rng)
+        IReadOnlyList<Region> candidates, IReadOnlyList<City> allCities, int count, SimRng rng, double weightExponent)
     {
-        var pool = candidates.Select(r => (Region: r, Weight: RegionalEconomics.Factor(r, allCities))).ToList();
+        var pool = candidates.Select(r => (Region: r, Weight: Math.Pow(RegionalEconomics.Factor(r, allCities), weightExponent))).ToList();
         var chosen = new List<Region>();
 
         while (chosen.Count < count && pool.Count > 0)
