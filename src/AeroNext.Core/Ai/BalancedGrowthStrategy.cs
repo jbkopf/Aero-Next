@@ -248,15 +248,27 @@ public sealed class BalancedGrowthStrategy : IAiStrategy
             && regionsNotYetLed is not null
             && (regionsNotYetLed.Contains(pair.Origin.Region) || regionsNotYetLed.Contains(pair.Destination.Region));
 
+    /// <summary>
+    /// Gateway-relevance follow-up (docs/OPEN_WORK.md's filler-seat
+    /// investigation, same fix as RapidExpansionStrategy's own
+    /// FindBestUnservedGatewayCrossRegionFirst): filtered to gateways
+    /// within AiToolkit.MaxEraAircraftRangeKm of the airline's own network
+    /// first, so <paramref name="regionFilter"/>'s "new region" search
+    /// doesn't reach for e.g. a distant, unreachable AustralAsia gateway
+    /// from a Europe-only network in year one, before demand weight
+    /// otherwise decides.
+    /// </summary>
     private static City? FindBestUnservedGateway(StrategyContext context, Func<City, bool> regionFilter)
     {
         var touchedCityIds = context.CurrentRoutes
             .SelectMany(r => new[] { r.Origin.Id, r.Destination.Id })
             .ToHashSet();
         var alreadyPursued = AiToolkit.CitiesAlreadyPursuedForNegotiation(context);
+        var maxRangeKm = AiToolkit.MaxEraAircraftRangeKm(context);
 
         return context.AllCities
             .Where(c => c.IsGateway && !touchedCityIds.Contains(c.Id) && !alreadyPursued.Contains(c.Id))
+            .Where(c => AiToolkit.DistanceFromNetworkKm(context, c) <= maxRangeKm)
             .Where(regionFilter)
             .OrderByDescending(c => c.DemandWeight)
             .ThenBy(c => c.Id, StringComparer.Ordinal)

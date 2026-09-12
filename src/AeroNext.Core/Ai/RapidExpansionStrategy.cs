@@ -332,15 +332,35 @@ public sealed class RapidExpansionStrategy : IAiStrategy
     private static bool IsCrossRegion(PairDemand pair, StrategyContext context) =>
         pair.Origin.Region != context.HomeRegion || pair.Destination.Region != context.HomeRegion;
 
+    /// <summary>
+    /// Gateway-relevance follow-up (docs/OPEN_WORK.md's filler-seat
+    /// investigation): this used to rank every unserved gateway on Earth
+    /// by "is it cross-region" before demand weight, with no reachability
+    /// check at all — meaning the home region's *own* gateway sorted dead
+    /// last, behind every other region's, however far away. Traced
+    /// directly: one airline spent $2M/quarter for 15 straight quarters
+    /// working through Tokyo, JFK, Hong Kong, LA, São Paulo, Sydney,
+    /// Cairo, Honolulu, Dakar, Anchorage, Gander, and Wake Island — none
+    /// remotely useful yet — before ever reaching London or Amsterdam,
+    /// its own region's gateways. Now filtered to gateways within
+    /// AiToolkit.MaxEraAircraftRangeKm of the airline's own network
+    /// (AiToolkit.DistanceFromNetworkKm) first — "cross-region reach" only
+    /// ever meant regions actually reachable soon, not literally anywhere
+    /// — so this still tries the farthest *reachable* region ahead of a
+    /// closer intra-region one, exactly as before, just never bids on a
+    /// gateway the airline has no plausible way to use for years.
+    /// </summary>
     private static City? FindBestUnservedGatewayCrossRegionFirst(StrategyContext context)
     {
         var touchedCityIds = context.CurrentRoutes
             .SelectMany(r => new[] { r.Origin.Id, r.Destination.Id })
             .ToHashSet();
         var alreadyPursued = AiToolkit.CitiesAlreadyPursuedForNegotiation(context);
+        var maxRangeKm = AiToolkit.MaxEraAircraftRangeKm(context);
 
         return context.AllCities
             .Where(c => c.IsGateway && !touchedCityIds.Contains(c.Id) && !alreadyPursued.Contains(c.Id))
+            .Where(c => AiToolkit.DistanceFromNetworkKm(context, c) <= maxRangeKm)
             .OrderByDescending(c => c.Region != context.HomeRegion)
             .ThenByDescending(c => c.DemandWeight)
             .ThenBy(c => c.Id, StringComparer.Ordinal)

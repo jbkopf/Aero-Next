@@ -1219,4 +1219,57 @@ public class AiToolkitTests
 
         Assert.Equal(10_000 * (1.0 + AiToolkit.ConsolidationBonusFraction), score, precision: 6);
     }
+
+    // --- DistanceFromNetworkKm / MaxEraAircraftRangeKm (gateway-relevance follow-up) ---
+
+    [Fact]
+    public void DistanceFromNetworkKm_WithNoRoutesYet_MeasuresFromHomeCityOnly()
+    {
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
+        var candidate = MakeCity("far", Region.Europe, 10, 10, 50, isGateway: true);
+        var context = MakeContext(new[] { home, candidate }, home);
+
+        var expected = GreatCircle.DistanceKm(home, candidate);
+        Assert.Equal(expected, AiToolkit.DistanceFromNetworkKm(context, candidate), precision: 3);
+    }
+
+    [Fact]
+    public void DistanceFromNetworkKm_UsesTheNearestTouchedCity_NotJustHome()
+    {
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
+        var servedFarOut = MakeCity("mid", Region.NorthAmerica, 5, 5, 60);
+        var candidate = MakeCity("far", Region.Europe, 6, 6, 50, isGateway: true);
+        var routes = new[] { new Route(home, servedFarOut, Aircraft, AircraftCount: 1) };
+        var context = MakeContext(new[] { home, servedFarOut, candidate }, home, routes: routes);
+
+        // The airline's own route already reaches "mid", much closer to the
+        // candidate than home is - the network's own footprint, not just
+        // the starting city, is what should count.
+        var fromHome = GreatCircle.DistanceKm(home, candidate);
+        var fromMid = GreatCircle.DistanceKm(servedFarOut, candidate);
+        Assert.True(fromMid < fromHome, "test fixture sanity: mid must really be closer to the candidate than home is");
+        Assert.Equal(fromMid, AiToolkit.DistanceFromNetworkKm(context, candidate), precision: 3);
+    }
+
+    [Fact]
+    public void MaxEraAircraftRangeKm_IsTheLongestAvailableType_NotTheOwnedFleet()
+    {
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
+        var shortRange = new AircraftType("short", "Short", Seats: 50, RangeKm: 1_000);
+        var longRange = new AircraftType("long", "Long", Seats: 50, RangeKm: 9_000);
+        var context = new StrategyContext(
+            Array.Empty<Route>(), 3, new[] { home }, DemandModel, new[] { shortRange, longRange }, AirlineFleet.Empty, home.Region, home);
+
+        Assert.Equal(9_000, AiToolkit.MaxEraAircraftRangeKm(context));
+    }
+
+    [Fact]
+    public void MaxEraAircraftRangeKm_NoEraTypesAvailable_IsZero()
+    {
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
+        var context = new StrategyContext(
+            Array.Empty<Route>(), 3, new[] { home }, DemandModel, Array.Empty<AircraftType>(), AirlineFleet.Empty, home.Region, home);
+
+        Assert.Equal(0, AiToolkit.MaxEraAircraftRangeKm(context));
+    }
 }

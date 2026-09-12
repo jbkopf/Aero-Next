@@ -629,6 +629,36 @@ public static class AiToolkit
     }
 
     /// <summary>
+    /// docs/OPEN_WORK.md's filler-seat investigation: the straight-line
+    /// distance from the *nearest* city this airline's own network already
+    /// touches (every city any of its current routes serves, plus its own
+    /// home city) to <paramref name="candidate"/> — the "how far would we
+    /// have to reach" a gateway-relevance filter needs. Traced a real
+    /// bankrupt game directly: with no such filter, a cross-region-first
+    /// gateway search bids on literally every gateway on Earth in
+    /// demand-weight order, home region's own last, regardless of whether
+    /// the airline has any plausible way to use a slot that far away yet.
+    /// </summary>
+    public static double DistanceFromNetworkKm(StrategyContext context, City candidate) =>
+        context.CurrentRoutes
+            .SelectMany(r => new[] { r.Origin, r.Destination })
+            .Append(context.HomeCity)
+            .Min(c => GreatCircle.DistanceKm(c, candidate));
+
+    /// <summary>
+    /// The longest range among every aircraft type this era makes
+    /// available — not restricted to the airline's own currently-owned
+    /// fleet, since a gateway negotiation is a long-lead-time bet
+    /// (2-4 quarters to resolve, CLAUDE.md) the airline could plausibly
+    /// back with something it leases/orders later, not necessarily what's
+    /// idle today. Zero when nothing is available (degenerate; nothing
+    /// will pass a "within this range" filter, which is the safe
+    /// direction to fail in).
+    /// </summary>
+    public static double MaxEraAircraftRangeKm(StrategyContext context) =>
+        context.EraAvailableTypes.Count == 0 ? 0 : context.EraAvailableTypes.Max(a => a.RangeKm);
+
+    /// <summary>
     /// M45: the best gateway with idle-expired, contestable inventory this
     /// airline hasn't already spent real money pursuing (same
     /// CitiesAlreadyPursuedForNegotiation exclusion every other

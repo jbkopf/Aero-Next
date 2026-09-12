@@ -350,6 +350,27 @@ public class BalancedGrowthStrategyTests
     }
 
     [Fact]
+    public void DecideOrders_UnreachableHigherDemandNewRegionGateway_LosesToAReachableLowerDemandOne()
+    {
+        // Gateway-relevance follow-up (docs/OPEN_WORK.md's filler-seat
+        // investigation): both untouched-region candidates used to be
+        // ranked by demand weight alone - "far" would have won purely for
+        // its higher weight, however unreachable. Same fix as
+        // RapidExpansionStrategy's own equivalent test.
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
+        var near = MakeCity("near", Region.Europe, 0, 10, 20, isGateway: true); // ~1,100km - reachable
+        var far = MakeCity("far", Region.SouthAmerica, 0, 100, 90, isGateway: true); // ~11,100km - not reachable
+        var cities = new[] { home, near, far };
+        var shortRangeAircraft = new AircraftType("t", "Test", Seats: 140, RangeKm: 3_000, CruiseSpeedKmh: 900, CostPerAvailableSeatKm: 0.1);
+        var context = MakeContext(cities, home, availableCash: Money.FromDollars(50_000_000), eraTypes: new[] { shortRangeAircraft });
+
+        var orders = Strategy.DecideOrders(context);
+
+        var negotiationOrder = Assert.Single(orders.OfType<NegotiationOrder>());
+        Assert.Equal("near", negotiationOrder.TargetCity.Id);
+    }
+
+    [Fact]
     public void DecideOrders_Phase2_NegotiatesForTouchedRegionGateway_NotUntouchedRegionOne()
     {
         // withinEuropeGateway's own weight (1) is deliberately too weak

@@ -200,13 +200,37 @@ public class RapidExpansionStrategyTests
         var domesticGateway = MakeCity("dgw", Region.NorthAmerica, 1, 1, 500, isGateway: true);
         var foreignGateway = MakeCity("fgw", Region.Europe, 2, 2, 20, isGateway: true);
         var cities = new[] { home, domesticGateway, foreignGateway };
+        var aircraft = new AircraftType("t", "Test", Seats: 140, RangeKm: 10_000); // gateway-relevance follow-up: era aircraft must be able to reach the candidates
 
-        var context = MakeContext(Array.Empty<Route>(), cities, Array.Empty<AircraftType>(), Region.NorthAmerica, cash: Money.FromDollars(10_000_000));
+        var context = MakeContext(Array.Empty<Route>(), cities, new[] { aircraft }, Region.NorthAmerica, cash: Money.FromDollars(10_000_000));
 
         var orders = Strategy.DecideOrders(context);
 
         var negotiation = Assert.Single(orders.OfType<NegotiationOrder>());
         Assert.Equal("fgw", negotiation.TargetCity.Id);
+    }
+
+    [Fact]
+    public void DecideOrders_UnreachableHigherDemandGateway_LosesToAReachableLowerDemandOne()
+    {
+        // Gateway-relevance follow-up (docs/OPEN_WORK.md's filler-seat
+        // investigation): both are cross-region, so the old ranking
+        // (cross-region first, then demand weight) would have picked the
+        // far one purely for its higher weight - exactly the "bid on
+        // literally any gateway on Earth" behavior that was traced
+        // directly to a real bankruptcy. Now it must be reachable first.
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
+        var near = MakeCity("near", Region.Europe, 0, 10, 20, isGateway: true); // ~1,100km - reachable
+        var far = MakeCity("far", Region.Europe, 0, 100, 90, isGateway: true); // ~11,100km - not reachable
+        var cities = new[] { home, near, far };
+        var shortRangeAircraft = new AircraftType("t", "Test", Seats: 140, RangeKm: 3_000);
+
+        var context = MakeContext(Array.Empty<Route>(), cities, new[] { shortRangeAircraft }, Region.NorthAmerica, cash: Money.FromDollars(10_000_000));
+
+        var orders = Strategy.DecideOrders(context);
+
+        var negotiation = Assert.Single(orders.OfType<NegotiationOrder>());
+        Assert.Equal("near", negotiation.TargetCity.Id);
     }
 
     [Fact]
@@ -221,9 +245,10 @@ public class RapidExpansionStrategyTests
         var best = MakeCity("best", Region.Europe, 2, 2, 90, isGateway: true);
         var next = MakeCity("next", Region.Europe, 3, 3, 50, isGateway: true);
         var cities = new[] { home, best, next };
+        var aircraft = new AircraftType("t", "Test", Seats: 140, RangeKm: 10_000); // gateway-relevance follow-up: era aircraft must be able to reach the candidates
 
         var context = new StrategyContext(
-            Array.Empty<Route>(), 3, cities, DemandModel, Array.Empty<AircraftType>(), AirlineFleet.Empty, Region.NorthAmerica, HomeCity: home,
+            Array.Empty<Route>(), 3, cities, DemandModel, new[] { aircraft }, AirlineFleet.Empty, Region.NorthAmerica, HomeCity: home,
             AvailableCash: Money.FromDollars(10_000_000),
             PendingNegotiationCityIds: new HashSet<string> { "best" });
 
@@ -244,9 +269,10 @@ public class RapidExpansionStrategyTests
         var best = MakeCity("best", Region.Europe, 2, 2, 90, isGateway: true);
         var next = MakeCity("next", Region.Europe, 3, 3, 50, isGateway: true);
         var cities = new[] { home, best, next };
+        var aircraft = new AircraftType("t", "Test", Seats: 140, RangeKm: 10_000); // gateway-relevance follow-up: era aircraft must be able to reach the candidates
 
         var context = new StrategyContext(
-            Array.Empty<Route>(), 3, cities, DemandModel, Array.Empty<AircraftType>(), AirlineFleet.Empty, Region.NorthAmerica, HomeCity: home,
+            Array.Empty<Route>(), 3, cities, DemandModel, new[] { aircraft }, AirlineFleet.Empty, Region.NorthAmerica, HomeCity: home,
             AvailableSlotsByCity: new Dictionary<string, int> { ["best"] = 1 },
             AvailableCash: Money.FromDollars(10_000_000));
 
@@ -590,9 +616,10 @@ public class RapidExpansionStrategyTests
         var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
         var foreignGateway = MakeCity("fgw", Region.Europe, 30, 30, 90, isGateway: true);
         var cities = new[] { home, foreignGateway };
+        var aircraft = new AircraftType("t", "Test", Seats: 140, RangeKm: 10_000); // gateway-relevance follow-up: era aircraft must be able to reach the candidates
 
         var context = new StrategyContext(
-            Array.Empty<Route>(), 3, cities, DemandModel, Array.Empty<AircraftType>(), AirlineFleet.Empty, Region.NorthAmerica, HomeCity: home,
+            Array.Empty<Route>(), 3, cities, DemandModel, new[] { aircraft }, AirlineFleet.Empty, Region.NorthAmerica, HomeCity: home,
             AvailableCash: Money.FromDollars(500_000), CurrentDebtBalance: Money.Zero);
 
         var orders = Strategy.DecideOrders(context);
