@@ -115,4 +115,50 @@ public class FullGameRunnerTuningTests
         Assert.InRange(result.WinnerRegionsDominated, 0, HomeRegions.All.Count);
         Assert.True(result.SolventAtEnd >= 1, "A declared winner implies at least one solvent airline when the game ended.");
     }
+
+    [Fact]
+    public void NegotiationSpendAndBidCount_ArePopulated_ForEverySeat_OverTheFirst20Quarters()
+    {
+        // docs/OPEN_WORK.md's filler-seat investigation: every airline with
+        // enough cash bids on unserved gateways every quarter it can afford
+        // to (BaselineAi.NegotiationBidAmount), so a real game of any
+        // decent length should show real, positive spend for every seat.
+        var seed = 1;
+        var seats = Seats(seed);
+        var result = FullGameRunner.Run(seed, seed, seed + 500_000, 24, seats, Cities, Fleet, Growth, null);
+
+        Assert.NotNull(result.NegotiationSpendCentsFirst20QByName);
+        Assert.NotNull(result.NegotiationBidCountFirst20QByName);
+
+        foreach (var seat in seats)
+        {
+            Assert.True(result.NegotiationSpendCentsFirst20QByName!.ContainsKey(seat.AirlineName));
+            Assert.True(result.NegotiationBidCountFirst20QByName!.ContainsKey(seat.AirlineName));
+            Assert.True(result.NegotiationSpendCentsFirst20QByName![seat.AirlineName] > 0,
+                $"{seat.AirlineName} should have placed at least one real gateway bid in 24 quarters.");
+            Assert.True(result.NegotiationBidCountFirst20QByName![seat.AirlineName] > 0);
+        }
+    }
+
+    [Fact]
+    public void NegotiationSpend_OnlyAccumulatesThroughQuarter20()
+    {
+        // A longer run's first-20-quarters totals must match a run truncated
+        // at exactly 20 quarters - proving the window is a hard cutoff, not
+        // just "whatever happened in a short game."
+        var seed = 1;
+        var seats = Seats(seed);
+        var at20 = FullGameRunner.Run(seed, seed, seed + 500_000, 20, seats, Cities, Fleet, Growth, null);
+        var at40 = FullGameRunner.Run(seed, seed, seed + 500_000, 40, seats, Cities, Fleet, Growth, null);
+
+        foreach (var seat in seats)
+        {
+            Assert.Equal(
+                at20.NegotiationSpendCentsFirst20QByName![seat.AirlineName],
+                at40.NegotiationSpendCentsFirst20QByName![seat.AirlineName]);
+            Assert.Equal(
+                at20.NegotiationBidCountFirst20QByName![seat.AirlineName],
+                at40.NegotiationBidCountFirst20QByName![seat.AirlineName]);
+        }
+    }
 }

@@ -37,7 +37,18 @@ public sealed record FullGameResult(
     // sole-survivor when that's false and SolventAtEnd <= 1, else
     // end-of-campaign ranking.
     int WinnerRegionsDominated = 0,
-    int SolventAtEnd = 0)
+    int SolventAtEnd = 0,
+    // Each airline's own gateway-negotiation spend/count over its first 20
+    // quarters. docs/OPEN_WORK.md's filler-seat investigation traced a real
+    // bankrupt trajectory and found BaselineAi.NegotiationBidAmount (a flat
+    // $2M) plus AiToolkit's FindBestUnservedGateway (globally richest
+    // untouched gateway, region-blind, no pending-bid throttle) drives
+    // *every* airline into $24-33M of speculative gateway bids in this
+    // window regardless of home region - these two fields let a sweep
+    // quantify that pattern instead of re-deriving it from a one-off trace
+    // each time.
+    IReadOnlyDictionary<string, long>? NegotiationSpendCentsFirst20QByName = null,
+    IReadOnlyDictionary<string, int>? NegotiationBidCountFirst20QByName = null)
 {
     public bool Success => Violations.Count == 0;
 }

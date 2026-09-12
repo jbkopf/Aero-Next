@@ -85,6 +85,10 @@ public static class FullGameRunner
         var finances = names.ToDictionary(n => n, n => FinancialState.Start(conditionsByName[n].StartingCash, DefaultStartingDebt, DefaultInterestRatePerQuarter));
         var bankruptcyQuarter = names.ToDictionary(n => n, n => (int?)null);
         var currentStrategyByName = names.ToDictionary(n => n, n => (IAiStrategy?)null);
+        // docs/OPEN_WORK.md's filler-seat investigation: accumulated below,
+        // one quarter at a time, over each airline's first 20 quarters only.
+        var negotiationSpendCentsFirst20QByName = names.ToDictionary(n => n, n => 0L);
+        var negotiationBidCountFirst20QByName = names.ToDictionary(n => n, n => 0);
 
         // M54: real, competitively-resolved carried seats per route, one
         // quarter lagged - built from each quarter's own real market.RouteUsage
@@ -456,8 +460,14 @@ public static class FullGameRunner
                 var name = airline.Name;
                 var wasBankruptEnteringQuarter = finances[name].IsBankrupt;
 
-                var (nextState, _) = FinancialResolver.Resolve(finances[name], airline, market, appliedOrdersByName[name], fleet: fleets[name], retiredUnits: retiredUnitsByName[name], currentActionCap: capsAtQuarterStart[name]);
+                var (nextState, statement) = FinancialResolver.Resolve(finances[name], airline, market, appliedOrdersByName[name], fleet: fleets[name], retiredUnits: retiredUnitsByName[name], currentActionCap: capsAtQuarterStart[name]);
                 finances[name] = nextState;
+
+                if (q <= 20)
+                {
+                    negotiationSpendCentsFirst20QByName[name] += statement.NegotiationBidCost.Cents;
+                    negotiationBidCountFirst20QByName[name] += appliedOrdersByName[name].OfType<NegotiationOrder>().Count();
+                }
 
                 if (wasBankruptEnteringQuarter)
                 {
@@ -530,6 +540,7 @@ public static class FullGameRunner
         return new FullGameResult(
             gameIndex, configSeed, campaignSeed, humanCount, winQuarter ?? quarters, violations,
             finalCash, bankruptcyQuarter, homeRegionByName, startingCityIdByName, winner, winQuarter, finalRanking,
-            winnerRegionsDominated, lastEligibleNames.Count);
+            winnerRegionsDominated, lastEligibleNames.Count,
+            negotiationSpendCentsFirst20QByName, negotiationBidCountFirst20QByName);
     }
 }
