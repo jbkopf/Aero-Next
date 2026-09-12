@@ -427,6 +427,30 @@ un-scoped question if it's ever revisited.
 - **AI differentiation** — the 4 airlines have differentiated starting
   conditions since M15–M19, but nothing beyond M39–M41's region-aware
   strategies makes them play differently by home region's own character.
+- **A real difficulty setting for computer-controlled airlines** — nothing
+  in the game today lets a player dial AI strength up or down; every
+  AI-controlled seat plays identically regardless of how the human wants
+  the game to feel. One concrete, already-scoped dimension: *how
+  random vs. how optimal an AI's starting setup is*. The filler-seat
+  investigation (`docs/OPEN_WORK.md`'s own item 4, above) built exactly
+  half the needed mechanism already —
+  `GameSetup.CreateSeats`'s `fillerRegionRng`/`fillerWeightExponent`
+  turns *which region* an AI-filler seat gets from a strict
+  richest-`RegionalEconomics.Factor`-first cut into a tunable weighted
+  draw (0.0 = uniform regardless of wealth; higher sharpens back toward
+  the deterministic ranking) — a "hard AI" could use a high exponent (or
+  no `fillerRegionRng` at all, the shipped default) and an "easy AI" a low
+  one or 0.0. **The other half doesn't exist yet**: which *city* an AI
+  gets within its assigned region is still 100% deterministic (always the
+  single richest eligible non-gateway city — see `CreateSeats`'s own
+  `OrderByDescending(c => c.DemandWeight)`), with no random or
+  weighted-random option at all. A real difficulty setting needs a
+  parallel mechanism for city choice, not just region choice, before "how
+  random or how optimally the computer chooses its starting city" is
+  actually true end to end. Likely also wants a second dimension beyond
+  setup — in-campaign strategy aggressiveness/skill — but that's a
+  separate, larger design question (`BASELINE_AI_ROADMAP.md`'s own
+  strategy roster) not scoped here.
 - **Route-entry slot requirement** — done. Both halves closed:
   network-contiguity via `docs/BASELINE_AI_ROADMAP.md`'s M44, and
   universal slot capacity (every city, not just the 15 gateways, plus
