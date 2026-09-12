@@ -440,17 +440,25 @@ un-scoped question if it's ever revisited.
   draw (0.0 = uniform regardless of wealth; higher sharpens back toward
   the deterministic ranking) — a "hard AI" could use a high exponent (or
   no `fillerRegionRng` at all, the shipped default) and an "easy AI" a low
-  one or 0.0. **The other half doesn't exist yet**: which *city* an AI
-  gets within its assigned region is still 100% deterministic (always the
-  single richest eligible non-gateway city — see `CreateSeats`'s own
-  `OrderByDescending(c => c.DemandWeight)`), with no random or
-  weighted-random option at all. A real difficulty setting needs a
-  parallel mechanism for city choice, not just region choice, before "how
-  random or how optimally the computer chooses its starting city" is
-  actually true end to end. Likely also wants a second dimension beyond
-  setup — in-campaign strategy aggressiveness/skill — but that's a
-  separate, larger design question (`BASELINE_AI_ROADMAP.md`'s own
-  strategy roster) not scoped here.
+  one or 0.0.
+
+  **The city-choice half is now built too**:
+  `StartingConditionsResolver.ResolveWithRouteRandomness` (0.0 = always
+  the most profitable (aircraft, destination) combination, 1.0 = uniform
+  random among every valid one), wired through
+  `ExperimentTuning.GlobalRouteRandomness`. Both halves — which region an
+  AI-filler seat gets, and which city/route it opens within its own home
+  region — now have a real, tested, off-by-default dial. **Still missing
+  before either is a real difficulty setting**: neither is wired to an
+  actual difficulty concept anywhere (no such setting exists yet in
+  `AeroNext.Sim`/the eventual Godot client), and `GlobalRouteRandomness`
+  specifically hasn't been validated by its own sweep at any nonzero
+  level — unlike the filler-region exponent, which was (see item 4's own
+  write-up: a cliff more than a dial, real bankruptcy/win-share tradeoffs
+  at each level). Likely also wants a second dimension beyond setup —
+  in-campaign strategy aggressiveness/skill — but that's a separate,
+  larger design question (`BASELINE_AI_ROADMAP.md`'s own strategy roster)
+  not scoped here.
 - **Route-entry slot requirement** — done. Both halves closed:
   network-contiguity via `docs/BASELINE_AI_ROADMAP.md`'s M44, and
   universal slot capacity (every city, not just the 15 gateways, plus
@@ -749,6 +757,40 @@ un-scoped question if it's ever revisited.
    *city* choice only is a narrower option) rather than another drive-by
    experiment. Not designed or scoped here, flagged for whoever picks up
    regional balance next.
+
+   **Two real fixes landed from this investigation, both real gameplay
+   code (not QA-harness knobs), both validated by a real 300-game canonical
+   sweep:**
+   - **Gateway-negotiation relevance.** `RapidExpansionStrategy`'s own
+     gateway search ranked every unserved gateway on Earth by "is it
+     cross-region" before demand weight, with no reachability check at
+     all — the home region's *own* gateway sorted dead last, behind every
+     other region's, however far away (traced directly: Paris bidding
+     Tokyo/JFK/Hong Kong/LA/São Paulo/Sydney/Cairo/Honolulu/Dakar/
+     Anchorage/Gander/Wake Island before ever reaching London or
+     Amsterdam). `AiToolkit.DistanceFromNetworkKm` +
+     `MaxEraAircraftRangeKm` now gate both `RapidExpansionStrategy`'s and
+     `BalancedGrowthStrategy`'s own gateway searches to reachable
+     candidates first. Measured: total bankruptcy 2.58%→1.50%, Europe's
+     own bankruptcy (the traced case) 5.1%→0.0%, avg game length
+     169.7→153.2 quarters, win share stable across every region (no
+     redistribution, just a safer game). One small-sample city (Taipei,
+     14 seats) showed a real bankruptcy increase on the same seeds, but
+     investigated directly: 7 of its 8 bankruptcies land at quarter
+     148–214 (30+ years in, far past the fix's own early-game window) and
+     its early negotiation spend isn't elevated versus its own surviving
+     seeds — most likely ordinary seed-level path divergence in a
+     deterministic sim (an early change cascading into a different
+     200-quarter trajectory for that specific seed), not a flaw in the
+     fix.
+   - **Q1 route choice: optimal + a real randomness dial.**
+     `StartingConditionsResolver.ResolveWithRouteRandomness` (0.0 = always
+     the most profitable combination, 1.0 = uniform random among every
+     valid one) is the mechanism half of the difficulty-setting item
+     above — real, tested, wired through `ExperimentTuning
+     .GlobalRouteRandomness`, but not yet wired to a real difficulty
+     setting (none exists) and not yet validated by its own sweep at any
+     nonzero level.
 
 ---
 
