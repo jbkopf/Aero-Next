@@ -61,6 +61,11 @@ public static class FullGameRunner
         tuning ??= ExperimentTuning.Baseline;
         var violations = new List<GameViolation>();
         var campaignRng = new SimRng(campaignSeed);
+        // A separate stream from campaignRng (offset, not reused) so
+        // ExperimentTuning.GlobalRouteRandomness - off by default, so this
+        // never runs for the shipped baseline - never perturbs the real
+        // negotiation-resolution draws campaignRng itself feeds.
+        var routeRandomnessRng = new SimRng(unchecked(campaignSeed + 800_000_000));
 
         var names = seats.Select(s => s.AirlineName).ToList();
 
@@ -76,7 +81,7 @@ public static class FullGameRunner
 
         var conditionsByName = seats.ToDictionary(
             s => s.AirlineName,
-            s => tuning.ApplyTo(s, StartingConditionsResolver.Resolve(s, cities, fleetCatalog), cities, fleetCatalog));
+            s => tuning.ApplyTo(s, StartingConditionsResolver.Resolve(s, cities, fleetCatalog), cities, fleetCatalog, routeRandomnessRng));
         var seatByName = seats.ToDictionary(s => s.AirlineName);
         var homeRegionByName = seats.ToDictionary(s => s.AirlineName, s => s.HomeRegion);
         var startingCityIdByName = seats.ToDictionary(s => s.AirlineName, s => s.StartingCity.Id);

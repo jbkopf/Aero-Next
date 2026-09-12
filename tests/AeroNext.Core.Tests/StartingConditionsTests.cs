@@ -243,4 +243,129 @@ public class StartingConditionsTests
         Assert.Throws<InvalidOperationException>(
             () => StartingConditionsResolver.ResolveWithMinProfitFraction(seat, cities, new[] { tooSmall }, 0.5));
     }
+
+    // --- ResolveWithRouteRandomness (docs/OPEN_WORK.md's difficulty-setting future work) ---
+
+    [Fact]
+    public void ResolveWithRouteRandomness_AtZero_AlwaysMatchesMostProfitableRoute_AcrossManySeeds()
+    {
+        var (home, thin, rich, aircraft) = ThinVsRichFixture();
+        var cities = new[] { home, thin, rich };
+        var fleet = new[] { aircraft };
+        var seat = new AirlineSeat("Test", IsHuman: true, Region.Europe, home);
+        var expected = StartingConditionsResolver.MostProfitableRoute(seat, cities, fleet);
+
+        for (var seed = 0; seed < 20; seed++)
+        {
+            var result = StartingConditionsResolver.ResolveWithRouteRandomness(seat, cities, fleet, randomness: 0.0, new SimRng(seed));
+            Assert.Equal(expected.Aircraft, result.StartingAircraft);
+            Assert.Equal(expected.Destination, result.GuaranteedRouteDestination);
+        }
+    }
+
+    [Fact]
+    public void ResolveWithRouteRandomness_AtOne_CanPickEitherValidDestination_AcrossManySeeds()
+    {
+        var (home, thin, rich, aircraft) = ThinVsRichFixture();
+        var cities = new[] { home, thin, rich };
+        var fleet = new[] { aircraft };
+        var seat = new AirlineSeat("Test", IsHuman: true, Region.Europe, home);
+
+        var seenDestinations = new HashSet<string>();
+        for (var seed = 0; seed < 50; seed++)
+        {
+            var result = StartingConditionsResolver.ResolveWithRouteRandomness(seat, cities, fleet, randomness: 1.0, new SimRng(seed));
+            seenDestinations.Add(result.GuaranteedRouteDestination.Id);
+        }
+
+        Assert.Equal(new HashSet<string> { "aaa", "zzz" }, seenDestinations); // both reachable combinations show up, not just the best
+    }
+
+    [Fact]
+    public void ResolveWithRouteRandomness_AtHalf_SometimesPicksBest_SometimesRandom_AcrossManySeeds()
+    {
+        var (home, thin, rich, aircraft) = ThinVsRichFixture();
+        var cities = new[] { home, thin, rich };
+        var fleet = new[] { aircraft };
+        var seat = new AirlineSeat("Test", IsHuman: true, Region.Europe, home);
+
+        var seenDestinations = new HashSet<string>();
+        for (var seed = 0; seed < 50; seed++)
+        {
+            var result = StartingConditionsResolver.ResolveWithRouteRandomness(seat, cities, fleet, randomness: 0.5, new SimRng(seed));
+            seenDestinations.Add(result.GuaranteedRouteDestination.Id);
+        }
+
+        Assert.Equal(new HashSet<string> { "aaa", "zzz" }, seenDestinations);
+    }
+
+    [Fact]
+    public void ResolveWithRouteRandomness_IsDeterministic_ForTheSameSeed()
+    {
+        var (home, thin, rich, aircraft) = ThinVsRichFixture();
+        var cities = new[] { home, thin, rich };
+        var fleet = new[] { aircraft };
+        var seat = new AirlineSeat("Test", IsHuman: true, Region.Europe, home);
+
+        var first = StartingConditionsResolver.ResolveWithRouteRandomness(seat, cities, fleet, randomness: 0.7, new SimRng(99));
+        var second = StartingConditionsResolver.ResolveWithRouteRandomness(seat, cities, fleet, randomness: 0.7, new SimRng(99));
+
+        Assert.Equal(first, second);
+    }
+
+    [Fact]
+    public void ResolveWithRouteRandomness_Cash_MatchesResolve()
+    {
+        var cities = RealCities;
+        var seat = new AirlineSeat("Test", IsHuman: true, Region.EastAsia, HomeRegions.EligibleStartingCities(Region.EastAsia, cities)[0]);
+
+        var resolved = StartingConditionsResolver.Resolve(seat, cities, RealFleet);
+        var tuned = StartingConditionsResolver.ResolveWithRouteRandomness(seat, cities, RealFleet, 0.5, new SimRng(1));
+
+        Assert.Equal(resolved.StartingCash, tuned.StartingCash);
+        Assert.Equal(resolved.AircraftQuantity, tuned.AircraftQuantity);
+    }
+
+    [Fact]
+    public void ResolveWithRouteRandomness_EveryEligibleStartingCity_ProducesAcceptedQuarter1Route_AtFullRandomness()
+    {
+        // The real-data version of the M18 "Done when" check, but for the
+        // riskiest setting (always random) - a random pick must still be a
+        // *valid* one (reachable, positive demand), never a made-up route.
+        var cities = RealCities;
+        var fleet = RealFleet;
+        var rng = new SimRng(7);
+
+        foreach (var region in HomeRegions.All)
+        {
+            foreach (var startingCity in HomeRegions.EligibleStartingCities(region, cities))
+            {
+                var seat = new AirlineSeat("Test Airline", IsHuman: true, region, startingCity);
+                var conditions = StartingConditionsResolver.ResolveWithRouteRandomness(seat, cities, fleet, randomness: 1.0, rng);
+
+                Assert.NotEqual(startingCity.Id, conditions.GuaranteedRouteDestination.Id);
+                Assert.Equal(region, conditions.GuaranteedRouteDestination.Region);
+                Assert.True(Timeline.IsAvailable(conditions.StartingAircraft, Timeline.StartYear));
+
+                var order = new RouteOrder(startingCity, conditions.GuaranteedRouteDestination, conditions.StartingAircraft);
+                var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, cities, DemandModel);
+
+                Assert.Empty(result.RejectedOrders);
+            }
+        }
+    }
+
+    [Fact]
+    public void ResolveWithRouteRandomness_NoReachableNeighborForAnyAppropriateAircraft_Throws()
+    {
+        var a = new City("a", "A", Region.Europe, 0, 0, 60, false, null);
+        var b = new City("b", "B", Region.Europe, 60, 60, 60, false, null); // unreachably far
+        var cities = new[] { a, b };
+
+        var tooSmall = new AircraftType("small", "Small", Seats: 40, RangeKm: 500, ManufacturerRegion: Region.Europe);
+        var seat = new AirlineSeat("Test", IsHuman: true, Region.Europe, a);
+
+        Assert.Throws<InvalidOperationException>(
+            () => StartingConditionsResolver.ResolveWithRouteRandomness(seat, cities, new[] { tooSmall }, 0.5, new SimRng(1)));
+    }
 }

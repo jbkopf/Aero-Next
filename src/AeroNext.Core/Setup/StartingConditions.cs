@@ -1,3 +1,4 @@
+using AeroNext.Core;
 using AeroNext.Core.Airlines;
 using AeroNext.Core.Finance;
 using AeroNext.Core.World;
@@ -198,6 +199,52 @@ public static class StartingConditionsResolver
             : new AirlineStartingConditions(cash, bestAircraft, StartingAircraftQuantity, bestDestination);
     }
 
+    /// <summary>
+    /// docs/OPEN_WORK.md's "difficulty setting" future-work note:
+    /// bracketed between <see cref="MostProfitableRoute"/> (optimal, no
+    /// randomness) and a naive uniform-random pick — the two intended
+    /// endpoints of a future AI-difficulty dial for how well the computer
+    /// chooses its own opening move. With probability
+    /// <paramref name="randomness"/> (0.0 = never, 1.0 = always), picks
+    /// uniformly at random among every reachable, positive-demand
+    /// (aircraft, destination) combination instead of the single most
+    /// profitable one — using <paramref name="rng"/> explicitly, per
+    /// CLAUDE.md's determinism rules (no ambient randomness; same seed,
+    /// same pick, always). A separate, parallel method — never touches
+    /// <see cref="Resolve"/>, which stays real, shipped, unconditional
+    /// behavior. Throws under the same "nothing reachable" condition as
+    /// <see cref="Resolve"/>/<see cref="MostProfitableRoute"/>.
+    /// </summary>
+    public static AirlineStartingConditions ResolveWithRouteRandomness(
+        AirlineSeat seat, IReadOnlyList<City> allCities, IReadOnlyList<AircraftType> fleet, double randomness, SimRng rng)
+    {
+        var cash = Money.FromDollars((long)Math.Round(
+            BaseStartingCashDollars * RegionalEconomics.Factor(seat.HomeRegion, allCities), MidpointRounding.AwayFromZero));
+
+        var demandModel = new GravityDemandModel(enableHubDemandBonus: true);
+        var aircraftOptions = RegionalFleet.AppropriateAircraft(seat.HomeRegion, fleet, Timeline.StartYear)
+            .OrderBy(a => a.RangeKm)
+            .ThenBy(a => a.Id, StringComparer.Ordinal)
+            .ToList();
+        var destinationOptions = HomeRegions.EligibleStartingCities(seat.HomeRegion, allCities)
+            .Where(c => c.Id != seat.StartingCity.Id)
+            .ToList();
+
+        var allValid = AllValidCombinationsByProfitDescending(seat, destinationOptions, aircraftOptions, demandModel);
+        if (allValid.Count == 0)
+        {
+            throw new InvalidOperationException(
+                $"No appropriate {Timeline.StartYear} aircraft for {seat.HomeRegion} can open a positive-demand route " +
+                $"from {seat.StartingCity.Id} to any other eligible city in the region.");
+        }
+
+        var (aircraft, destination) = rng.NextDouble() < randomness
+            ? allValid[rng.Next(0, allValid.Count)]
+            : allValid[0];
+
+        return new AirlineStartingConditions(cash, aircraft, StartingAircraftQuantity, destination);
+    }
+
     private static long RouteProfit(City origin, City destination, AircraftType aircraft, GravityDemandModel demandModel)
     {
         var route = new Route(origin, destination, aircraft, AircraftCount: 1);
@@ -208,11 +255,16 @@ public static class StartingConditionsResolver
     /// <summary>The (aircraft, destination) with the best real quarter-1 profit; ties break by shorter range, then aircraft id, then destination id.</summary>
     private static (AircraftType Aircraft, City Destination) MostProfitableCombination(
         AirlineSeat seat, IReadOnlyList<City> destinationOptions, IReadOnlyList<AircraftType> aircraftOptions, GravityDemandModel demandModel) =>
+        AllValidCombinationsByProfitDescending(seat, destinationOptions, aircraftOptions, demandModel).First();
+
+    /// <summary>Every reachable, positive-demand (aircraft, destination) combination, richest profit first; same tie-break as <see cref="MostProfitableCombination"/> always used.</summary>
+    private static List<(AircraftType Aircraft, City Destination)> AllValidCombinationsByProfitDescending(
+        AirlineSeat seat, IReadOnlyList<City> destinationOptions, IReadOnlyList<AircraftType> aircraftOptions, GravityDemandModel demandModel) =>
         (from aircraft in aircraftOptions
          from destination in destinationOptions
          where GreatCircle.DistanceKm(seat.StartingCity, destination) <= aircraft.RangeKm
          where demandModel.ForPair(seat.StartingCity, destination).PassengersPerQuarter > 0
          orderby RouteProfit(seat.StartingCity, destination, aircraft, demandModel) descending, aircraft.RangeKm, aircraft.Id, destination.Id
          select (aircraft, destination))
-        .First();
+        .ToList();
 }
