@@ -442,23 +442,67 @@ un-scoped question if it's ever revisited.
   no `fillerRegionRng` at all, the shipped default) and an "easy AI" a low
   one or 0.0.
 
-  **The city-choice half is now built too**:
-  `StartingConditionsResolver.ResolveWithRouteRandomness` (0.0 = always
-  the most profitable (aircraft, destination) combination, 1.0 = uniform
-  random among every valid one), wired through
-  `ExperimentTuning.GlobalRouteRandomness`. Both halves — which region an
-  AI-filler seat gets, and which city/route it opens within its own home
-  region — now have a real, tested, off-by-default dial. **Still missing
-  before either is a real difficulty setting**: neither is wired to an
-  actual difficulty concept anywhere (no such setting exists yet in
-  `AeroNext.Sim`/the eventual Godot client), and `GlobalRouteRandomness`
-  specifically hasn't been validated by its own sweep at any nonzero
-  level — unlike the filler-region exponent, which was (see item 4's own
-  write-up: a cliff more than a dial, real bankruptcy/win-share tradeoffs
-  at each level). Likely also wants a second dimension beyond setup —
-  in-campaign strategy aggressiveness/skill — but that's a separate,
-  larger design question (`BASELINE_AI_ROADMAP.md`'s own strategy roster)
-  not scoped here.
+  **The city-choice half is now built, validated, and its own "always
+  optimal by default" question closed — the same way the filler-region
+  exponent's was.** `StartingConditionsResolver.ResolveWithWeightedRouteRandomness`
+  (rank-weighted: combination rank *i* gets weight `1/(i+1)^weightExponent`
+  — 0.0 = uniform random among every valid combination, larger = biased
+  toward `MostProfitableRoute`'s own pick) replaced the earlier binary
+  0.0/1.0 switch, wired through `ExperimentTuning.GlobalRouteWeightExponent`.
+
+  **Tried making `Resolve` itself unconditionally optimal by default, per
+  direct instruction — measured, and reverted.** The old "V1" experiment
+  (`docs/AUSTRALASIA_TUNING_EXPERIMENTS.md`) had already rejected a
+  universal always-optimal policy once (fixed Europe, spiked EastAsia
+  bankruptcy to 24.5%). Worth re-testing since M65's AustralAsia tuning,
+  the SouthAmerica Belo Horizonte fix, and this doc's own gateway-relevance
+  fix (item 4, above) had all shipped since — maybe they'd defused it. A
+  real 300-game canonical sweep (seed 1, 244 quarters) with `Resolve` made
+  unconditionally optimal:
+
+  | | Old heuristic (`Resolve`, shipped) | Unconditionally optimal |
+  |---|---|---|
+  | Total bankruptcy | 1.50% | **4.42%** |
+  | Avg game length | 153.2q | 177.3q |
+  | Europe bankrupt / win share | 0.0% / 5.7% | 0.5% / 12.3% |
+  | EastAsia bankrupt / win share | 3.1% / 51.7% | **10.7%** / 46.3% |
+  | AustralAsia bankrupt / win share | 5.2% / 7.7% | **15.5%** / 3.7% |
+  | SouthAmerica bankrupt / win share | 1.3% / 6.3% | 1.3% / 4.3% |
+
+  Smaller than the original V1 shock (EastAsia 3.1%→10.7% here vs.
+  4.5%→24.5% then), but the same failure mode, confirmed still real on
+  the current codebase: Europe wins, EastAsia/AustralAsia pay for it, and
+  total bankruptcy nearly triples.
+
+  A follow-up screen (150 games/level) across `GlobalRouteWeightExponent`
+  itself, hoping the dial had a safer middle ground between uniform-random
+  and always-optimal, found the opposite of what a "difficulty dial"
+  should look like — **monotonic in the wrong direction**: total
+  bankruptcy is *worse* toward the uniform-random end (12.50% at exponent
+  0.5, 8.33% at 1.0) and only improves moving toward always-optimal,
+  plateauing around 4.8–5.2% (exponent ≥ 2) — never back near the 1.50%
+  heuristic baseline at any point on the dial. The reason: the shipped
+  heuristic isn't a "medium-random" policy sitting between bad-random and
+  optimal — it's a specific, decent pick (alphabetically-first
+  positive-demand city, re-optimized only when that loses money) that
+  beats *uniform-random-among-every-valid-combination* outright, because
+  most valid combinations are mediocre and only one or two per starting
+  city are genuinely strong. Unlike the filler-region exponent (a real,
+  validated tradeoff dial — see item 4's own write-up), this dial has no
+  safe middle: **`StartingConditionsResolver.Resolve` was reverted to the
+  original heuristic-first behavior**, unconditional, exactly as shipped
+  before this investigation.
+  `ResolveWithWeightedRouteRandomness`/`GlobalRouteWeightExponent` are kept,
+  tested, off by default — real scaffolding for a future difficulty
+  setting, not a validated safety knob, same disposition as every other
+  measured-and-rejected knob in `ExperimentTuning`.
+
+  **Still missing before either mechanism is a real difficulty setting**:
+  neither is wired to an actual difficulty concept anywhere (no such
+  setting exists yet in `AeroNext.Sim`/the eventual Godot client). Likely
+  also wants a second dimension beyond setup — in-campaign strategy
+  aggressiveness/skill — but that's a separate, larger design question
+  (`BASELINE_AI_ROADMAP.md`'s own strategy roster) not scoped here.
 - **Route-entry slot requirement** — done. Both halves closed:
   network-contiguity via `docs/BASELINE_AI_ROADMAP.md`'s M44, and
   universal slot capacity (every city, not just the 15 gateways, plus
@@ -783,14 +827,21 @@ un-scoped question if it's ever revisited.
      deterministic sim (an early change cascading into a different
      200-quarter trajectory for that specific seed), not a flaw in the
      fix.
-   - **Q1 route choice: optimal + a real randomness dial.**
-     `StartingConditionsResolver.ResolveWithRouteRandomness` (0.0 = always
-     the most profitable combination, 1.0 = uniform random among every
-     valid one) is the mechanism half of the difficulty-setting item
-     above — real, tested, wired through `ExperimentTuning
-     .GlobalRouteRandomness`, but not yet wired to a real difficulty
-     setting (none exists) and not yet validated by its own sweep at any
-     nonzero level.
+   - **Q1 route choice: a weighted-random mechanism built, validated, kept
+     off by default.** `StartingConditionsResolver.ResolveWithWeightedRouteRandomness`
+     is the mechanism half of the difficulty-setting item above — real,
+     tested, wired through `ExperimentTuning.GlobalRouteWeightExponent`.
+     Making `Resolve` itself unconditionally optimal (this mechanism's
+     own high-exponent endpoint, as the *default*) was tried per direct
+     instruction and reverted after measurement: total bankruptcy
+     1.50%→4.42% (EastAsia 3.1%→10.7%, AustralAsia 5.2%→15.5%), the same
+     failure mode the old "V1" experiment found, smaller but still real.
+     A follow-up exponent screen found no safer middle ground either —
+     bankruptcy gets *worse* toward the uniform-random end, not better,
+     and only approaches (never beats) the old heuristic baseline near
+     the fully-optimal end. Full write-up, numbers, and the reasoning for
+     why this dial has no safe point: `GAME_SETUP_ROADMAP.md`'s own
+     "difficulty setting" item, below.
 
 ---
 

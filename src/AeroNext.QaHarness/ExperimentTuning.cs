@@ -113,20 +113,21 @@ public sealed record ExperimentTuning
     public double? GlobalMinProfitFraction { get; init; }
 
     /// <summary>
-    /// Global route-choice randomness, [0.0, 1.0] (docs/OPEN_WORK.md's
+    /// Global route-choice weighting exponent, ≥ 0.0 (docs/OPEN_WORK.md's
     /// "difficulty setting" future-work note) — like
     /// <see cref="GlobalMinProfitFraction"/>, applies to every seat, not
     /// one region. null = off, <see cref="StartingConditionsResolver.Resolve"/>'s
     /// own shipped pick, byte-identical. When set, every seat's guaranteed
     /// route comes from
-    /// <see cref="StartingConditionsResolver.ResolveWithRouteRandomness"/>
-    /// instead, via <paramref name="routeRandomnessRng"/> — see that
-    /// method's own doc comment for what the value means. The intended
-    /// eventual use: a "how well does the AI choose its own opening move"
-    /// dial for a future difficulty setting (0.0 = hardest/optimal, 1.0 =
-    /// easiest/uniform-random).
+    /// <see cref="StartingConditionsResolver.ResolveWithWeightedRouteRandomness"/>
+    /// instead, via <paramref name="routeWeightRng"/> — see that method's
+    /// own doc comment for the real measurement of what each value does
+    /// to bankruptcy (not a safety dial; see
+    /// <see cref="StartingConditionsResolver"/>'s own top-level doc
+    /// comment for the full write-up). Off by default, same disposition
+    /// as every other measured-and-rejected knob in this file.
     /// </summary>
-    public double? GlobalRouteRandomness { get; init; }
+    public double? GlobalRouteWeightExponent { get; init; }
 
     /// <summary>Baseline: all knobs off.</summary>
     public static ExperimentTuning Baseline { get; } = new();
@@ -150,20 +151,20 @@ public sealed record ExperimentTuning
     /// tuning applied. <paramref name="baseline"/> is what
     /// <see cref="StartingConditionsResolver.Resolve"/> returned untouched;
     /// <paramref name="allCities"/> and <paramref name="fleet"/> are the
-    /// same lists that resolver was handed. <paramref name="routeRandomnessRng"/>
-    /// is only read when <see cref="GlobalRouteRandomness"/> is set — pass
-    /// the caller's own seeded <see cref="SimRng"/> (never a fresh ambient
-    /// one), reused across every seat's own call for the game so the whole
-    /// sequence stays deterministic per campaign seed. A no-op for
-    /// <see cref="Baseline"/>; a no-op for any seat outside AustralAsia
+    /// same lists that resolver was handed. <paramref name="routeWeightRng"/>
+    /// is only read when <see cref="GlobalRouteWeightExponent"/> is set,
+    /// pass the caller's own seeded <see cref="SimRng"/> (never a fresh
+    /// ambient one), reused across every seat's own call for the game so
+    /// the whole sequence stays deterministic per campaign seed. A no-op
+    /// for <see cref="Baseline"/>; a no-op for any seat outside AustralAsia
     /// unless <see cref="GlobalMinProfitFraction"/> or
-    /// <see cref="GlobalRouteRandomness"/> is set (the two knobs here that
-    /// aren't AustralAsia-scoped).
+    /// <see cref="GlobalRouteWeightExponent"/> is set (the two knobs here
+    /// that aren't AustralAsia-scoped).
     /// </summary>
     public AirlineStartingConditions ApplyTo(
         AirlineSeat seat, AirlineStartingConditions baseline,
         IReadOnlyList<City> allCities, IReadOnlyList<AircraftType> fleet,
-        SimRng? routeRandomnessRng = null)
+        SimRng? routeWeightRng = null)
     {
         var result = baseline;
 
@@ -173,14 +174,14 @@ public sealed record ExperimentTuning
             result = result with { StartingAircraft = tuned.StartingAircraft, GuaranteedRouteDestination = tuned.GuaranteedRouteDestination };
         }
 
-        if (GlobalRouteRandomness is { } randomness)
+        if (GlobalRouteWeightExponent is { } weightExponent)
         {
-            if (routeRandomnessRng is null)
+            if (routeWeightRng is null)
             {
-                throw new ArgumentNullException(nameof(routeRandomnessRng), $"{nameof(GlobalRouteRandomness)} is set but no RNG was supplied.");
+                throw new ArgumentNullException(nameof(routeWeightRng), $"{nameof(GlobalRouteWeightExponent)} is set but no RNG was supplied.");
             }
 
-            var tuned = StartingConditionsResolver.ResolveWithRouteRandomness(seat, allCities, fleet, randomness, routeRandomnessRng);
+            var tuned = StartingConditionsResolver.ResolveWithWeightedRouteRandomness(seat, allCities, fleet, weightExponent, routeWeightRng);
             result = result with { StartingAircraft = tuned.StartingAircraft, GuaranteedRouteDestination = tuned.GuaranteedRouteDestination };
         }
 

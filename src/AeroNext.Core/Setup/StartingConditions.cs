@@ -51,6 +51,34 @@ namespace AeroNext.Core.Setup;
 /// have no profitable domestic pair at 1955 tech and get the least-bad
 /// option — a separate, harder problem (a data or catalog gap, not a
 /// selection one) left open.
+///
+/// **"Always optimal" tried again, re-rejected.** The old "V1" experiment
+/// (docs/AUSTRALASIA_TUNING_EXPERIMENTS.md) measured making every
+/// airline's Q1 pick unconditionally optimal and rejected it — fixed
+/// Europe harder but spiked EastAsia bankruptcy to 24.5%. Per direct
+/// instruction this was tried again on the current codebase (after M65's
+/// AustralAsia tuning, the SouthAmerica Belo Horizonte fix, and this
+/// file's own sibling gateway-negotiation reachability fix in
+/// <c>RapidExpansionStrategy</c>/<c>BalancedGrowthStrategy</c> had all
+/// shipped, in case those changes had defused the old failure mode). They
+/// hadn't: a real 300-game sweep with <see cref="Resolve"/> made
+/// unconditionally optimal showed total bankruptcy 1.50%→4.42%
+/// (EastAsia 3.1%→10.7%, AustralAsia 5.2%→15.5%), Europe still the one
+/// clear winner (0.0%→0.5% bankrupt, win share 5.7%→12.3%). A follow-up
+/// screen across <see cref="ResolveWithWeightedRouteRandomness"/>'s own
+/// exponent, hoping for a safer middle ground, found the opposite of a
+/// dial: total bankruptcy is monotonically *worse* toward the
+/// uniform-random end (12.5% at exponent 0.5) and only improves toward
+/// the optimal end, plateauing around 4.8–5.2% — never back near 1.50% at
+/// any exponent. The old heuristic below isn't a "medium-random" policy;
+/// it's a specific, decent pick that beats uniform-random-among-all-valid-
+/// combos, because most valid combos are mediocre and only one or two per
+/// city are genuinely strong. <see cref="Resolve"/> therefore stays on the
+/// heuristic below, unconditionally, exactly as it always has;
+/// <see cref="ResolveWithWeightedRouteRandomness"/> is kept, tested, and
+/// off by default — real scaffolding for whenever a future difficulty
+/// setting exists, same disposition as every other measured-and-rejected
+/// knob in <see cref="ExperimentTuning"/>.
 /// </summary>
 public sealed record AirlineStartingConditions(
     Money StartingCash,
@@ -65,8 +93,7 @@ public static class StartingConditionsResolver
 
     public static AirlineStartingConditions Resolve(AirlineSeat seat, IReadOnlyList<City> allCities, IReadOnlyList<AircraftType> fleet)
     {
-        var cash = Money.FromDollars((long)Math.Round(
-            BaseStartingCashDollars * RegionalEconomics.Factor(seat.HomeRegion, allCities), MidpointRounding.AwayFromZero));
+        var cash = StartingCashFor(seat, allCities);
 
         var demandModel = new GravityDemandModel(enableHubDemandBonus: true);
         var aircraftOptions = RegionalFleet.AppropriateAircraft(seat.HomeRegion, fleet, Timeline.StartYear)
@@ -108,12 +135,14 @@ public static class StartingConditionsResolver
     }
 
     /// <summary>
-    /// Factor A (docs/AUSTRALASIA_TUNING_EXPERIMENTS.md): the most
-    /// profitable starting (aircraft, destination) combination outright —
-    /// no smallest-aircraft / alphabetical-first heuristic, just the pick
-    /// <see cref="Resolve"/> already falls back to when its heuristic pick
-    /// loses money, applied unconditionally. Same option set, same
-    /// tie-break, same "nothing reachable" throw as <see cref="Resolve"/>.
+    /// The most profitable starting (aircraft, destination) combination
+    /// outright — no smallest-aircraft / alphabetical-first heuristic, just
+    /// the pick <see cref="Resolve"/> already falls back to when its
+    /// heuristic pick loses money, applied unconditionally. Measured as a
+    /// universal policy twice now (docs/AUSTRALASIA_TUNING_EXPERIMENTS.md's
+    /// "V1", and again on the current codebase — see this file's own
+    /// top-level doc comment) and rejected both times. Same option set,
+    /// same tie-break, same "nothing reachable" throw as <see cref="Resolve"/>.
     /// </summary>
     public static (AircraftType Aircraft, City Destination) MostProfitableRoute(
         AirlineSeat seat, IReadOnlyList<City> allCities, IReadOnlyList<AircraftType> fleet)
@@ -162,8 +191,7 @@ public static class StartingConditionsResolver
     public static AirlineStartingConditions ResolveWithMinProfitFraction(
         AirlineSeat seat, IReadOnlyList<City> allCities, IReadOnlyList<AircraftType> fleet, double minProfitFraction)
     {
-        var cash = Money.FromDollars((long)Math.Round(
-            BaseStartingCashDollars * RegionalEconomics.Factor(seat.HomeRegion, allCities), MidpointRounding.AwayFromZero));
+        var cash = StartingCashFor(seat, allCities);
 
         var demandModel = new GravityDemandModel(enableHubDemandBonus: true);
         var (bestAircraft, bestDestination) = MostProfitableRoute(seat, allCities, fleet); // throws if nothing reachable at all
@@ -200,26 +228,34 @@ public static class StartingConditionsResolver
     }
 
     /// <summary>
-    /// docs/OPEN_WORK.md's "difficulty setting" future-work note:
-    /// bracketed between <see cref="MostProfitableRoute"/> (optimal, no
-    /// randomness) and a naive uniform-random pick — the two intended
-    /// endpoints of a future AI-difficulty dial for how well the computer
-    /// chooses its own opening move. With probability
-    /// <paramref name="randomness"/> (0.0 = never, 1.0 = always), picks
-    /// uniformly at random among every reachable, positive-demand
-    /// (aircraft, destination) combination instead of the single most
-    /// profitable one — using <paramref name="rng"/> explicitly, per
-    /// CLAUDE.md's determinism rules (no ambient randomness; same seed,
-    /// same pick, always). A separate, parallel method — never touches
-    /// <see cref="Resolve"/>, which stays real, shipped, unconditional
-    /// behavior. Throws under the same "nothing reachable" condition as
-    /// <see cref="Resolve"/>/<see cref="MostProfitableRoute"/>.
+    /// docs/OPEN_WORK.md's "difficulty setting" future-work note: a
+    /// genuinely weighted (not binary) pick among every reachable,
+    /// positive-demand (aircraft, destination) combination, biased toward
+    /// the best by <paramref name="weightExponent"/> — the same
+    /// rank-weighted idiom <see cref="GameSetup"/>'s own
+    /// <c>fillerWeightExponent</c> applies to region wealth, applied here
+    /// to route profitability rank instead. Combination rank <c>i</c>
+    /// (0 = <see cref="MostProfitableRoute"/>'s own pick, richest profit
+    /// first) gets weight <c>1 / (i+1)^weightExponent</c>: at
+    /// <paramref name="weightExponent"/> = 0.0 every valid combination is
+    /// equally likely; as it grows, the distribution concentrates on the
+    /// best pick. <b>Not a safety dial</b> — a real screening sweep (this
+    /// file's own top-level doc comment) found total bankruptcy gets
+    /// *worse*, not better, toward the uniform-random end (12.5% at
+    /// exponent 0.5) and only improves toward the fully-optimal end,
+    /// plateauing around 4.8–5.2% — never back near <see cref="Resolve"/>'s
+    /// own ~1.5% baseline at any exponent. Kept, tested, off by default —
+    /// real scaffolding for a future difficulty setting, not a validated
+    /// safety knob. Uses <paramref name="rng"/> explicitly, per CLAUDE.md's
+    /// determinism rule (no ambient randomness; same seed, same pick,
+    /// always). A separate, parallel method — never touches
+    /// <see cref="Resolve"/>. Throws under the same "nothing reachable"
+    /// condition as <see cref="Resolve"/>/<see cref="MostProfitableRoute"/>.
     /// </summary>
-    public static AirlineStartingConditions ResolveWithRouteRandomness(
-        AirlineSeat seat, IReadOnlyList<City> allCities, IReadOnlyList<AircraftType> fleet, double randomness, SimRng rng)
+    public static AirlineStartingConditions ResolveWithWeightedRouteRandomness(
+        AirlineSeat seat, IReadOnlyList<City> allCities, IReadOnlyList<AircraftType> fleet, double weightExponent, SimRng rng)
     {
-        var cash = Money.FromDollars((long)Math.Round(
-            BaseStartingCashDollars * RegionalEconomics.Factor(seat.HomeRegion, allCities), MidpointRounding.AwayFromZero));
+        var cash = StartingCashFor(seat, allCities);
 
         var demandModel = new GravityDemandModel(enableHubDemandBonus: true);
         var aircraftOptions = RegionalFleet.AppropriateAircraft(seat.HomeRegion, fleet, Timeline.StartYear)
@@ -238,12 +274,43 @@ public static class StartingConditionsResolver
                 $"from {seat.StartingCity.Id} to any other eligible city in the region.");
         }
 
-        var (aircraft, destination) = rng.NextDouble() < randomness
-            ? allValid[rng.Next(0, allValid.Count)]
-            : allValid[0];
-
+        var (aircraft, destination) = WeightedRandomCombination(allValid, weightExponent, rng);
         return new AirlineStartingConditions(cash, aircraft, StartingAircraftQuantity, destination);
     }
+
+    /// <summary>
+    /// Draws one combination with probability proportional to
+    /// <c>1 / (rank+1)^weightExponent</c>, where rank is the combination's
+    /// own index in <paramref name="rankedCombinations"/> (already
+    /// profit-descending). Same weighted-draw shape as
+    /// <see cref="GameSetup"/>'s own region sampler, minus the
+    /// without-replacement removal loop (this only ever draws once).
+    /// </summary>
+    private static (AircraftType Aircraft, City Destination) WeightedRandomCombination(
+        IReadOnlyList<(AircraftType Aircraft, City Destination)> rankedCombinations, double weightExponent, SimRng rng)
+    {
+        var weights = rankedCombinations.Select((_, rank) => Math.Pow(rank + 1, -weightExponent)).ToList();
+        var totalWeight = weights.Sum();
+        var roll = rng.NextDouble() * totalWeight;
+        var cumulative = 0.0;
+        var pickIndex = rankedCombinations.Count - 1; // floating-point fallback: last item absorbs any rounding slop
+
+        for (var i = 0; i < weights.Count; i++)
+        {
+            cumulative += weights[i];
+            if (roll < cumulative)
+            {
+                pickIndex = i;
+                break;
+            }
+        }
+
+        return rankedCombinations[pickIndex];
+    }
+
+    private static Money StartingCashFor(AirlineSeat seat, IReadOnlyList<City> allCities) =>
+        Money.FromDollars((long)Math.Round(
+            BaseStartingCashDollars * RegionalEconomics.Factor(seat.HomeRegion, allCities), MidpointRounding.AwayFromZero));
 
     private static long RouteProfit(City origin, City destination, AircraftType aircraft, GravityDemandModel demandModel)
     {

@@ -238,44 +238,44 @@ public class ExperimentTuningTests
         Assert.Equal(Money.FromDollars(StartingConditionsResolver.BaseStartingCashDollars), result.StartingCash);
     }
 
-    // --- Global route-choice randomness (docs/OPEN_WORK.md's difficulty-setting future work) ---
+    // --- Global route-choice weighting exponent (docs/OPEN_WORK.md's difficulty-setting future work) ---
 
     [Fact]
-    public void GlobalRouteRandomness_Null_NeverRequiresAnRng()
+    public void GlobalRouteWeightExponent_Null_NeverRequiresAnRng()
     {
-        // Baseline never reads routeRandomnessRng at all - must not throw
+        // Baseline never reads routeWeightRng at all - must not throw
         // even when none is supplied.
         var conditions = Fake(15_100_000);
-        var result = ExperimentTuning.Baseline.ApplyTo(SeatIn(Region.Europe), conditions, RealCities, RealFleet, routeRandomnessRng: null);
+        var result = ExperimentTuning.Baseline.ApplyTo(SeatIn(Region.Europe), conditions, RealCities, RealFleet, routeWeightRng: null);
         Assert.Equal(conditions, result);
     }
 
     [Fact]
-    public void GlobalRouteRandomness_SetWithoutAnRng_Throws()
+    public void GlobalRouteWeightExponent_SetWithoutAnRng_Throws()
     {
-        var tuning = new ExperimentTuning { GlobalRouteRandomness = 0.5 };
+        var tuning = new ExperimentTuning { GlobalRouteWeightExponent = 0.5 };
         Assert.Throws<ArgumentNullException>(() =>
-            tuning.ApplyTo(SeatIn(Region.Europe), Fake(15_100_000), RealCities, RealFleet, routeRandomnessRng: null));
+            tuning.ApplyTo(SeatIn(Region.Europe), Fake(15_100_000), RealCities, RealFleet, routeWeightRng: null));
     }
 
     [Fact]
-    public void GlobalRouteRandomness_AppliesToNonAustralAsiaSeats_UnlikeEveryOtherKnob()
+    public void GlobalRouteWeightExponent_AppliesToNonAustralAsiaSeats_UnlikeEveryOtherKnob()
     {
         var cities = RealCities;
         var fleet = RealFleet;
         var seat = new AirlineSeat("T", IsHuman: true, Region.Europe,
             HomeRegions.EligibleStartingCities(Region.Europe, cities).First(c => c.Id == "cdg"));
         var baseline = StartingConditionsResolver.Resolve(seat, cities, fleet);
-        var expected = StartingConditionsResolver.ResolveWithRouteRandomness(seat, cities, fleet, 0.0, new SimRng(1));
+        var expected = StartingConditionsResolver.ResolveWithWeightedRouteRandomness(seat, cities, fleet, 0.0, new SimRng(1));
 
-        var result = new ExperimentTuning { GlobalRouteRandomness = 0.0 }.ApplyTo(seat, baseline, cities, fleet, new SimRng(1));
+        var result = new ExperimentTuning { GlobalRouteWeightExponent = 0.0 }.ApplyTo(seat, baseline, cities, fleet, new SimRng(1));
 
         Assert.Equal(expected.StartingAircraft, result.StartingAircraft);
         Assert.Equal(expected.GuaranteedRouteDestination, result.GuaranteedRouteDestination);
     }
 
     [Fact]
-    public void GlobalRouteRandomness_ComposesWithAustralAsiaOnlyKnobs()
+    public void GlobalRouteWeightExponent_ComposesWithAustralAsiaOnlyKnobs()
     {
         var cities = RealCities;
         var fleet = RealFleet;
@@ -283,10 +283,10 @@ public class ExperimentTuningTests
             HomeRegions.EligibleStartingCities(Region.AustralAsia, cities).First(c => c.Id == "cgk"));
         var baseline = StartingConditionsResolver.Resolve(seat, cities, fleet);
 
-        var tuning = new ExperimentTuning { GlobalRouteRandomness = 0.0, AustralAsiaCashFloorFactor = 1.0 };
+        var tuning = new ExperimentTuning { GlobalRouteWeightExponent = 0.0, AustralAsiaCashFloorFactor = 1.0 };
         var result = tuning.ApplyTo(seat, baseline, cities, fleet, new SimRng(1));
 
-        var expectedRoute = StartingConditionsResolver.ResolveWithRouteRandomness(seat, cities, fleet, 0.0, new SimRng(1));
+        var expectedRoute = StartingConditionsResolver.ResolveWithWeightedRouteRandomness(seat, cities, fleet, 0.0, new SimRng(1));
         Assert.Equal(expectedRoute.GuaranteedRouteDestination, result.GuaranteedRouteDestination);
         Assert.Equal(Money.FromDollars(StartingConditionsResolver.BaseStartingCashDollars), result.StartingCash);
     }
