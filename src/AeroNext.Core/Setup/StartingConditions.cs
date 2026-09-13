@@ -79,6 +79,26 @@ namespace AeroNext.Core.Setup;
 /// off by default — real scaffolding for whenever a future difficulty
 /// setting exists, same disposition as every other measured-and-rejected
 /// knob in <see cref="ExperimentTuning"/>.
+///
+/// **Root-cause follow-up: a real bug, found tracing the regression
+/// above.** Every method here built its own demand model with no
+/// <c>schedule</c>/<c>year</c> — invisible to <c>historical_events.json</c>'s
+/// authored, city/region-scoped 1955 demand suppression (e.g. Shanghai's
+/// Maoist-era "closed economy" entry, a real 0.3x multiplier the actual
+/// per-quarter market always applies). "Most profitable" chases the
+/// biggest *mature* demand weight it can see, which is disproportionately
+/// the same handful of cities carrying the largest 1955 suppression —
+/// picking an oversized aircraft for demand that was never really there
+/// on quarter 1. Traced directly: fuk→pvg's static estimate saw 27,939
+/// passengers/quarter; the real quarter-1 market delivers exactly 8,382
+/// (27,939 × 0.3). <see cref="Quarter1DemandModel"/> now builds the exact
+/// same schedule/year-aware model every real per-quarter call site already
+/// uses, closing this gap for every method here, <see cref="Resolve"/>
+/// included (its own heuristic was always less exposed to this — it
+/// doesn't chase the biggest number — but isn't immune either). This is
+/// an independent, real correctness fix, not itself a re-attempt at
+/// making <see cref="Resolve"/> unconditionally optimal — see
+/// docs/OPEN_WORK.md for whatever re-measurement follows it.
 /// </summary>
 public sealed record AirlineStartingConditions(
     Money StartingCash,
@@ -91,11 +111,12 @@ public static class StartingConditionsResolver
     public const long BaseStartingCashDollars = 20_000_000;
     public const int StartingAircraftQuantity = 2;
 
-    public static AirlineStartingConditions Resolve(AirlineSeat seat, IReadOnlyList<City> allCities, IReadOnlyList<AircraftType> fleet)
+    public static AirlineStartingConditions Resolve(
+        AirlineSeat seat, IReadOnlyList<City> allCities, IReadOnlyList<AircraftType> fleet, IReadOnlyList<DemandGrowthPoint> growthSchedule)
     {
         var cash = StartingCashFor(seat, allCities);
 
-        var demandModel = new GravityDemandModel(enableHubDemandBonus: true);
+        var demandModel = Quarter1DemandModel(growthSchedule);
         var aircraftOptions = RegionalFleet.AppropriateAircraft(seat.HomeRegion, fleet, Timeline.StartYear)
             .OrderBy(a => a.RangeKm)
             .ThenBy(a => a.Id, StringComparer.Ordinal)
@@ -145,9 +166,9 @@ public static class StartingConditionsResolver
     /// same tie-break, same "nothing reachable" throw as <see cref="Resolve"/>.
     /// </summary>
     public static (AircraftType Aircraft, City Destination) MostProfitableRoute(
-        AirlineSeat seat, IReadOnlyList<City> allCities, IReadOnlyList<AircraftType> fleet)
+        AirlineSeat seat, IReadOnlyList<City> allCities, IReadOnlyList<AircraftType> fleet, IReadOnlyList<DemandGrowthPoint> growthSchedule)
     {
-        var demandModel = new GravityDemandModel(enableHubDemandBonus: true);
+        var demandModel = Quarter1DemandModel(growthSchedule);
         var aircraftOptions = RegionalFleet.AppropriateAircraft(seat.HomeRegion, fleet, Timeline.StartYear)
             .OrderBy(a => a.RangeKm)
             .ThenBy(a => a.Id, StringComparer.Ordinal)
@@ -189,12 +210,12 @@ public static class StartingConditionsResolver
     /// real, shipped, unconditional behavior.
     /// </summary>
     public static AirlineStartingConditions ResolveWithMinProfitFraction(
-        AirlineSeat seat, IReadOnlyList<City> allCities, IReadOnlyList<AircraftType> fleet, double minProfitFraction)
+        AirlineSeat seat, IReadOnlyList<City> allCities, IReadOnlyList<AircraftType> fleet, double minProfitFraction, IReadOnlyList<DemandGrowthPoint> growthSchedule)
     {
         var cash = StartingCashFor(seat, allCities);
 
-        var demandModel = new GravityDemandModel(enableHubDemandBonus: true);
-        var (bestAircraft, bestDestination) = MostProfitableRoute(seat, allCities, fleet); // throws if nothing reachable at all
+        var demandModel = Quarter1DemandModel(growthSchedule);
+        var (bestAircraft, bestDestination) = MostProfitableRoute(seat, allCities, fleet, growthSchedule); // throws if nothing reachable at all
 
         var aircraftOptions = RegionalFleet.AppropriateAircraft(seat.HomeRegion, fleet, Timeline.StartYear)
             .OrderBy(a => a.RangeKm)
@@ -253,11 +274,11 @@ public static class StartingConditionsResolver
     /// condition as <see cref="Resolve"/>/<see cref="MostProfitableRoute"/>.
     /// </summary>
     public static AirlineStartingConditions ResolveWithWeightedRouteRandomness(
-        AirlineSeat seat, IReadOnlyList<City> allCities, IReadOnlyList<AircraftType> fleet, double weightExponent, SimRng rng)
+        AirlineSeat seat, IReadOnlyList<City> allCities, IReadOnlyList<AircraftType> fleet, double weightExponent, SimRng rng, IReadOnlyList<DemandGrowthPoint> growthSchedule)
     {
         var cash = StartingCashFor(seat, allCities);
 
-        var demandModel = new GravityDemandModel(enableHubDemandBonus: true);
+        var demandModel = Quarter1DemandModel(growthSchedule);
         var aircraftOptions = RegionalFleet.AppropriateAircraft(seat.HomeRegion, fleet, Timeline.StartYear)
             .OrderBy(a => a.RangeKm)
             .ThenBy(a => a.Id, StringComparer.Ordinal)
@@ -307,6 +328,30 @@ public static class StartingConditionsResolver
 
         return rankedCombinations[pickIndex];
     }
+
+    /// <summary>
+    /// The same demand model every real per-quarter call site
+    /// (<c>FullGameRunner</c>, <c>AeroNext.Sim</c>) builds for quarter 1 —
+    /// <paramref name="growthSchedule"/> and <see cref="Timeline.StartYear"/>
+    /// resolve <c>historical_events.json</c>'s authored, city/region-scoped
+    /// 1955 demand suppression (e.g. Shanghai's Maoist-era "closed economy"
+    /// entry, a real 0.3x multiplier), and
+    /// <see cref="GravityDemandModel.AustralAsiaTunedIntraRegionMultipliers"/>
+    /// is the real shipped baseline every quarter applies regardless of any
+    /// QA-harness tuning. Before this, every method here built a bare
+    /// <c>new GravityDemandModel(enableHubDemandBonus: true)</c> with no
+    /// schedule at all — invisible to those suppression entries, so a
+    /// profitability ranking could chase a city's *mature* demand weight
+    /// while the real quarter-1 market only delivers a fraction of it. A
+    /// real trace (docs/OPEN_WORK.md) found this exact gap driving most of
+    /// the "always optimal" regression: fuk→pvg's static estimate saw
+    /// 27,939 passengers/quarter; the real quarter-1 market, with Shanghai's
+    /// 0.3x multiplier applied, delivers exactly 8,382 — an oversized
+    /// aircraft chasing demand that was never really there.
+    /// </summary>
+    private static GravityDemandModel Quarter1DemandModel(IReadOnlyList<DemandGrowthPoint> growthSchedule) =>
+        new(schedule: growthSchedule, year: Timeline.StartYear, enableHubDemandBonus: true,
+            intraRegionMultipliers: GravityDemandModel.AustralAsiaTunedIntraRegionMultipliers);
 
     private static Money StartingCashFor(AirlineSeat seat, IReadOnlyList<City> allCities) =>
         Money.FromDollars((long)Math.Round(

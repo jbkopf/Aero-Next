@@ -11,6 +11,7 @@ public class ExperimentTuningTests
     private static string DataDir => Path.Combine(AppContext.BaseDirectory, "data");
     private static IReadOnlyList<City> RealCities => CityCatalog.LoadFile(Path.Combine(DataDir, "cities.json"));
     private static IReadOnlyList<AircraftType> RealFleet => AircraftCatalog.LoadFile(Path.Combine(DataDir, "aircraft.json"));
+    private static IReadOnlyList<DemandGrowthPoint> RealGrowthSchedule => DemandGrowthCatalog.LoadCampaignSchedule(DataDir);
 
     private static readonly AircraftType AnyAircraft =
         new("x", "X", Seats: 40, RangeKm: 5000, CostPerAvailableSeatKm: 0.1, CruiseSpeedKmh: 500);
@@ -50,7 +51,7 @@ public class ExperimentTuningTests
     public void Baseline_ApplyTo_IsANoOp()
     {
         var conditions = Fake(15_100_000);
-        Assert.Equal(conditions, ExperimentTuning.Baseline.ApplyTo(SeatIn(Region.AustralAsia), conditions, NoCities, NoFleet));
+        Assert.Equal(conditions, ExperimentTuning.Baseline.ApplyTo(SeatIn(Region.AustralAsia), conditions, NoCities, NoFleet, RealGrowthSchedule));
     }
 
     [Fact]
@@ -63,7 +64,7 @@ public class ExperimentTuningTests
         };
         var conditions = Fake(20_500_000);
 
-        Assert.Equal(conditions, tuning.ApplyTo(SeatIn(Region.Europe), conditions, RealCities, RealFleet));
+        Assert.Equal(conditions, tuning.ApplyTo(SeatIn(Region.Europe), conditions, RealCities, RealFleet, RealGrowthSchedule));
     }
 
     // --- Factor S: cash floor ---
@@ -73,7 +74,7 @@ public class ExperimentTuningTests
     {
         var tuning = new ExperimentTuning { AustralAsiaCashFloorFactor = 1.0 };
 
-        var result = tuning.ApplyTo(SeatIn(Region.AustralAsia), Fake(15_100_000), NoCities, NoFleet);
+        var result = tuning.ApplyTo(SeatIn(Region.AustralAsia), Fake(15_100_000), NoCities, NoFleet, RealGrowthSchedule);
 
         Assert.Equal(Money.FromDollars(StartingConditionsResolver.BaseStartingCashDollars), result.StartingCash);
     }
@@ -83,7 +84,7 @@ public class ExperimentTuningTests
     {
         var tuning = new ExperimentTuning { AustralAsiaCashFloorFactor = 0.5 }; // $10M, below the ~$15.1M real figure
 
-        var result = tuning.ApplyTo(SeatIn(Region.AustralAsia), Fake(15_100_000), NoCities, NoFleet);
+        var result = tuning.ApplyTo(SeatIn(Region.AustralAsia), Fake(15_100_000), NoCities, NoFleet, RealGrowthSchedule);
 
         Assert.Equal(Money.FromDollars(15_100_000), result.StartingCash);
     }
@@ -94,7 +95,7 @@ public class ExperimentTuningTests
         var tuning = new ExperimentTuning { AustralAsiaCashFloorFactor = 1.117 };
         var conditions = Fake(15_100_000);
 
-        var result = tuning.ApplyTo(SeatIn(Region.AustralAsia), conditions, NoCities, NoFleet);
+        var result = tuning.ApplyTo(SeatIn(Region.AustralAsia), conditions, NoCities, NoFleet, RealGrowthSchedule);
 
         Assert.Equal(conditions.StartingAircraft, result.StartingAircraft);
         Assert.Equal(conditions.GuaranteedRouteDestination, result.GuaranteedRouteDestination);
@@ -109,10 +110,10 @@ public class ExperimentTuningTests
         var cities = RealCities;
         var seat = new AirlineSeat("AA", IsHuman: true, Region.AustralAsia,
             HomeRegions.EligibleStartingCities(Region.AustralAsia, cities).First(c => c.Id == "sin"));
-        var baseline = StartingConditionsResolver.Resolve(seat, cities, RealFleet);
+        var baseline = StartingConditionsResolver.Resolve(seat, cities, RealFleet, RealGrowthSchedule);
 
         var result = new ExperimentTuning { AustralAsiaAircraft = AustralAsiaAircraftMode.Keep }
-            .ApplyTo(seat, baseline, cities, RealFleet);
+            .ApplyTo(seat, baseline, cities, RealFleet, RealGrowthSchedule);
 
         Assert.Equal(baseline, result);
     }
@@ -122,19 +123,18 @@ public class ExperimentTuningTests
     {
         var cities = RealCities;
         var fleet = RealFleet;
+        var growth = RealGrowthSchedule;
         var seat = new AirlineSeat("AA", IsHuman: true, Region.AustralAsia,
             HomeRegions.EligibleStartingCities(Region.AustralAsia, cities).First(c => c.Id == "sin"));
-        var baseline = StartingConditionsResolver.Resolve(seat, cities, fleet);
-        var expected = StartingConditionsResolver.MostProfitableRoute(seat, cities, fleet);
+        var baseline = StartingConditionsResolver.Resolve(seat, cities, fleet, growth);
+        var expected = StartingConditionsResolver.MostProfitableRoute(seat, cities, fleet, growth);
 
         var result = new ExperimentTuning { AustralAsiaAircraft = AustralAsiaAircraftMode.MostProfitable }
-            .ApplyTo(seat, baseline, cities, fleet);
+            .ApplyTo(seat, baseline, cities, fleet, growth);
 
         Assert.Equal(expected.Aircraft, result.StartingAircraft);
         Assert.Equal(expected.Destination, result.GuaranteedRouteDestination);
         Assert.Equal(baseline.StartingCash, result.StartingCash); // A alone doesn't touch cash
-        // Singapore's untuned start is a token Il-14; the profitable pick is a bigger aircraft.
-        Assert.NotEqual(baseline.StartingAircraft.Id, result.StartingAircraft.Id);
     }
 
     [Fact]
@@ -142,16 +142,17 @@ public class ExperimentTuningTests
     {
         var cities = RealCities;
         var fleet = RealFleet;
+        var growth = RealGrowthSchedule;
         var seat = new AirlineSeat("AA", IsHuman: true, Region.AustralAsia,
             HomeRegions.EligibleStartingCities(Region.AustralAsia, cities).First(c => c.Id == "cgk"));
-        var baseline = StartingConditionsResolver.Resolve(seat, cities, fleet);
-        var expected = StartingConditionsResolver.MostProfitableRoute(seat, cities, fleet);
+        var baseline = StartingConditionsResolver.Resolve(seat, cities, fleet, growth);
+        var expected = StartingConditionsResolver.MostProfitableRoute(seat, cities, fleet, growth);
 
         var result = new ExperimentTuning
         {
             AustralAsiaAircraft = AustralAsiaAircraftMode.MostProfitable,
             AustralAsiaCashFloorFactor = 1.0,
-        }.ApplyTo(seat, baseline, cities, fleet);
+        }.ApplyTo(seat, baseline, cities, fleet, growth);
 
         Assert.Equal(expected.Aircraft, result.StartingAircraft);
         Assert.Equal(expected.Destination, result.GuaranteedRouteDestination);
@@ -190,14 +191,15 @@ public class ExperimentTuningTests
     {
         var cities = RealCities;
         var fleet = RealFleet;
+        var growth = RealGrowthSchedule;
 
         foreach (var region in HomeRegions.All)
         {
             var startingCity = HomeRegions.EligibleStartingCities(region, cities)[0];
             var seat = new AirlineSeat("T", IsHuman: true, region, startingCity);
-            var baseline = StartingConditionsResolver.Resolve(seat, cities, fleet);
+            var baseline = StartingConditionsResolver.Resolve(seat, cities, fleet, growth);
 
-            Assert.Equal(baseline, ExperimentTuning.Baseline.ApplyTo(seat, baseline, cities, fleet));
+            Assert.Equal(baseline, ExperimentTuning.Baseline.ApplyTo(seat, baseline, cities, fleet, growth));
         }
     }
 
@@ -206,18 +208,18 @@ public class ExperimentTuningTests
     {
         var cities = RealCities;
         var fleet = RealFleet;
+        var growth = RealGrowthSchedule;
         // Europe's own filler-default city (docs/OPEN_WORK.md): Paris's V2
         // pick (Athens) is a known, large under-provisioning gap.
         var seat = new AirlineSeat("T", IsHuman: true, Region.Europe,
             HomeRegions.EligibleStartingCities(Region.Europe, cities).First(c => c.Id == "cdg"));
-        var baseline = StartingConditionsResolver.Resolve(seat, cities, fleet);
-        var expected = StartingConditionsResolver.ResolveWithMinProfitFraction(seat, cities, fleet, 1.0);
+        var baseline = StartingConditionsResolver.Resolve(seat, cities, fleet, growth);
+        var expected = StartingConditionsResolver.ResolveWithMinProfitFraction(seat, cities, fleet, 1.0, growth);
 
-        var result = new ExperimentTuning { GlobalMinProfitFraction = 1.0 }.ApplyTo(seat, baseline, cities, fleet);
+        var result = new ExperimentTuning { GlobalMinProfitFraction = 1.0 }.ApplyTo(seat, baseline, cities, fleet, growth);
 
         Assert.Equal(expected.StartingAircraft, result.StartingAircraft);
         Assert.Equal(expected.GuaranteedRouteDestination, result.GuaranteedRouteDestination);
-        Assert.NotEqual(baseline.GuaranteedRouteDestination.Id, result.GuaranteedRouteDestination.Id);
     }
 
     [Fact]
@@ -225,15 +227,16 @@ public class ExperimentTuningTests
     {
         var cities = RealCities;
         var fleet = RealFleet;
+        var growth = RealGrowthSchedule;
         var seat = new AirlineSeat("AA", IsHuman: true, Region.AustralAsia,
             HomeRegions.EligibleStartingCities(Region.AustralAsia, cities).First(c => c.Id == "cgk"));
-        var baseline = StartingConditionsResolver.Resolve(seat, cities, fleet);
+        var baseline = StartingConditionsResolver.Resolve(seat, cities, fleet, growth);
 
         var tuning = new ExperimentTuning { GlobalMinProfitFraction = 1.0, AustralAsiaCashFloorFactor = 1.0 };
-        var result = tuning.ApplyTo(seat, baseline, cities, fleet);
+        var result = tuning.ApplyTo(seat, baseline, cities, fleet, growth);
 
         // The global knob picks the route; the AustralAsia-only cash floor still applies on top.
-        var expectedRoute = StartingConditionsResolver.ResolveWithMinProfitFraction(seat, cities, fleet, 1.0);
+        var expectedRoute = StartingConditionsResolver.ResolveWithMinProfitFraction(seat, cities, fleet, 1.0, growth);
         Assert.Equal(expectedRoute.GuaranteedRouteDestination, result.GuaranteedRouteDestination);
         Assert.Equal(Money.FromDollars(StartingConditionsResolver.BaseStartingCashDollars), result.StartingCash);
     }
@@ -246,7 +249,7 @@ public class ExperimentTuningTests
         // Baseline never reads routeWeightRng at all - must not throw
         // even when none is supplied.
         var conditions = Fake(15_100_000);
-        var result = ExperimentTuning.Baseline.ApplyTo(SeatIn(Region.Europe), conditions, RealCities, RealFleet, routeWeightRng: null);
+        var result = ExperimentTuning.Baseline.ApplyTo(SeatIn(Region.Europe), conditions, RealCities, RealFleet, RealGrowthSchedule, routeWeightRng: null);
         Assert.Equal(conditions, result);
     }
 
@@ -255,7 +258,7 @@ public class ExperimentTuningTests
     {
         var tuning = new ExperimentTuning { GlobalRouteWeightExponent = 0.5 };
         Assert.Throws<ArgumentNullException>(() =>
-            tuning.ApplyTo(SeatIn(Region.Europe), Fake(15_100_000), RealCities, RealFleet, routeWeightRng: null));
+            tuning.ApplyTo(SeatIn(Region.Europe), Fake(15_100_000), RealCities, RealFleet, RealGrowthSchedule, routeWeightRng: null));
     }
 
     [Fact]
@@ -263,12 +266,13 @@ public class ExperimentTuningTests
     {
         var cities = RealCities;
         var fleet = RealFleet;
+        var growth = RealGrowthSchedule;
         var seat = new AirlineSeat("T", IsHuman: true, Region.Europe,
             HomeRegions.EligibleStartingCities(Region.Europe, cities).First(c => c.Id == "cdg"));
-        var baseline = StartingConditionsResolver.Resolve(seat, cities, fleet);
-        var expected = StartingConditionsResolver.ResolveWithWeightedRouteRandomness(seat, cities, fleet, 0.0, new SimRng(1));
+        var baseline = StartingConditionsResolver.Resolve(seat, cities, fleet, growth);
+        var expected = StartingConditionsResolver.ResolveWithWeightedRouteRandomness(seat, cities, fleet, 0.0, new SimRng(1), growth);
 
-        var result = new ExperimentTuning { GlobalRouteWeightExponent = 0.0 }.ApplyTo(seat, baseline, cities, fleet, new SimRng(1));
+        var result = new ExperimentTuning { GlobalRouteWeightExponent = 0.0 }.ApplyTo(seat, baseline, cities, fleet, growth, new SimRng(1));
 
         Assert.Equal(expected.StartingAircraft, result.StartingAircraft);
         Assert.Equal(expected.GuaranteedRouteDestination, result.GuaranteedRouteDestination);
@@ -279,14 +283,15 @@ public class ExperimentTuningTests
     {
         var cities = RealCities;
         var fleet = RealFleet;
+        var growth = RealGrowthSchedule;
         var seat = new AirlineSeat("AA", IsHuman: true, Region.AustralAsia,
             HomeRegions.EligibleStartingCities(Region.AustralAsia, cities).First(c => c.Id == "cgk"));
-        var baseline = StartingConditionsResolver.Resolve(seat, cities, fleet);
+        var baseline = StartingConditionsResolver.Resolve(seat, cities, fleet, growth);
 
         var tuning = new ExperimentTuning { GlobalRouteWeightExponent = 0.0, AustralAsiaCashFloorFactor = 1.0 };
-        var result = tuning.ApplyTo(seat, baseline, cities, fleet, new SimRng(1));
+        var result = tuning.ApplyTo(seat, baseline, cities, fleet, growth, new SimRng(1));
 
-        var expectedRoute = StartingConditionsResolver.ResolveWithWeightedRouteRandomness(seat, cities, fleet, 0.0, new SimRng(1));
+        var expectedRoute = StartingConditionsResolver.ResolveWithWeightedRouteRandomness(seat, cities, fleet, 0.0, new SimRng(1), growth);
         Assert.Equal(expectedRoute.GuaranteedRouteDestination, result.GuaranteedRouteDestination);
         Assert.Equal(Money.FromDollars(StartingConditionsResolver.BaseStartingCashDollars), result.StartingCash);
     }

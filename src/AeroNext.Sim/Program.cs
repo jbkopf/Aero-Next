@@ -575,7 +575,7 @@ var campaignSeats = campaignAirlineNames.Zip(campaignRegions, (name, region) =>
     return new AirlineSeat(name, IsHuman: false, region, startingCity);
 }).ToDictionary(s => s.AirlineName);
 
-var campaignConditions = campaignAirlineNames.ToDictionary(n => n, n => StartingConditionsResolver.Resolve(campaignSeats[n], cities, fleetCatalog));
+var campaignConditions = campaignAirlineNames.ToDictionary(n => n, n => StartingConditionsResolver.Resolve(campaignSeats[n], cities, fleetCatalog, growthSchedule));
 var campaignHomeRegionByName = campaignAirlineNames.ToDictionary(n => n, n => campaignSeats[n].HomeRegion);
 var campaignRoutes = campaignAirlineNames.ToDictionary(n => n, _ => (IReadOnlyList<Route>)Array.Empty<Route>());
 var campaignCaps = campaignAirlineNames.ToDictionary(n => n, _ => QuarterEngine.BaseActionCap);
@@ -951,7 +951,7 @@ var setupSeats = GameSetup.CreateSeats(new[]
 
 foreach (var seat in setupSeats)
 {
-    var conditions = StartingConditionsResolver.Resolve(seat, cities, fleetCatalog);
+    var conditions = StartingConditionsResolver.Resolve(seat, cities, fleetCatalog, growthSchedule);
     Console.WriteLine($"  {seat.AirlineName,-18} cash {conditions.StartingCash,14}  " +
         $"{conditions.AircraftQuantity}x {conditions.StartingAircraft.Name,-20} -> {conditions.GuaranteedRouteDestination.Name}");
 
@@ -976,7 +976,7 @@ void RunSetupThroughQuarter1(string label, IReadOnlyList<HumanPlayerChoice> huma
 
     var seats = GameSetup.CreateSeats(humanChoices, cities);
 
-    var conditionsBySeat = seats.ToDictionary(s => s, s => StartingConditionsResolver.Resolve(s, cities, fleetCatalog));
+    var conditionsBySeat = seats.ToDictionary(s => s, s => StartingConditionsResolver.Resolve(s, cities, fleetCatalog, growthSchedule));
     var routesBySeat = new Dictionary<AirlineSeat, IReadOnlyList<Route>>();
     var appliedOrdersBySeat = new Dictionary<AirlineSeat, IReadOnlyList<QuarterOrder>>();
 

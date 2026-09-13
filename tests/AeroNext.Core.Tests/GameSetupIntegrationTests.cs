@@ -18,10 +18,10 @@ namespace AeroNext.Core.Tests;
 /// </summary>
 public class GameSetupIntegrationTests
 {
-    private static string CitiesDataPath => Path.Combine(AppContext.BaseDirectory, "data", "cities.json");
-    private static string AircraftDataPath => Path.Combine(AppContext.BaseDirectory, "data", "aircraft.json");
-    private static IReadOnlyList<City> Cities => CityCatalog.LoadFile(CitiesDataPath);
-    private static IReadOnlyList<AircraftType> Fleet => AircraftCatalog.LoadFile(AircraftDataPath);
+    private static string DataDir => Path.Combine(AppContext.BaseDirectory, "data");
+    private static IReadOnlyList<City> Cities => CityCatalog.LoadFile(Path.Combine(DataDir, "cities.json"));
+    private static IReadOnlyList<AircraftType> Fleet => AircraftCatalog.LoadFile(Path.Combine(DataDir, "aircraft.json"));
+    private static IReadOnlyList<DemandGrowthPoint> GrowthSchedule => DemandGrowthCatalog.LoadCampaignSchedule(DataDir);
     private static readonly GravityDemandModel DemandModel = new();
 
     public static IEnumerable<object[]> Configurations()
@@ -51,7 +51,7 @@ public class GameSetupIntegrationTests
         Assert.Equal(4, seats.Select(s => s.HomeRegion).Distinct().Count());
         Assert.Equal(4, seats.Select(s => s.StartingCity.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count());
 
-        var conditionsBySeat = seats.ToDictionary(s => s, s => StartingConditionsResolver.Resolve(s, Cities, Fleet));
+        var conditionsBySeat = seats.ToDictionary(s => s, s => StartingConditionsResolver.Resolve(s, Cities, Fleet, GrowthSchedule));
         var routesBySeat = new Dictionary<AirlineSeat, IReadOnlyList<Route>>();
         var appliedOrdersBySeat = new Dictionary<AirlineSeat, IReadOnlyList<QuarterOrder>>();
 

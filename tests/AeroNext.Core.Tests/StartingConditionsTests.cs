@@ -10,11 +10,16 @@ namespace AeroNext.Core.Tests;
 
 public class StartingConditionsTests
 {
-    private static string CitiesDataPath => Path.Combine(AppContext.BaseDirectory, "data", "cities.json");
-    private static string AircraftDataPath => Path.Combine(AppContext.BaseDirectory, "data", "aircraft.json");
-    private static IReadOnlyList<City> RealCities => CityCatalog.LoadFile(CitiesDataPath);
-    private static IReadOnlyList<AircraftType> RealFleet => AircraftCatalog.LoadFile(AircraftDataPath);
+    private static string DataDir => Path.Combine(AppContext.BaseDirectory, "data");
+    private static IReadOnlyList<City> RealCities => CityCatalog.LoadFile(Path.Combine(DataDir, "cities.json"));
+    private static IReadOnlyList<AircraftType> RealFleet => AircraftCatalog.LoadFile(Path.Combine(DataDir, "aircraft.json"));
+    private static IReadOnlyList<DemandGrowthPoint> RealGrowthSchedule => DemandGrowthCatalog.LoadCampaignSchedule(DataDir);
     private static readonly GravityDemandModel DemandModel = new();
+
+    /// <summary>The exact demand model Quarter1DemandModel builds internally — real-data growth schedule works fine against synthetic test cities too (no matching id, so their city/region multipliers stay neutral).</summary>
+    private static GravityDemandModel RealQuarter1DemandModel =>
+        new(schedule: RealGrowthSchedule, year: Timeline.StartYear, enableHubDemandBonus: true,
+            intraRegionMultipliers: GravityDemandModel.AustralAsiaTunedIntraRegionMultipliers);
 
     [Fact]
     public void Resolve_EveryEligibleStartingCity_ProducesAcceptedQuarter1Route()
@@ -23,6 +28,7 @@ public class StartingConditionsTests
         // (home region, eligible starting city) pair the real data offers.
         var cities = RealCities;
         var fleet = RealFleet;
+        var growth = RealGrowthSchedule;
 
         foreach (var region in HomeRegions.All)
         {
@@ -30,7 +36,7 @@ public class StartingConditionsTests
             {
                 var seat = new AirlineSeat("Test Airline", IsHuman: true, region, startingCity);
 
-                var conditions = StartingConditionsResolver.Resolve(seat, cities, fleet);
+                var conditions = StartingConditionsResolver.Resolve(seat, cities, fleet, growth);
 
                 Assert.True(conditions.StartingCash.Cents > 0,
                     $"{startingCity.Id}: starting cash must be positive.");
@@ -54,7 +60,7 @@ public class StartingConditionsTests
         var cities = RealCities;
         var seat = new AirlineSeat("Test", IsHuman: true, Region.EastAsia, HomeRegions.EligibleStartingCities(Region.EastAsia, cities)[0]);
 
-        var conditions = StartingConditionsResolver.Resolve(seat, cities, RealFleet);
+        var conditions = StartingConditionsResolver.Resolve(seat, cities, RealFleet, RealGrowthSchedule);
         var expectedFactor = RegionalEconomics.Factor(Region.EastAsia, cities);
 
         var expectedCash = Money.FromDollars((long)Math.Round(
@@ -69,8 +75,8 @@ public class StartingConditionsTests
         var cities = RealCities;
         var seat = new AirlineSeat("Test", IsHuman: true, Region.Europe, HomeRegions.EligibleStartingCities(Region.Europe, cities)[0]);
 
-        var first = StartingConditionsResolver.Resolve(seat, cities, RealFleet);
-        var second = StartingConditionsResolver.Resolve(seat, cities, RealFleet);
+        var first = StartingConditionsResolver.Resolve(seat, cities, RealFleet, RealGrowthSchedule);
+        var second = StartingConditionsResolver.Resolve(seat, cities, RealFleet, RealGrowthSchedule);
 
         Assert.Equal(first, second);
     }
@@ -95,7 +101,7 @@ public class StartingConditionsTests
         var fleet = new[] { small, large };
 
         var seat = new AirlineSeat("Test", IsHuman: true, Region.Europe, home);
-        var conditions = StartingConditionsResolver.Resolve(seat, cities, fleet);
+        var conditions = StartingConditionsResolver.Resolve(seat, cities, fleet, RealGrowthSchedule);
 
         Assert.Equal("zzz", conditions.GuaranteedRouteDestination.Id); // profitable, not alphabetically-first
     }
@@ -112,7 +118,7 @@ public class StartingConditionsTests
         var fleet = new[] { tooSmall, bigEnough };
 
         var seat = new AirlineSeat("Test", IsHuman: true, Region.Europe, a);
-        var conditions = StartingConditionsResolver.Resolve(seat, cities, fleet);
+        var conditions = StartingConditionsResolver.Resolve(seat, cities, fleet, RealGrowthSchedule);
 
         Assert.Equal("large", conditions.StartingAircraft.Id);
         Assert.Equal("b", conditions.GuaranteedRouteDestination.Id);
@@ -130,7 +136,7 @@ public class StartingConditionsTests
 
         var seat = new AirlineSeat("Test", IsHuman: true, Region.Europe, a);
 
-        Assert.Throws<InvalidOperationException>(() => StartingConditionsResolver.Resolve(seat, cities, fleet));
+        Assert.Throws<InvalidOperationException>(() => StartingConditionsResolver.Resolve(seat, cities, fleet, RealGrowthSchedule));
     }
 
     [Fact]
@@ -144,7 +150,38 @@ public class StartingConditionsTests
         var seat = new AirlineSeat("Test", IsHuman: true, Region.Europe, a);
 
         Assert.Throws<InvalidOperationException>(
-            () => StartingConditionsResolver.MostProfitableRoute(seat, cities, new[] { tooSmall }));
+            () => StartingConditionsResolver.MostProfitableRoute(seat, cities, new[] { tooSmall }, RealGrowthSchedule));
+    }
+
+    [Fact]
+    public void MostProfitableRoute_PicksACombinationSizedForTheRealSuppressedDemand_NotTheBareModelFigure()
+    {
+        // The root-cause fix (docs/OPEN_WORK.md): Shanghai's own 1955
+        // "Maoist-era closed economy" entry (historical_events.json) must
+        // suppress its demand here exactly the way it suppresses every
+        // real per-quarter call site's own demand model - a bare
+        // GravityDemandModel with no schedule/year can't see it at all.
+        var cities = RealCities;
+        var fleet = RealFleet;
+        var fukuoka = cities.First(c => c.Id == "fuk");
+        var shanghai = cities.First(c => c.Id == "pvg");
+        var seat = new AirlineSeat("Test", IsHuman: true, Region.EastAsia, fukuoka);
+
+        var bareModelDemand = new GravityDemandModel(enableHubDemandBonus: true).ForPair(fukuoka, shanghai).PassengersPerQuarter;
+        var scheduleAwareDemand = RealQuarter1DemandModel.ForPair(fukuoka, shanghai).PassengersPerQuarter;
+        Assert.True(scheduleAwareDemand < bareModelDemand,
+            "Shanghai's 1955 suppression multiplier should meaningfully reduce its real quarter-1 demand versus an unscheduled model.");
+
+        var (aircraft, destination) = StartingConditionsResolver.MostProfitableRoute(seat, cities, fleet, RealGrowthSchedule);
+
+        // Whatever combination wins, its own aircraft must be sized so the
+        // real (suppressed) demand for that specific pair actually fills a
+        // real majority of its capacity - not oversized for a phantom
+        // number the bare model would have reported.
+        var demandForChosenPair = RealQuarter1DemandModel.ForPair(fukuoka, destination).PassengersPerQuarter;
+        var route = new Route(fukuoka, destination, aircraft, AircraftCount: 1);
+        Assert.True(demandForChosenPair >= route.SeatsPerQuarter / 2,
+            $"chosen combination {aircraft.Id}->{destination.Id} is oversized for its own real demand ({demandForChosenPair} vs {route.SeatsPerQuarter} seats).");
     }
 
     // --- ResolveWithMinProfitFraction (docs/OPEN_WORK.md's filler-seat investigation) ---
@@ -154,7 +191,7 @@ public class StartingConditionsTests
         // "thin" is alphabetically first with positive (but small) demand,
         // so the heuristic always lands there; "rich" is the real best pick.
         var home = new City("home", "HOME", Region.Europe, 0, 0, 40, false, null);
-        var thin = new City("aaa", "THIN", Region.Europe, 0, 3, 15, false, null); // alphabetically first; small but real positive profit ($21,743)
+        var thin = new City("aaa", "THIN", Region.Europe, 0, 3, 15, false, null); // alphabetically first; small but real positive profit
         var rich = new City("zzz", "RICH", Region.Europe, 0, 2, 400, false, null);
         var aircraft = new AircraftType("ac", "AC", Seats: 100, RangeKm: 5000, ManufacturerRegion: Region.Europe, CostPerAvailableSeatKm: 0.1, CruiseSpeedKmh: 500);
         return (home, thin, rich, aircraft);
@@ -175,8 +212,8 @@ public class StartingConditionsTests
         var fleet = new[] { aircraft };
         var seat = new AirlineSeat("Test", IsHuman: true, Region.Europe, home);
 
-        var expected = StartingConditionsResolver.MostProfitableRoute(seat, cities, fleet);
-        var result = StartingConditionsResolver.ResolveWithMinProfitFraction(seat, cities, fleet, minProfitFraction: 1.0);
+        var expected = StartingConditionsResolver.MostProfitableRoute(seat, cities, fleet, RealGrowthSchedule);
+        var result = StartingConditionsResolver.ResolveWithMinProfitFraction(seat, cities, fleet, minProfitFraction: 1.0, RealGrowthSchedule);
 
         Assert.Equal(expected.Aircraft, result.StartingAircraft);
         Assert.Equal(expected.Destination, result.GuaranteedRouteDestination);
@@ -191,7 +228,7 @@ public class StartingConditionsTests
         var fleet = new[] { aircraft };
         var seat = new AirlineSeat("Test", IsHuman: true, Region.Europe, home);
 
-        var result = StartingConditionsResolver.ResolveWithMinProfitFraction(seat, cities, fleet, minProfitFraction: 0.0);
+        var result = StartingConditionsResolver.ResolveWithMinProfitFraction(seat, cities, fleet, minProfitFraction: 0.0, RealGrowthSchedule);
 
         Assert.Equal("aaa", result.GuaranteedRouteDestination.Id); // the heuristic's own (alphabetically-first) pick, kept
     }
@@ -203,15 +240,15 @@ public class StartingConditionsTests
         var cities = new[] { home, thin, rich };
         var fleet = new[] { aircraft };
         var seat = new AirlineSeat("Test", IsHuman: true, Region.Europe, home);
-        var demandModel = new GravityDemandModel(enableHubDemandBonus: true);
+        var demandModel = RealQuarter1DemandModel; // the exact model ResolveWithMinProfitFraction now builds internally
 
         var heuristicProfit = ProfitFor(home, thin, aircraft, demandModel);
         var bestProfit = ProfitFor(home, rich, aircraft, demandModel);
         var ratio = (double)heuristicProfit / bestProfit;
         Assert.InRange(ratio, 0.0, 0.99); // sanity: thin really is much weaker than rich
 
-        var justBelow = StartingConditionsResolver.ResolveWithMinProfitFraction(seat, cities, fleet, ratio - 0.01);
-        var justAbove = StartingConditionsResolver.ResolveWithMinProfitFraction(seat, cities, fleet, ratio + 0.01);
+        var justBelow = StartingConditionsResolver.ResolveWithMinProfitFraction(seat, cities, fleet, ratio - 0.01, RealGrowthSchedule);
+        var justAbove = StartingConditionsResolver.ResolveWithMinProfitFraction(seat, cities, fleet, ratio + 0.01, RealGrowthSchedule);
 
         Assert.Equal("aaa", justBelow.GuaranteedRouteDestination.Id);
         Assert.Equal("zzz", justAbove.GuaranteedRouteDestination.Id);
@@ -223,8 +260,8 @@ public class StartingConditionsTests
         var cities = RealCities;
         var seat = new AirlineSeat("Test", IsHuman: true, Region.EastAsia, HomeRegions.EligibleStartingCities(Region.EastAsia, cities)[0]);
 
-        var resolved = StartingConditionsResolver.Resolve(seat, cities, RealFleet);
-        var tuned = StartingConditionsResolver.ResolveWithMinProfitFraction(seat, cities, RealFleet, 0.5);
+        var resolved = StartingConditionsResolver.Resolve(seat, cities, RealFleet, RealGrowthSchedule);
+        var tuned = StartingConditionsResolver.ResolveWithMinProfitFraction(seat, cities, RealFleet, 0.5, RealGrowthSchedule);
 
         Assert.Equal(resolved.StartingCash, tuned.StartingCash);
         Assert.Equal(resolved.AircraftQuantity, tuned.AircraftQuantity);
@@ -241,7 +278,7 @@ public class StartingConditionsTests
         var seat = new AirlineSeat("Test", IsHuman: true, Region.Europe, a);
 
         Assert.Throws<InvalidOperationException>(
-            () => StartingConditionsResolver.ResolveWithMinProfitFraction(seat, cities, new[] { tooSmall }, 0.5));
+            () => StartingConditionsResolver.ResolveWithMinProfitFraction(seat, cities, new[] { tooSmall }, 0.5, RealGrowthSchedule));
     }
 
     // --- ResolveWithWeightedRouteRandomness (docs/OPEN_WORK.md's difficulty-setting future work) ---
@@ -253,11 +290,11 @@ public class StartingConditionsTests
         var cities = new[] { home, thin, rich };
         var fleet = new[] { aircraft };
         var seat = new AirlineSeat("Test", IsHuman: true, Region.Europe, home);
-        var expected = StartingConditionsResolver.MostProfitableRoute(seat, cities, fleet);
+        var expected = StartingConditionsResolver.MostProfitableRoute(seat, cities, fleet, RealGrowthSchedule);
 
         for (var seed = 0; seed < 20; seed++)
         {
-            var result = StartingConditionsResolver.ResolveWithWeightedRouteRandomness(seat, cities, fleet, weightExponent: 50.0, new SimRng(seed));
+            var result = StartingConditionsResolver.ResolveWithWeightedRouteRandomness(seat, cities, fleet, weightExponent: 50.0, new SimRng(seed), RealGrowthSchedule);
             Assert.Equal(expected.Aircraft, result.StartingAircraft);
             Assert.Equal(expected.Destination, result.GuaranteedRouteDestination);
         }
@@ -274,7 +311,7 @@ public class StartingConditionsTests
         var seenDestinations = new HashSet<string>();
         for (var seed = 0; seed < 50; seed++)
         {
-            var result = StartingConditionsResolver.ResolveWithWeightedRouteRandomness(seat, cities, fleet, weightExponent: 0.0, new SimRng(seed));
+            var result = StartingConditionsResolver.ResolveWithWeightedRouteRandomness(seat, cities, fleet, weightExponent: 0.0, new SimRng(seed), RealGrowthSchedule);
             seenDestinations.Add(result.GuaranteedRouteDestination.Id);
         }
 
@@ -292,7 +329,7 @@ public class StartingConditionsTests
         var pickCounts = new Dictionary<string, int> { ["aaa"] = 0, ["zzz"] = 0 };
         for (var seed = 0; seed < 200; seed++)
         {
-            var result = StartingConditionsResolver.ResolveWithWeightedRouteRandomness(seat, cities, fleet, weightExponent: 1.0, new SimRng(seed));
+            var result = StartingConditionsResolver.ResolveWithWeightedRouteRandomness(seat, cities, fleet, weightExponent: 1.0, new SimRng(seed), RealGrowthSchedule);
             pickCounts[result.GuaranteedRouteDestination.Id]++;
         }
 
@@ -308,8 +345,8 @@ public class StartingConditionsTests
         var fleet = new[] { aircraft };
         var seat = new AirlineSeat("Test", IsHuman: true, Region.Europe, home);
 
-        var first = StartingConditionsResolver.ResolveWithWeightedRouteRandomness(seat, cities, fleet, weightExponent: 0.7, new SimRng(99));
-        var second = StartingConditionsResolver.ResolveWithWeightedRouteRandomness(seat, cities, fleet, weightExponent: 0.7, new SimRng(99));
+        var first = StartingConditionsResolver.ResolveWithWeightedRouteRandomness(seat, cities, fleet, weightExponent: 0.7, new SimRng(99), RealGrowthSchedule);
+        var second = StartingConditionsResolver.ResolveWithWeightedRouteRandomness(seat, cities, fleet, weightExponent: 0.7, new SimRng(99), RealGrowthSchedule);
 
         Assert.Equal(first, second);
     }
@@ -320,8 +357,8 @@ public class StartingConditionsTests
         var cities = RealCities;
         var seat = new AirlineSeat("Test", IsHuman: true, Region.EastAsia, HomeRegions.EligibleStartingCities(Region.EastAsia, cities)[0]);
 
-        var resolved = StartingConditionsResolver.Resolve(seat, cities, RealFleet);
-        var tuned = StartingConditionsResolver.ResolveWithWeightedRouteRandomness(seat, cities, RealFleet, 0.5, new SimRng(1));
+        var resolved = StartingConditionsResolver.Resolve(seat, cities, RealFleet, RealGrowthSchedule);
+        var tuned = StartingConditionsResolver.ResolveWithWeightedRouteRandomness(seat, cities, RealFleet, 0.5, new SimRng(1), RealGrowthSchedule);
 
         Assert.Equal(resolved.StartingCash, tuned.StartingCash);
         Assert.Equal(resolved.AircraftQuantity, tuned.AircraftQuantity);
@@ -336,6 +373,7 @@ public class StartingConditionsTests
         // demand), never a made-up route.
         var cities = RealCities;
         var fleet = RealFleet;
+        var growth = RealGrowthSchedule;
         var rng = new SimRng(7);
 
         foreach (var region in HomeRegions.All)
@@ -343,7 +381,7 @@ public class StartingConditionsTests
             foreach (var startingCity in HomeRegions.EligibleStartingCities(region, cities))
             {
                 var seat = new AirlineSeat("Test Airline", IsHuman: true, region, startingCity);
-                var conditions = StartingConditionsResolver.ResolveWithWeightedRouteRandomness(seat, cities, fleet, weightExponent: 0.0, rng);
+                var conditions = StartingConditionsResolver.ResolveWithWeightedRouteRandomness(seat, cities, fleet, weightExponent: 0.0, rng, growth);
 
                 Assert.NotEqual(startingCity.Id, conditions.GuaranteedRouteDestination.Id);
                 Assert.Equal(region, conditions.GuaranteedRouteDestination.Region);
@@ -368,6 +406,6 @@ public class StartingConditionsTests
         var seat = new AirlineSeat("Test", IsHuman: true, Region.Europe, a);
 
         Assert.Throws<InvalidOperationException>(
-            () => StartingConditionsResolver.ResolveWithWeightedRouteRandomness(seat, cities, new[] { tooSmall }, 0.5, new SimRng(1)));
+            () => StartingConditionsResolver.ResolveWithWeightedRouteRandomness(seat, cities, new[] { tooSmall }, 0.5, new SimRng(1), RealGrowthSchedule));
     }
 }

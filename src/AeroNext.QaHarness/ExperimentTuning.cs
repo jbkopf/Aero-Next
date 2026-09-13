@@ -150,8 +150,9 @@ public sealed record ExperimentTuning
     /// The starting conditions for <paramref name="seat"/> with this
     /// tuning applied. <paramref name="baseline"/> is what
     /// <see cref="StartingConditionsResolver.Resolve"/> returned untouched;
-    /// <paramref name="allCities"/> and <paramref name="fleet"/> are the
-    /// same lists that resolver was handed. <paramref name="routeWeightRng"/>
+    /// <paramref name="allCities"/>, <paramref name="fleet"/>, and
+    /// <paramref name="growthSchedule"/> are the same arguments that
+    /// resolver was handed. <paramref name="routeWeightRng"/>
     /// is only read when <see cref="GlobalRouteWeightExponent"/> is set,
     /// pass the caller's own seeded <see cref="SimRng"/> (never a fresh
     /// ambient one), reused across every seat's own call for the game so
@@ -163,14 +164,14 @@ public sealed record ExperimentTuning
     /// </summary>
     public AirlineStartingConditions ApplyTo(
         AirlineSeat seat, AirlineStartingConditions baseline,
-        IReadOnlyList<City> allCities, IReadOnlyList<AircraftType> fleet,
+        IReadOnlyList<City> allCities, IReadOnlyList<AircraftType> fleet, IReadOnlyList<DemandGrowthPoint> growthSchedule,
         SimRng? routeWeightRng = null)
     {
         var result = baseline;
 
         if (GlobalMinProfitFraction is { } fraction)
         {
-            var tuned = StartingConditionsResolver.ResolveWithMinProfitFraction(seat, allCities, fleet, fraction);
+            var tuned = StartingConditionsResolver.ResolveWithMinProfitFraction(seat, allCities, fleet, fraction, growthSchedule);
             result = result with { StartingAircraft = tuned.StartingAircraft, GuaranteedRouteDestination = tuned.GuaranteedRouteDestination };
         }
 
@@ -181,7 +182,7 @@ public sealed record ExperimentTuning
                 throw new ArgumentNullException(nameof(routeWeightRng), $"{nameof(GlobalRouteWeightExponent)} is set but no RNG was supplied.");
             }
 
-            var tuned = StartingConditionsResolver.ResolveWithWeightedRouteRandomness(seat, allCities, fleet, weightExponent, routeWeightRng);
+            var tuned = StartingConditionsResolver.ResolveWithWeightedRouteRandomness(seat, allCities, fleet, weightExponent, routeWeightRng, growthSchedule);
             result = result with { StartingAircraft = tuned.StartingAircraft, GuaranteedRouteDestination = tuned.GuaranteedRouteDestination };
         }
 
@@ -192,7 +193,7 @@ public sealed record ExperimentTuning
 
         if (AustralAsiaAircraft == AustralAsiaAircraftMode.MostProfitable)
         {
-            var (aircraft, destination) = StartingConditionsResolver.MostProfitableRoute(seat, allCities, fleet);
+            var (aircraft, destination) = StartingConditionsResolver.MostProfitableRoute(seat, allCities, fleet, growthSchedule);
             result = result with { StartingAircraft = aircraft, GuaranteedRouteDestination = destination };
         }
 

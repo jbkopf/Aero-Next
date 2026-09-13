@@ -81,7 +81,7 @@ public static class FullGameRunner
 
         var conditionsByName = seats.ToDictionary(
             s => s.AirlineName,
-            s => tuning.ApplyTo(s, StartingConditionsResolver.Resolve(s, cities, fleetCatalog), cities, fleetCatalog, routeWeightRng));
+            s => tuning.ApplyTo(s, StartingConditionsResolver.Resolve(s, cities, fleetCatalog, growthSchedule), cities, fleetCatalog, growthSchedule, routeWeightRng));
         var seatByName = seats.ToDictionary(s => s.AirlineName);
         var homeRegionByName = seats.ToDictionary(s => s.AirlineName, s => s.HomeRegion);
         var startingCityIdByName = seats.ToDictionary(s => s.AirlineName, s => s.StartingCity.Id);
