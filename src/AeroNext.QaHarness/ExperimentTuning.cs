@@ -5,7 +5,18 @@ using AeroNext.Core.World;
 
 namespace AeroNext.QaHarness;
 
-/// <summary>How the AustralAsia starting (aircraft, destination) pair is picked — factor A.</summary>
+/// <summary>
+/// How the AustralAsia starting (aircraft, destination) pair is picked —
+/// factor A. Both values are a no-op relative to each other:
+/// <see cref="StartingConditionsResolver.Resolve"/> itself always makes
+/// the most-profitable pick (see that method's own doc comment) since it
+/// shipped as the real default, so <see cref="Keep"/> and
+/// <see cref="MostProfitable"/> compute the same route today. Kept,
+/// unremoved, purely so the field and its own tests stay meaningful
+/// history of the AustralAsia investigation
+/// (docs/AUSTRALASIA_TUNING_EXPERIMENTS.md) rather than silently going
+/// dead.
+/// </summary>
 public enum AustralAsiaAircraftMode
 {
     /// <summary>The shipped <see cref="StartingConditionsResolver.Resolve"/> pick.</summary>
@@ -62,10 +73,17 @@ public sealed record ExperimentTuning
 
     /// <summary>
     /// Factor A. How AustralAsia's starting aircraft + destination is
-    /// picked. Measured: net regression on its own (fixes the
-    /// capital-starved cities but the larger starting aircraft's higher
-    /// operating cost breaks several previously-safe ones — total
-    /// bankruptcy rose). Not adopted.
+    /// picked. Measured (against the old, heuristic-first
+    /// <see cref="StartingConditionsResolver.Resolve"/>): net regression
+    /// on its own (fixes the capital-starved cities but the larger
+    /// starting aircraft's higher operating cost breaks several
+    /// previously-safe ones — total bankruptcy rose). Not adopted at the
+    /// time — though the always-optimal default that later shipped
+    /// re-triggers exactly this AustralAsia failure mode at scale (see
+    /// <see cref="StartingConditionsResolver"/>'s own top-level doc
+    /// comment), not yet separately investigated. Now a no-op either
+    /// way — see <see cref="AustralAsiaAircraftMode"/>'s own doc comment
+    /// for why.
     /// </summary>
     public AustralAsiaAircraftMode AustralAsiaAircraft { get; init; } = AustralAsiaAircraftMode.Keep;
 
@@ -92,23 +110,33 @@ public sealed record ExperimentTuning
     /// byte-identical. When set, every seat's guaranteed route comes from
     /// <see cref="StartingConditionsResolver.ResolveWithMinProfitFraction"/>
     /// at this fraction instead — see that method's own doc comment for
-    /// what the value means (0.0 ≈ shipped Resolve; 1.0 = always the best
-    /// available combination, the already-rejected "V1" policy).
+    /// what the value means. At 1.0 this is now a no-op (
+    /// <see cref="StartingConditionsResolver.Resolve"/> already always
+    /// makes the best-combination pick this fraction would force); every
+    /// value below 1.0 keeps a heuristic pick this knob still computes
+    /// itself, byte-for-byte the alphabetical-first-city rule
+    /// <see cref="StartingConditionsResolver.Resolve"/> used to run before
+    /// it shipped as always-optimal (see that class's own top-level doc
+    /// comment).
     ///
-    /// Measured (4 levels, 0.3/0.5/0.7 vs baseline, 300 games): a cliff, not
-    /// a dial. Below 0.3 it's inert (most heuristic picks already clear
-    /// that bar). At 0.5+ total bankruptcy nearly quadruples (2.58%→9.50%),
-    /// and the damage lands hardest on EastAsia specifically — previously
-    /// the most bankruptcy-resistant region (4.5%) becomes the *most*
-    /// (25.9%) once its filler seat gets pushed onto a bigger, pricier
-    /// aircraft — the same "bigger starting aircraft, higher fixed cost"
-    /// failure mode AustralAsia's factor A hit, but universal instead of
-    /// scoped. Worse: even at 0.7, AustralAsia/SouthAmerica/SouthWestAsia's
-    /// own filler seats stay at exactly 0.0% win rate — their problem was
-    /// never really Q1 under-provisioning (their own dollar gaps were the
+    /// Measured against that old heuristic-first <c>Resolve</c> (4 levels,
+    /// 0.3/0.5/0.7 vs baseline, 300 games): a cliff, not a dial. Below 0.3
+    /// it's inert (most heuristic picks already clear that bar). At 0.5+
+    /// total bankruptcy nearly quadruples (2.58%→9.50%), and the damage
+    /// lands hardest on EastAsia specifically — previously the most
+    /// bankruptcy-resistant region (4.5%) becomes the *most* (25.9%) once
+    /// its filler seat gets pushed onto a bigger, pricier aircraft — the
+    /// same "bigger starting aircraft, higher fixed cost" failure mode
+    /// AustralAsia's factor A hit, but universal instead of scoped. Worse:
+    /// even at 0.7, AustralAsia/SouthAmerica/SouthWestAsia's own filler
+    /// seats stay at exactly 0.0% win rate — their problem was never
+    /// really Q1 under-provisioning (their own dollar gaps were the
     /// smallest of the six regions measured); it's the deeper filler
     /// co-occurrence effect this knob was never going to reach. Not
-    /// adopted at any level.
+    /// adopted at any level *at the time* — that measurement predates
+    /// both the always-optimal default and the demand-model fix, so it
+    /// no longer describes what 0.5/0.7 would do against today's shipped
+    /// baseline.
     /// </summary>
     public double? GlobalMinProfitFraction { get; init; }
 

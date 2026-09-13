@@ -451,14 +451,14 @@ un-scoped question if it's ever revisited.
   0.0/1.0 switch, wired through `ExperimentTuning.GlobalRouteWeightExponent`.
 
   **Tried making `Resolve` itself unconditionally optimal by default, per
-  direct instruction — measured, and reverted.** The old "V1" experiment
-  (`docs/AUSTRALASIA_TUNING_EXPERIMENTS.md`) had already rejected a
-  universal always-optimal policy once (fixed Europe, spiked EastAsia
-  bankruptcy to 24.5%). Worth re-testing since M65's AustralAsia tuning,
-  the SouthAmerica Belo Horizonte fix, and this doc's own gateway-relevance
-  fix (item 4, above) had all shipped since — maybe they'd defused it. A
-  real 300-game canonical sweep (seed 1, 244 quarters) with `Resolve` made
-  unconditionally optimal:
+  direct instruction — measured, reverted, root-caused, re-measured, and
+  shipped.** The old "V1" experiment (`docs/AUSTRALASIA_TUNING_EXPERIMENTS.md`)
+  had already rejected a universal always-optimal policy once (fixed
+  Europe, spiked EastAsia bankruptcy to 24.5%). Worth re-testing since
+  M65's AustralAsia tuning, the SouthAmerica Belo Horizonte fix, and this
+  doc's own gateway-relevance fix (item 4, above) had all shipped since —
+  maybe they'd defused it. A real 300-game canonical sweep (seed 1, 244
+  quarters) with `Resolve` made unconditionally optimal:
 
   | | Old heuristic (`Resolve`, shipped) | Unconditionally optimal |
   |---|---|---|
@@ -472,35 +472,76 @@ un-scoped question if it's ever revisited.
   Smaller than the original V1 shock (EastAsia 3.1%→10.7% here vs.
   4.5%→24.5% then), but the same failure mode, confirmed still real on
   the current codebase: Europe wins, EastAsia/AustralAsia pay for it, and
-  total bankruptcy nearly triples.
+  total bankruptcy nearly triples. A follow-up screen (150 games/level)
+  across `GlobalRouteWeightExponent` itself, hoping the dial had a safer
+  middle ground between uniform-random and always-optimal, found the
+  opposite of what a "difficulty dial" should look like — monotonic in
+  the wrong direction: total bankruptcy was *worse* toward the
+  uniform-random end (12.50% at exponent 0.5, 8.33% at 1.0) and only
+  improved moving toward always-optimal, plateauing around 4.8–5.2%
+  (exponent ≥ 2) — never back near the 1.50% heuristic baseline at any
+  point on the dial. `StartingConditionsResolver.Resolve` was reverted to
+  the original heuristic-first behavior at this point.
 
-  A follow-up screen (150 games/level) across `GlobalRouteWeightExponent`
-  itself, hoping the dial had a safer middle ground between uniform-random
-  and always-optimal, found the opposite of what a "difficulty dial"
-  should look like — **monotonic in the wrong direction**: total
-  bankruptcy is *worse* toward the uniform-random end (12.50% at exponent
-  0.5, 8.33% at 1.0) and only improves moving toward always-optimal,
-  plateauing around 4.8–5.2% (exponent ≥ 2) — never back near the 1.50%
-  heuristic baseline at any point on the dial. The reason: the shipped
-  heuristic isn't a "medium-random" policy sitting between bad-random and
-  optimal — it's a specific, decent pick (alphabetically-first
-  positive-demand city, re-optimized only when that loses money) that
-  beats *uniform-random-among-every-valid-combination* outright, because
-  most valid combinations are mediocre and only one or two per starting
-  city are genuinely strong. Unlike the filler-region exponent (a real,
-  validated tradeoff dial — see item 4's own write-up), this dial has no
-  safe middle: **`StartingConditionsResolver.Resolve` was reverted to the
-  original heuristic-first behavior**, unconditional, exactly as shipped
-  before this investigation.
-  `ResolveWithWeightedRouteRandomness`/`GlobalRouteWeightExponent` are kept,
-  tested, off by default — real scaffolding for a future difficulty
-  setting, not a validated safety knob, same disposition as every other
-  measured-and-rejected knob in `ExperimentTuning`.
+  **Root-caused instead of left rejected: a real bug, not an inherent
+  tradeoff.** Every route-picking method here built its own
+  `GravityDemandModel` with no `schedule`/`year` — invisible to
+  `historical_events.json`'s authored, city/region-scoped 1955 demand
+  suppression (e.g. Shanghai's Maoist-era "closed economy" entry, a real
+  0.3x multiplier the actual per-quarter market always applies).
+  "Most profitable" chased the biggest *mature* demand weight it could
+  see — disproportionately the same handful of cities carrying the
+  largest 1955 suppression — sizing an aircraft for demand that was never
+  really there on quarter 1. Traced directly: fuk→pvg's static estimate
+  saw 27,939 passengers/quarter; the real quarter-1 market delivers
+  exactly 8,382 (27,939 × 0.3) — a 22,000-seat-quarter aircraft chasing a
+  phantom number 3.3x too large. `StartingConditionsResolver.Quarter1DemandModel`
+  now builds the exact schedule/year-aware model every real per-quarter
+  call site already uses, closing the gap for every method here.
 
-  **Still missing before either mechanism is a real difficulty setting**:
-  neither is wired to an actual difficulty concept anywhere (no such
-  setting exists yet in `AeroNext.Sim`/the eventual Godot client). Likely
-  also wants a second dimension beyond setup — in-campaign strategy
+  Re-measured "always optimal" with the fix in place (300-game canonical
+  sweep):
+
+  | | Heuristic (with the fix) | Always optimal (with the fix) |
+  |---|---|---|
+  | Total bankruptcy | 1.75% | 2.33% |
+  | Avg game length | 145.1q | 137.8q |
+  | NorthAmerica bankrupt / win share | 0.0% / 15.3% | 0.4% / 18.0% |
+  | Europe bankrupt / win share | 0.0% / 4.7% | 1.0% / 6.3% |
+  | EastAsia bankrupt / win share | 4.5% / 59.3% | **2.1%** / 61.7% |
+  | SouthWestAsia bankrupt / win share | 0.0% / 9.7% | 3.8% / 8.0% |
+  | AustralAsia bankrupt / win share | 5.2% / 6.0% | **12.4%** / 4.0% |
+  | SouthAmerica bankrupt / win share | 1.3% / 5.0% | 1.3% / 2.0% |
+
+  EastAsia — the region the bug hurt worst before (10.7% pre-fix) — now
+  *improves* under always-optimal (4.5%→2.1%), safer than the heuristic
+  itself, once it can see the real, suppressed 1955 demand instead of a
+  phantom mature-market number. Doing the arithmetic on raw counts, every
+  region's own change nets out to +7 bankruptcies total (21→28), and
+  AustralAsia alone accounts for all seven of them (5→12) — every other
+  region is flat or a net improvement. **Shipped**: `Resolve` now always
+  makes the fully-optimal pick, unconditionally, as the real game's
+  default. AustralAsia's own remaining problem (a bigger, pricier aircraft
+  against the game's most capital-poor starting region — the same failure
+  mode the original Factor A experiment already flagged, now re-triggered
+  at scale) is a separate, real, not-yet-investigated issue, isolated and
+  well-understood enough to pursue on its own.
+
+  **The difficulty-setting hook survives the flip.**
+  `ResolveWithWeightedRouteRandomness`/`GlobalRouteWeightExponent` remain
+  the adjustable mechanism `Resolve`'s new default plugs into — a large
+  exponent converges on exactly what `Resolve` now always picks, a small
+  one diverges toward uniform-random. No real difficulty setting exists
+  yet to drive it (still not wired to an actual difficulty concept
+  anywhere — no such setting exists yet in `AeroNext.Sim`/the eventual
+  Godot client), but the structural guarantee holds: a future setting only
+  has to pick an exponent (and pass its own seeded `SimRng`) instead of
+  calling `Resolve` directly, no re-plumbing of `StartingConditionsResolver`
+  itself required. Its own exponent screen predates this demand-model fix
+  and hasn't been re-verified against it — treat the "low exponent is
+  worse, not safer" shape as a caveat for whoever designs the real
+  setting, not a re-confirmed guarantee at every level. Likely also wants
+  a second dimension beyond setup — in-campaign strategy
   aggressiveness/skill — but that's a separate, larger design question
   (`BASELINE_AI_ROADMAP.md`'s own strategy roster) not scoped here.
 - **Route-entry slot requirement** — done. Both halves closed:
@@ -827,21 +868,31 @@ un-scoped question if it's ever revisited.
      deterministic sim (an early change cascading into a different
      200-quarter trajectory for that specific seed), not a flaw in the
      fix.
-   - **Q1 route choice: a weighted-random mechanism built, validated, kept
-     off by default.** `StartingConditionsResolver.ResolveWithWeightedRouteRandomness`
-     is the mechanism half of the difficulty-setting item above — real,
-     tested, wired through `ExperimentTuning.GlobalRouteWeightExponent`.
-     Making `Resolve` itself unconditionally optimal (this mechanism's
-     own high-exponent endpoint, as the *default*) was tried per direct
-     instruction and reverted after measurement: total bankruptcy
-     1.50%→4.42% (EastAsia 3.1%→10.7%, AustralAsia 5.2%→15.5%), the same
-     failure mode the old "V1" experiment found, smaller but still real.
-     A follow-up exponent screen found no safer middle ground either —
-     bankruptcy gets *worse* toward the uniform-random end, not better,
-     and only approaches (never beats) the old heuristic baseline near
-     the fully-optimal end. Full write-up, numbers, and the reasoning for
-     why this dial has no safe point: `GAME_SETUP_ROADMAP.md`'s own
-     "difficulty setting" item, below.
+   - **Q1 route choice: always-optimal shipped as the real default, root
+     cause fixed, difficulty-setting hook kept.** Making `Resolve` itself
+     unconditionally optimal was tried per direct instruction and
+     initially reverted: total bankruptcy 1.50%→4.42% (EastAsia
+     3.1%→10.7%, AustralAsia 5.2%→15.5%), the same failure mode the old
+     "V1" experiment found, smaller but still real. Traced to a real bug
+     rather than an inherent tradeoff — every route-picking method here
+     built its demand model blind to `historical_events.json`'s authored
+     1955 demand suppression (Shanghai's Maoist-era entry alone: a 3.3x
+     overestimate) — and fixed via
+     `StartingConditionsResolver.Quarter1DemandModel`. Re-measured with
+     the fix in place: total bankruptcy 1.75%→2.33%, but EastAsia now
+     *improves* under always-optimal (4.5%→2.1%) instead of driving the
+     regression; every region's own net change sums to +7 bankruptcies,
+     and AustralAsia alone accounts for all seven. `Resolve` now ships as
+     always-optimal for real.
+     `StartingConditionsResolver.ResolveWithWeightedRouteRandomness`/
+     `ExperimentTuning.GlobalRouteWeightExponent` remain the mechanism for
+     a future difficulty setting to dial this back — `Resolve`'s new
+     default is exactly that mechanism's own high-exponent endpoint, so no
+     re-plumbing is needed once a real setting exists to drive it. Full
+     write-up, numbers, and the reasoning for why the exponent dial's low
+     end isn't a validated "safer" endpoint (pre-fix measurement, not
+     re-verified): `GAME_SETUP_ROADMAP.md`'s own "difficulty setting" item,
+     below.
 
 ---
 

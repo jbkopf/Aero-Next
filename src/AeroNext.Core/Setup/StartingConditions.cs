@@ -52,53 +52,64 @@ namespace AeroNext.Core.Setup;
 /// option — a separate, harder problem (a data or catalog gap, not a
 /// selection one) left open.
 ///
-/// **"Always optimal" tried again, re-rejected.** The old "V1" experiment
-/// (docs/AUSTRALASIA_TUNING_EXPERIMENTS.md) measured making every
-/// airline's Q1 pick unconditionally optimal and rejected it — fixed
-/// Europe harder but spiked EastAsia bankruptcy to 24.5%. Per direct
-/// instruction this was tried again on the current codebase (after M65's
-/// AustralAsia tuning, the SouthAmerica Belo Horizonte fix, and this
-/// file's own sibling gateway-negotiation reachability fix in
-/// <c>RapidExpansionStrategy</c>/<c>BalancedGrowthStrategy</c> had all
-/// shipped, in case those changes had defused the old failure mode). They
-/// hadn't: a real 300-game sweep with <see cref="Resolve"/> made
-/// unconditionally optimal showed total bankruptcy 1.50%→4.42%
-/// (EastAsia 3.1%→10.7%, AustralAsia 5.2%→15.5%), Europe still the one
-/// clear winner (0.0%→0.5% bankrupt, win share 5.7%→12.3%). A follow-up
-/// screen across <see cref="ResolveWithWeightedRouteRandomness"/>'s own
-/// exponent, hoping for a safer middle ground, found the opposite of a
-/// dial: total bankruptcy is monotonically *worse* toward the
-/// uniform-random end (12.5% at exponent 0.5) and only improves toward
-/// the optimal end, plateauing around 4.8–5.2% — never back near 1.50% at
-/// any exponent. The old heuristic below isn't a "medium-random" policy;
-/// it's a specific, decent pick that beats uniform-random-among-all-valid-
-/// combos, because most valid combos are mediocre and only one or two per
-/// city are genuinely strong. <see cref="Resolve"/> therefore stays on the
-/// heuristic below, unconditionally, exactly as it always has;
-/// <see cref="ResolveWithWeightedRouteRandomness"/> is kept, tested, and
-/// off by default — real scaffolding for whenever a future difficulty
-/// setting exists, same disposition as every other measured-and-rejected
-/// knob in <see cref="ExperimentTuning"/>.
+/// **"Always optimal" tried, rejected, root-caused, and now shipped.**
+/// The old "V1" experiment (docs/AUSTRALASIA_TUNING_EXPERIMENTS.md)
+/// measured making every airline's Q1 pick unconditionally optimal and
+/// rejected it — fixed Europe harder but spiked EastAsia bankruptcy to
+/// 24.5%. Tried again on the current codebase (after M65's AustralAsia
+/// tuning, the SouthAmerica Belo Horizonte fix, and this file's own
+/// sibling gateway-negotiation reachability fix had all shipped): still
+/// bad (total bankruptcy 1.50%→4.42%, EastAsia 3.1%→10.7%, AustralAsia
+/// 5.2%→15.5%). Traced to a real bug rather than an inherent tradeoff:
+/// every method here built its demand model with no <c>schedule</c>/
+/// <c>year</c> — invisible to <c>historical_events.json</c>'s authored,
+/// city/region-scoped 1955 demand suppression (e.g. Shanghai's Maoist-era
+/// "closed economy" entry, a real 0.3x multiplier the actual per-quarter
+/// market always applies). "Most profitable" chased the biggest *mature*
+/// demand weight it could see — disproportionately the same handful of
+/// cities carrying the largest 1955 suppression — sizing an aircraft for
+/// demand that was never really there on quarter 1 (fuk→pvg's static
+/// estimate saw 27,939 passengers/quarter; the real quarter-1 market
+/// delivers exactly 8,382, i.e. 27,939 × 0.3). <see cref="Quarter1DemandModel"/>
+/// now builds the exact same schedule/year-aware model every real
+/// per-quarter call site already uses. Re-measured with the fix in place:
+/// total bankruptcy 1.75%→2.33%, but EastAsia — the region the bug hurt
+/// worst before — now *improves* under always-optimal (4.5%→2.1%, safer
+/// than the heuristic itself) once it can see the real, suppressed 1955
+/// demand instead of a phantom mature-market number. Every region's own
+/// change nets to +7 bankruptcies total, and AustralAsia alone accounts
+/// for all seven (5.2%→12.4%) — a separate capital-intensity problem
+/// (a bigger, pricier aircraft against the game's most capital-poor
+/// starting region), not a demand mismatch, not yet investigated.
 ///
-/// **Root-cause follow-up: a real bug, found tracing the regression
-/// above.** Every method here built its own demand model with no
-/// <c>schedule</c>/<c>year</c> — invisible to <c>historical_events.json</c>'s
-/// authored, city/region-scoped 1955 demand suppression (e.g. Shanghai's
-/// Maoist-era "closed economy" entry, a real 0.3x multiplier the actual
-/// per-quarter market always applies). "Most profitable" chases the
-/// biggest *mature* demand weight it can see, which is disproportionately
-/// the same handful of cities carrying the largest 1955 suppression —
-/// picking an oversized aircraft for demand that was never really there
-/// on quarter 1. Traced directly: fuk→pvg's static estimate saw 27,939
-/// passengers/quarter; the real quarter-1 market delivers exactly 8,382
-/// (27,939 × 0.3). <see cref="Quarter1DemandModel"/> now builds the exact
-/// same schedule/year-aware model every real per-quarter call site already
-/// uses, closing this gap for every method here, <see cref="Resolve"/>
-/// included (its own heuristic was always less exposed to this — it
-/// doesn't chase the biggest number — but isn't immune either). This is
-/// an independent, real correctness fix, not itself a re-attempt at
-/// making <see cref="Resolve"/> unconditionally optimal — see
-/// docs/OPEN_WORK.md for whatever re-measurement follows it.
+/// Per direct instruction, <see cref="Resolve"/> now ships as always
+/// optimal — <see cref="MostProfitableRoute"/>, unconditionally — given
+/// this net-positive, root-caused re-measurement. The old heuristic
+/// (smallest-range aircraft that can reach the alphabetically-first
+/// positive-demand eligible city, falling back to the best combination
+/// only when that loses money) is gone from <see cref="Resolve"/> itself;
+/// <see cref="ResolveWithMinProfitFraction"/> still has its own copy of
+/// it for the AustralAsia/SouthAmerica <see cref="ExperimentTuning"/>
+/// knobs that call it by name.
+///
+/// **The future-difficulty-setting hook.**
+/// <see cref="ResolveWithWeightedRouteRandomness"/> is the adjustable
+/// mechanism this always-optimal default plugs into: rank-weighted by
+/// <c>weightExponent</c>, converging on (large exponent) or diverging
+/// from (small exponent) exactly what <see cref="Resolve"/> now always
+/// picks. No real difficulty setting exists yet to drive it — this is
+/// the load-bearing structural guarantee that one can, later, without
+/// re-plumbing <see cref="StartingConditionsResolver"/> itself: a future
+/// setting only has to pick an exponent (and pass its own seeded
+/// <see cref="SimRng"/>) instead of calling <see cref="Resolve"/>
+/// directly. <see cref="ExperimentTuning.GlobalRouteWeightExponent"/> is
+/// today's only real caller, off by default, QA-harness-scoped. Its own
+/// exponent screen (pre-fix numbers, not yet re-verified against this
+/// demand-model fix) found the low-exponent end is *not* a "safer, more
+/// random" endpoint — total bankruptcy got worse toward uniform-random,
+/// not better, because most valid combinations are mediocre and only one
+/// or two per city are genuinely strong; treat that shape as a caveat for
+/// whoever designs the real setting, not a guarantee at every level.
 /// </summary>
 public sealed record AirlineStartingConditions(
     Money StartingCash,
@@ -111,59 +122,29 @@ public static class StartingConditionsResolver
     public const long BaseStartingCashDollars = 20_000_000;
     public const int StartingAircraftQuantity = 2;
 
+    /// <summary>
+    /// The real, shipped default: always the single most profitable
+    /// (aircraft, destination) combination — see this file's own doc
+    /// comment above for the full history of why. Byte-identical to
+    /// <see cref="MostProfitableRoute"/>, wrapped with starting cash.
+    /// </summary>
     public static AirlineStartingConditions Resolve(
         AirlineSeat seat, IReadOnlyList<City> allCities, IReadOnlyList<AircraftType> fleet, IReadOnlyList<DemandGrowthPoint> growthSchedule)
     {
         var cash = StartingCashFor(seat, allCities);
-
-        var demandModel = Quarter1DemandModel(growthSchedule);
-        var aircraftOptions = RegionalFleet.AppropriateAircraft(seat.HomeRegion, fleet, Timeline.StartYear)
-            .OrderBy(a => a.RangeKm)
-            .ThenBy(a => a.Id, StringComparer.Ordinal)
-            .ToList();
-        var destinationOptions = HomeRegions.EligibleStartingCities(seat.HomeRegion, allCities)
-            .Where(c => c.Id != seat.StartingCity.Id)
-            .ToList();
-
-        // The original selection: smallest-range aircraft that can reach
-        // the alphabetically-first positive-demand eligible city.
-        foreach (var aircraft in aircraftOptions)
-        {
-            var destination = destinationOptions
-                .Where(c => GreatCircle.DistanceKm(seat.StartingCity, c) <= aircraft.RangeKm)
-                .Where(c => demandModel.ForPair(seat.StartingCity, c).PassengersPerQuarter > 0)
-                .OrderBy(c => c.Id, StringComparer.Ordinal)
-                .FirstOrDefault();
-
-            if (destination is null)
-            {
-                continue;
-            }
-
-            // Only re-optimize when the original pick would lose money.
-            if (RouteProfit(seat.StartingCity, destination, aircraft, demandModel) >= 0)
-            {
-                return new AirlineStartingConditions(cash, aircraft, StartingAircraftQuantity, destination);
-            }
-
-            var best = MostProfitableCombination(seat, destinationOptions, aircraftOptions, demandModel);
-            return new AirlineStartingConditions(cash, best.Aircraft, StartingAircraftQuantity, best.Destination);
-        }
-
-        throw new InvalidOperationException(
-            $"No appropriate {Timeline.StartYear} aircraft for {seat.HomeRegion} can open a positive-demand route " +
-            $"from {seat.StartingCity.Id} to any other eligible city in the region.");
+        var (aircraft, destination) = MostProfitableRoute(seat, allCities, fleet, growthSchedule);
+        return new AirlineStartingConditions(cash, aircraft, StartingAircraftQuantity, destination);
     }
 
     /// <summary>
     /// The most profitable starting (aircraft, destination) combination
-    /// outright — no smallest-aircraft / alphabetical-first heuristic, just
-    /// the pick <see cref="Resolve"/> already falls back to when its
-    /// heuristic pick loses money, applied unconditionally. Measured as a
-    /// universal policy twice now (docs/AUSTRALASIA_TUNING_EXPERIMENTS.md's
-    /// "V1", and again on the current codebase — see this file's own
-    /// top-level doc comment) and rejected both times. Same option set,
-    /// same tie-break, same "nothing reachable" throw as <see cref="Resolve"/>.
+    /// outright — no smallest-aircraft / alphabetical-first heuristic. This
+    /// is exactly what <see cref="Resolve"/> itself now always returns; it
+    /// stays a separate public method because <see cref="ExperimentTuning"/>'s
+    /// AustralAsia-only "factor A" knob and
+    /// <see cref="ResolveWithMinProfitFraction"/>'s upper bracket both still
+    /// call it by name. Same option set, same tie-break, same "nothing
+    /// reachable" throw as <see cref="Resolve"/>.
     /// </summary>
     public static (AircraftType Aircraft, City Destination) MostProfitableRoute(
         AirlineSeat seat, IReadOnlyList<City> allCities, IReadOnlyList<AircraftType> fleet, IReadOnlyList<DemandGrowthPoint> growthSchedule)
@@ -194,20 +175,21 @@ public static class StartingConditionsResolver
     /// <summary>
     /// A generalized guaranteed-route selection, bracketing the two
     /// already-measured extremes (docs/OPEN_WORK.md's filler-seat
-    /// investigation): keeps the heuristic pick — the same
-    /// smallest-aircraft / alphabetical-first choice <see cref="Resolve"/>
-    /// itself uses — only when its profit is at least
-    /// <paramref name="minProfitFraction"/> of the best available
-    /// (aircraft, destination) combination's profit; otherwise uses the
-    /// best combination outright. <c>minProfitFraction</c> near 0.0
-    /// reduces to (but is not byte-identical with — see the degenerate
-    /// both-non-positive case below) <see cref="Resolve"/>'s own shipped
+    /// investigation): keeps its own copy of the heuristic pick — the
+    /// same smallest-aircraft / alphabetical-first choice
+    /// <see cref="Resolve"/> used before it was promoted to always-optimal
+    /// (see this file's own top-level doc comment) — only when its profit
+    /// is at least <paramref name="minProfitFraction"/> of the best
+    /// available (aircraft, destination) combination's profit; otherwise
+    /// uses the best combination outright. <c>minProfitFraction</c> near
+    /// 0.0 reduces to (but is not byte-identical with — see the degenerate
+    /// both-non-positive case below) <see cref="Resolve"/>'s old
     /// "keep if profit ≥ $0" rule; 1.0 reduces to
-    /// <see cref="MostProfitableRoute"/> always winning (the "V1" variant
-    /// the AustralAsia investigation measured and rejected as a universal
-    /// policy — see docs/AUSTRALASIA_TUNING_EXPERIMENTS.md). A separate,
-    /// parallel method — never touches <see cref="Resolve"/>, which stays
-    /// real, shipped, unconditional behavior.
+    /// <see cref="MostProfitableRoute"/> always winning, which
+    /// <see cref="Resolve"/> itself now already does unconditionally. A
+    /// separate, parallel method, kept for the AustralAsia/SouthAmerica
+    /// <see cref="ExperimentTuning"/> tuning knobs that still call it by
+    /// name; never touches <see cref="Resolve"/> itself.
     /// </summary>
     public static AirlineStartingConditions ResolveWithMinProfitFraction(
         AirlineSeat seat, IReadOnlyList<City> allCities, IReadOnlyList<AircraftType> fleet, double minProfitFraction, IReadOnlyList<DemandGrowthPoint> growthSchedule)
@@ -249,27 +231,29 @@ public static class StartingConditionsResolver
     }
 
     /// <summary>
-    /// docs/OPEN_WORK.md's "difficulty setting" future-work note: a
-    /// genuinely weighted (not binary) pick among every reachable,
-    /// positive-demand (aircraft, destination) combination, biased toward
-    /// the best by <paramref name="weightExponent"/> — the same
-    /// rank-weighted idiom <see cref="GameSetup"/>'s own
-    /// <c>fillerWeightExponent</c> applies to region wealth, applied here
-    /// to route profitability rank instead. Combination rank <c>i</c>
-    /// (0 = <see cref="MostProfitableRoute"/>'s own pick, richest profit
-    /// first) gets weight <c>1 / (i+1)^weightExponent</c>: at
+    /// docs/OPEN_WORK.md's "difficulty setting" future-work note, and
+    /// <see cref="Resolve"/>'s own future-difficulty-setting hook (see this
+    /// file's own top-level doc comment): a genuinely weighted (not binary)
+    /// pick among every reachable, positive-demand (aircraft, destination)
+    /// combination, biased toward the best by
+    /// <paramref name="weightExponent"/> — the same rank-weighted idiom
+    /// <see cref="GameSetup"/>'s own <c>fillerWeightExponent</c> applies to
+    /// region wealth, applied here to route profitability rank instead.
+    /// Combination rank <c>i</c> (0 = <see cref="MostProfitableRoute"/>'s
+    /// own pick, richest profit first) gets weight
+    /// <c>1 / (i+1)^weightExponent</c>: a large exponent converges on
+    /// exactly what <see cref="Resolve"/> now always picks; at
     /// <paramref name="weightExponent"/> = 0.0 every valid combination is
-    /// equally likely; as it grows, the distribution concentrates on the
-    /// best pick. <b>Not a safety dial</b> — a real screening sweep (this
-    /// file's own top-level doc comment) found total bankruptcy gets
-    /// *worse*, not better, toward the uniform-random end (12.5% at
-    /// exponent 0.5) and only improves toward the fully-optimal end,
-    /// plateauing around 4.8–5.2% — never back near <see cref="Resolve"/>'s
-    /// own ~1.5% baseline at any exponent. Kept, tested, off by default —
-    /// real scaffolding for a future difficulty setting, not a validated
-    /// safety knob. Uses <paramref name="rng"/> explicitly, per CLAUDE.md's
-    /// determinism rule (no ambient randomness; same seed, same pick,
-    /// always). A separate, parallel method — never touches
+    /// equally likely. <b>The low end is not a validated "easier/safer"
+    /// endpoint</b> — a screening sweep taken before the demand-model fix
+    /// above found total bankruptcy got *worse*, not better, toward
+    /// uniform-random (12.5% at exponent 0.5), because most valid
+    /// combinations are mediocre and only one or two per city are
+    /// genuinely strong; not yet re-verified against the fix. Kept,
+    /// tested, off by default — real scaffolding for whoever designs the
+    /// real setting. Uses <paramref name="rng"/> explicitly, per
+    /// CLAUDE.md's determinism rule (no ambient randomness; same seed,
+    /// same pick, always). A separate, parallel method — never touches
     /// <see cref="Resolve"/>. Throws under the same "nothing reachable"
     /// condition as <see cref="Resolve"/>/<see cref="MostProfitableRoute"/>.
     /// </summary>
