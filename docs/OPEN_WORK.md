@@ -893,6 +893,67 @@ un-scoped question if it's ever revisited.
      end isn't a validated "safer" endpoint (pre-fix measurement, not
      re-verified): `GAME_SETUP_ROADMAP.md`'s own "difficulty setting" item,
      below.
+   - **AustralAsia's own remaining regression (5.2%→12.4% under
+     always-optimal): two distinct real mechanisms, traced directly, one
+     fix landed so far.**
+     - **Mechanism A — self-contestation.** "Most profitable" is
+       deterministic, so whenever two starting cities are each other's own
+       best real option (Saipan↔Guam; also observed for Tehran↔Baghdad in
+       SouthWestAsia), *both* airlines pick the same pair in reverse and
+       fly it with the same aircraft. `CompetitiveMarket.Resolve` then
+       splits real demand ~50/50 between them, against a start each sized
+       for monopoly capacity — traced directly: real Q1 load factor ~68%
+       instead of 100%, net income already negative before any external
+       shock. Root cause of *this specific* traced case turned out to be
+       `AeroNext.QaHarness.GameConfigGenerator` — its own uniform-random
+       region draw for simulated humans, independent per seat with no
+       collision awareness, frequently lands 2-3 of the 4 seats in the
+       same region purely by chance. **Fixed a related, real gap in real
+       gameplay code while investigating**: `GameSetup.CreateSeats`'s own
+       AI filler previously never shared a region with a human at all (an
+       accidental side effect of "richest *unclaimed* region," never a
+       deliberate design) — now an AI filler's region draw runs over every
+       home region, human-occupied or not; only AI-vs-AI collisions stay
+       impossible. Measured (300-game canonical sweep): total bankruptcy
+       2.33%→3.00%, driven by NorthAmerica (0.4%→1.4%) and EastAsia
+       (2.1%→3.2%) — the richest regions, now shared far more often
+       (EastAsia's own seat count rose 290→341 across the same 300 games),
+       which almost certainly re-triggers Mechanism A there instead of
+       fixing it, since nothing here touches the underlying deterministic-
+       collision problem. AustralAsia's own rate was unchanged (12.4%→12.4%),
+       confirming its own bankruptcies were never from this fix's own case
+       (human-vs-AI overlap) to begin with — they're `GameConfigGenerator`'s
+       human-vs-human collisions, a QA-harness-only generator question,
+       still open. Shipped anyway, per direct instruction — a real,
+       correct capability (AI can now compete for a human's own region, as
+       intended) whose net aggregate effect is presently negative until
+       Mechanism A itself is addressed.
+     - **Mechanism B — the idle second aircraft gets a bad second route.**
+       No demand mismatch in the solo (non-contested) case: Q1 alone is
+       fine, even better than the heuristic's (+$447K vs. +$167K). By
+       quarter 5 `RapidExpansionStrategy` — the only Starting-era strategy
+       eligible that early — reuses the idle second dc7 (owned since Q1,
+       never purchased again) for a second route, and that route's own
+       marginal economics are negative (≈$1.18M marginal revenue against
+       ≈$2.4M marginal cost), flipping a profitable single-route network
+       into a structural ≈$1M/quarter loss that compounds via borrowing
+       until bankruptcy around quarter 30-32. Traced to
+       `RapidExpansionStrategy.FindBestUnservedPairCrossRegionFirst`
+       (`src/AeroNext.Core/Ai/RapidExpansionStrategy.cs`): ranks candidate
+       pairs by `AiToolkit.EffectiveDemandScore` (raw demand × a hub bonus)
+       filtered only by `aircraft.RangeKm` reachability — no comparison
+       anywhere against the aircraft's own `SeatsPerQuarter`, so a fixed,
+       oversized idle aircraft can get pointed at a pair that can't fill
+       it. `BalancedGrowthStrategy`/`NetworkOptimizerStrategy` (MidGame+)
+       and `DomesticProfitOptimizerStrategy` (the other Starting-era
+       strategy) already do real profit/capacity-aware matching via
+       `AiToolkit.FindMostProfitablePair`/`EstimatedRealProfit` —
+       `RapidExpansionStrategy` deliberately doesn't, by its own documented
+       design intent ("expand as fast as possible... worry less about
+       individual route profitability"). Not yet fixed; a capacity-
+       matching pass for `RapidExpansionStrategy`'s own idle-fleet reuse
+       path is the natural next step, flagged for whoever picks this up
+       next.
 
 ---
 
