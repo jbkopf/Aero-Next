@@ -928,6 +928,52 @@ un-scoped question if it's ever revisited.
        correct capability (AI can now compete for a human's own region, as
        intended) whose net aggregate effect is presently negative until
        Mechanism A itself is addressed.
+
+       **Contested-vs-uncontested breakdown, 300-game canonical sweep**:
+       confirms Mechanism A is the dominant driver everywhere it can
+       reach. Uncontested games (all 4 seats in distinct regions, 146/300):
+       0.86% total bankruptcy — the real baseline. Every region's own rate
+       jumps well above that the moment it's contested: NorthAmerica
+       3.61% (40 games), Europe 0.00% (14 games), EastAsia 8.80% (58
+       games — contested most often, since it's rich and both humans and
+       the filler fix above now reach for it), SouthWestAsia 11.76% (17
+       games), SouthAmerica 0.00% (26 games), AustralAsia **21.74%** (10
+       games) — contested *least* often but hurt *worst*, consistent with
+       its own thin starting cash absorbing a demand split worse than any
+       other region.
+
+       **Directly verified, not inferred**: across all 300 games,
+       AustralAsia holds 97 total seats and every single one is human
+       (`IsHuman: true`); zero are AI filler. Structural, not incidental —
+       AustralAsia ranks 5th or 6th of 6 home regions by
+       `RegionalEconomics.Factor`, and the deterministic filler (the only
+       kind any of these sweeps exercise; `fillerRegionRng` is still off
+       by default, wired to nothing real) only ever takes the *richest*
+       remaining regions, at most 4 of them — AustralAsia never clears
+       that bar regardless of human occupancy. So every one of
+       AustralAsia's own contested games is two or more *humans*
+       independently landing there via `GameConfigGenerator`'s own
+       uncoordinated random draw, and the filler-AI fix above is
+       completely orthogonal to it.
+
+       **User's own call, given this: not worth pursuing further for
+       AustralAsia specifically.** Real human players independently
+       choosing the same low-value region simultaneously is unlikely once
+       the real UI surfaces enough information (regional economics,
+       other players' visible commitments) to discourage it — unlike
+       `GameConfigGenerator`'s own QA-only draw, which has no such
+       awareness and no reason to avoid it. Since AI filler can't reach
+       AustralAsia at all today, a real game's own AustralAsia airline
+       should generally go uncontested through its fragile early game,
+       only meeting real rivals there later once it has a stronger
+       network to absorb the shock. This means the AustralAsia bankruptcy
+       figures in this section's own sweeps (12.4%/15.5%/21.74%
+       depending on which round) are real numbers for the QA harness's
+       own stress-test distribution, but likely overstate a real game's
+       actual risk — recorded here so a future reader doesn't re-alarm on
+       them without this context. Mechanism A stays a real, worth-fixing
+       problem for the regions filler *can* reach (NorthAmerica/EastAsia
+       above), just not framed as an AustralAsia-specific one anymore.
      - **Mechanism B — the idle second aircraft gets a bad second route.**
        No demand mismatch in the solo (non-contested) case: Q1 alone is
        fine, even better than the heuristic's (+$447K vs. +$167K). By
