@@ -38,7 +38,7 @@ public class RapidExpansionStrategyTests
         // pair, not the already-served one.
         var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
         var near = MakeCity("near", Region.NorthAmerica, 1, 1, 5); // already served - low weight so it doesn't make an attractive *second* leg for other candidates
-        var far = MakeCity("far", Region.NorthAmerica, 5, 5, 20); // new-pair candidate
+        var far = MakeCity("far", Region.NorthAmerica, 5, 5, 30); // new-pair candidate - weight clears MinLoadFactorForNewPair's own floor (~56% LF at this weight, comfortably above 40%)
         var cities = new[] { home, near, far };
         var aircraft = new AircraftType("t", "Test", Seats: 140);
         var existing = new[] { new Route(home, near, aircraft, AircraftCount: 1) };
@@ -568,7 +568,7 @@ public class RapidExpansionStrategyTests
         // needs a genuinely mixed idle fleet to exercise both outcomes of
         // that equality check.
         var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
-        var far = MakeCity("far", Region.NorthAmerica, 40, 40, 50); // long distance
+        var far = MakeCity("far", Region.NorthAmerica, 40, 40, 400); // long distance; weight clears MinLoadFactorForNewPair's own floor (~57% LF for "long" at this weight, comfortably above 40%)
         var cities = new[] { home, far };
         var shortRange = new AircraftType("short", "Short", Seats: 140, RangeKm: 100); // can't reach "far"
         var longRange = new AircraftType("long", "Long", Seats: 140, RangeKm: 10_000);
@@ -581,6 +581,58 @@ public class RapidExpansionStrategyTests
 
         var routeOrder = Assert.Single(orders.OfType<RouteOrder>());
         Assert.Equal("long", routeOrder.Aircraft.Id);
+    }
+
+    // --- MinLoadFactorForNewPair (docs/OPEN_WORK.md's capacity-mismatch follow-up) ---
+
+    [Fact]
+    public void DecideOrders_IdleAircraftGrosslyOversizedForTheOnlyReachablePair_SkipsRatherThanCommitting()
+    {
+        // Real, traced failure mode: an idle aircraft reused for whatever
+        // pair has the highest reachable raw demand, even when that
+        // aircraft's own capacity dwarfs it (26% load factor here) - a
+        // structural loss from the quarter it opens, since operating cost
+        // is charged on capacity offered, not seats filled. The fix: skip
+        // opening anything this quarter rather than commit to it. No
+        // era-available types either, so the buy-new fallback can't paper
+        // over the same gap.
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
+        var dest = MakeCity("dest", Region.NorthAmerica, 5, 5, 30); // 26.0% load factor for "big"
+        var cities = new[] { home, dest };
+        var big = new AircraftType("big", "Big", Seats: 300);
+        var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, big, quantity: 1, FleetOwnershipMode.Owned);
+
+        var context = MakeContext(Array.Empty<Route>(), cities, Array.Empty<AircraftType>(), Region.NorthAmerica, fleet, actionCap: 1);
+
+        var orders = Strategy.DecideOrders(context);
+
+        Assert.Empty(orders.OfType<RouteOrder>());
+        Assert.Empty(orders.OfType<AircraftOrder>());
+        Assert.Empty(orders.OfType<LeaseAircraftOrder>());
+    }
+
+    [Fact]
+    public void DecideOrders_IdleFleetHasAnOversizedAndAWellFittedType_PicksTheWellFittedOne()
+    {
+        // The positive case: with both an oversized idle unit (26% load
+        // factor, filtered) and a well-fitted one (100% load factor, the
+        // same pair fully saturates its own smaller capacity) idle at
+        // once, the strategy picks the one that can actually fill the
+        // route - not whichever happens to be bigger.
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
+        var dest = MakeCity("dest", Region.NorthAmerica, 5, 5, 30); // big: 26.0% LF (filtered); small: 100.0% LF
+        var cities = new[] { home, dest };
+        var big = new AircraftType("big", "Big", Seats: 300);
+        var small = new AircraftType("small", "Small", Seats: 40);
+        var withBig = FleetLedger.ApplyDelivery(AirlineFleet.Empty, big, quantity: 1, FleetOwnershipMode.Owned);
+        var fleet = FleetLedger.ApplyDelivery(withBig, small, quantity: 1, FleetOwnershipMode.Owned);
+
+        var context = MakeContext(Array.Empty<Route>(), cities, new[] { big, small }, Region.NorthAmerica, fleet, actionCap: 1);
+
+        var orders = Strategy.DecideOrders(context);
+
+        var routeOrder = Assert.Single(orders.OfType<RouteOrder>());
+        Assert.Equal("small", routeOrder.Aircraft.Id);
     }
 
     [Fact]

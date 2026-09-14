@@ -999,29 +999,74 @@ un-scoped question if it's ever revisited.
      - **Mechanism B — the idle second aircraft gets a bad second route.**
        No demand mismatch in the solo (non-contested) case: Q1 alone is
        fine, even better than the heuristic's (+$447K vs. +$167K). By
-       quarter 5 `RapidExpansionStrategy` — the only Starting-era strategy
-       eligible that early — reuses the idle second dc7 (owned since Q1,
-       never purchased again) for a second route, and that route's own
-       marginal economics are negative (≈$1.18M marginal revenue against
-       ≈$2.4M marginal cost), flipping a profitable single-route network
-       into a structural ≈$1M/quarter loss that compounds via borrowing
-       until bankruptcy around quarter 30-32. Traced to
-       `RapidExpansionStrategy.FindBestUnservedPairCrossRegionFirst`
-       (`src/AeroNext.Core/Ai/RapidExpansionStrategy.cs`): ranks candidate
+       quarter 5 the seat's own strategy reuses the idle second dc7 (owned
+       since Q1, never purchased again) for a second route, and that
+       route's own marginal economics are negative, flipping a profitable
+       single-route network into a structural ≈$1M/quarter loss that
+       compounds via borrowing until bankruptcy around quarter 30-32.
+
+       **First traced to `RapidExpansionStrategy.FindBestUnservedPairCrossRegionFirst`**
+       (`src/AeroNext.Core/Ai/RapidExpansionStrategy.cs`): ranked candidate
        pairs by `AiToolkit.EffectiveDemandScore` (raw demand × a hub bonus)
        filtered only by `aircraft.RangeKm` reachability — no comparison
        anywhere against the aircraft's own `SeatsPerQuarter`, so a fixed,
-       oversized idle aircraft can get pointed at a pair that can't fill
-       it. `BalancedGrowthStrategy`/`NetworkOptimizerStrategy` (MidGame+)
-       and `DomesticProfitOptimizerStrategy` (the other Starting-era
-       strategy) already do real profit/capacity-aware matching via
-       `AiToolkit.FindMostProfitablePair`/`EstimatedRealProfit` —
-       `RapidExpansionStrategy` deliberately doesn't, by its own documented
-       design intent ("expand as fast as possible... worry less about
-       individual route profitability"). Not yet fixed; a capacity-
-       matching pass for `RapidExpansionStrategy`'s own idle-fleet reuse
-       path is the natural next step, flagged for whoever picks this up
-       next.
+       oversized idle aircraft could get pointed at a pair that can't fill
+       it. **Fixed**: a new `MinLoadFactorForNewPair` (0.4) constant now
+       filters candidates inside that method, applied only to the
+       idle-fleet-reuse path (`FindBestUnservedPairCrossRegionFirstUsingIdleFleet`,
+       its one caller) — deliberately *not* the buy-new path below it.
+       Extending the same multi-type search to buy-new was tried first and
+       reverted after a real 300-game sweep: trying every era-available
+       type (not just the single biggest-range one buy-new has always
+       tried) let the strategy successfully *afford and open* routes far
+       more often — a cheaper, better-fitting type clears
+       `FinancialState.CanAfford` more easily than the single expensive
+       type it used to be stuck with — compounding into real
+       over-expansion for a strategy with no route cap by design.
+       Measured directly: SouthAmerica bankruptcy rose 1.3%→5.1%, traced
+       to a real seat (Lima) that opened 4 routes in 9 quarters instead of
+       the 2 it opened in the same window without the change, cumulative
+       operating cost outrunning revenue. Scoped back to idle-fleet reuse
+       only (the actual originally-traced bug) and re-measured: **total
+       bankruptcy and every region's own rate came back byte-identical to
+       the pre-fix baseline** (2.33% total, SouthAmerica back to 1.3%) —
+       the regression is gone, and the fix is a real, tested,
+       zero-regression correctness improvement, but has **no measurable
+       effect on this session's own 300-game sample** — a good outcome
+       for what it targeted, just a narrow one.
+
+       **Second, deeper trace found this specific traced case (Saipan)
+       isn't `RapidExpansionStrategy`'s doing at all.** Strategy-name
+       tracing showed the seat switches to `DomesticProfitOptimizerStrategy`
+       by quarter 5 (heavy Q2-4 losses drop `CashRatio`, and that
+       strategy's own `Suitability` is `1 - CashRatio` — lower cash reads
+       as *more* suitable) — `RapidExpansionStrategy` never gets the
+       chance to open the actual bad second route here. The real
+       mechanism is `DomesticProfitOptimizerStrategy`'s own Phase 1
+       (`FindMostProfitableDomesticPairAcrossTypes`, that class's own file):
+       ranks *which pair* wins by raw demand alone, deliberately capacity-
+       blind, by design — its own class doc comment documents **four
+       previously tried and reverted fixes** (ranking by real profit,
+       real captured demand, a minimum profitability floor, a load-factor-
+       derated ranking), all reverted after real 300-game sweeps because
+       this game's coarse, discrete aircraft catalog means "which pair
+       happens to have an available type near its own best fit" is an
+       accident of the catalog, not a real signal — comparing a fit-
+       sensitive number *across pairs* leaks that accident into which
+       pair gets chosen at all. Phase 2 (already real, cost-subtracted
+       profit-based) only ever picks the best *aircraft* for whichever
+       pair Phase 1 already locked in — it can't rescue a badly-chosen
+       pair. Not yet reattempted: the extensively-documented four-strikes
+       history is real prior art any fifth attempt needs to reckon with,
+       and the `RapidExpansionStrategy` episode just above independently
+       demonstrated the exact same "broadening a search space quietly
+       enables more/worse activity" failure shape firsthand. One
+       genuinely different angle worth trying if this gets picked back
+       up: a post-hoc "skip, don't downgrade" gate on the *already-chosen*
+       (pair, aircraft) from Phases 1+2 unmodified — refusing to act at
+       all when that specific combination's own load factor is
+       catastrophic, never influencing which pair wins the way all four
+       prior attempts did.
 
 ---
 

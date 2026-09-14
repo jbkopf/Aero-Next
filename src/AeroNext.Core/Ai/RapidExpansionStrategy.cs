@@ -122,8 +122,9 @@ public sealed class RapidExpansionStrategy : IAiStrategy
         // AllPairs's own canonical ordering has no idea which side that is.
         if (spent + 1 <= context.ActionCap)
         {
+            var idleTypes = context.OwnFleet.Idle.Where(u => !reservedUnitIds.Contains(u.Id)).Select(u => u.Type).Distinct().ToList();
             var idleBest = AiToolkit.FindBestUnservedPairTouchingWonSlot(context, reservedUnitIds)
-                ?? FindBestUnservedPairCrossRegionFirstUsingIdleFleet(context, reservedUnitIds, validOriginCityIds);
+                ?? FindBestUnservedPairCrossRegionFirstUsingIdleFleet(context, idleTypes, validOriginCityIds);
 
             if (idleBest is not null && AiToolkit.TryOrientFromValidOrigin(idleBest.Value.Pair, validOriginCityIds, out var origin, out var destination)
                 && BaselineAi.HasSlotAtEveryGateway(origin, destination, context.AvailableSlotsByCity, slotsReservedByCity)
@@ -265,12 +266,32 @@ public sealed class RapidExpansionStrategy : IAiStrategy
             .FirstOrDefault();
     }
 
-    /// <summary>Mirrors BaselineAi.FindBestUnservedPairUsingIdleFleet's shape, but cross-region candidates outrank intra-region ones before demand is even compared.</summary>
-    private static (PairDemand Pair, AircraftType Aircraft)? FindBestUnservedPairCrossRegionFirstUsingIdleFleet(StrategyContext context, IReadOnlySet<int> reservedUnitIds, IReadOnlySet<string> validOriginCityIds)
+    /// <summary>
+    /// Mirrors BaselineAi.FindBestUnservedPairUsingIdleFleet's shape, but
+    /// cross-region candidates outrank intra-region ones before demand is
+    /// even compared. Capacity-mismatch follow-up (docs/OPEN_WORK.md):
+    /// each type's own candidate now comes from
+    /// <see cref="FindBestUnservedPairCrossRegionFirst"/>, which screens
+    /// out any pair that type's own capacity can't come close to filling
+    /// - deliberately scoped to idle-fleet reuse only (this method's one
+    /// caller), not the buy-new path below: trying every era-available
+    /// type there too was tried and reverted after a real 300-game sweep
+    /// - it let the strategy successfully afford and open routes far more
+    /// often (a cheaper, better-fitting type clears
+    /// <see cref="FinancialState.CanAfford"/> more easily than the single
+    /// biggest-range type the buy-new path has always tried), compounding
+    /// into real over-expansion for a strategy with no route cap by
+    /// design - a different failure mode than the one this fix targets,
+    /// and this class already carries several other measured-and-reverted
+    /// attempts at changing this strategy's own growth pace (see the
+    /// class doc comment). Buying new stays exactly as narrow-search as
+    /// it always was; only which pair the single tried type is allowed to
+    /// propose changed.
+    /// </summary>
+    private static (PairDemand Pair, AircraftType Aircraft)? FindBestUnservedPairCrossRegionFirstUsingIdleFleet(
+        StrategyContext context, IReadOnlyList<AircraftType> idleTypes, IReadOnlySet<string> validOriginCityIds)
     {
-        var candidates = context.OwnFleet.Idle
-            .Where(u => !reservedUnitIds.Contains(u.Id))
-            .Select(u => u.Type)
+        var candidates = idleTypes
             .Distinct()
             .Select(type => (Pair: FindBestUnservedPairCrossRegionFirst(context, type, validOriginCityIds), Aircraft: type))
             .Where(c => c.Pair is not null)
@@ -295,6 +316,29 @@ public sealed class RapidExpansionStrategy : IAiStrategy
     }
 
     /// <summary>
+    /// Minimum load factor (real demand vs. this specific aircraft's own
+    /// quarter-1-style capacity, <c>Math.Min(demand, capacity) / capacity</c>)
+    /// a candidate pair must clear for <paramref name="aircraft"/> before
+    /// this method will ever propose it — the fix for a real, traced
+    /// failure mode (docs/OPEN_WORK.md): an idle aircraft reused (or a new
+    /// one bought) for whichever reachable pair has the highest *raw*
+    /// demand, with zero regard for whether that aircraft's own capacity
+    /// can come anywhere near filling it — traced directly: Saipan's own
+    /// idle second dc7 (80 seats, ~52,000 seats/quarter) pointed at a pair
+    /// real demand filled to a fraction of that, a structural
+    /// ≈$1M/quarter loss from the quarter it opened, not a slow-growing
+    /// one, because operating cost is charged on capacity offered, not
+    /// seats filled. Deliberately well below FareCalculator's own
+    /// break-even load factor (~77%, 1/1.3) — matching that bar would be
+    /// the "real profitability gate" already measured and rejected for
+    /// this strategy's own step 2 (see this class's own top-level doc
+    /// comment); this only screens out catastrophic mismatches, not
+    /// merely mediocre ones, keeping "expand fast, don't chase per-route
+    /// profit" intact everywhere above the floor.
+    /// </summary>
+    private const double MinLoadFactorForNewPair = 0.4;
+
+    /// <summary>
     /// M44: validOriginCityIds filters candidates to those touching a
     /// city this airline can legally originate a new route from - see
     /// AiToolkit.ValidOriginCityIds/TryOrientFromValidOrigin. M55: also
@@ -303,7 +347,10 @@ public sealed class RapidExpansionStrategy : IAiStrategy
     /// unlike DomesticProfitOptimizerStrategy) was the specific "known,
     /// accepted risk" M54 named but didn't fix: it could otherwise
     /// immediately re-propose a pair the shared toolkit just closed for
-    /// real, structural reasons.
+    /// real, structural reasons. Capacity-mismatch follow-up: also
+    /// requires <paramref name="aircraft"/>'s own load factor on the pair
+    /// to clear <see cref="MinLoadFactorForNewPair"/> - see that constant's
+    /// own doc comment.
     /// </summary>
     private static PairDemand? FindBestUnservedPairCrossRegionFirst(StrategyContext context, AircraftType aircraft, IReadOnlySet<string> validOriginCityIds)
     {
@@ -322,6 +369,7 @@ public sealed class RapidExpansionStrategy : IAiStrategy
             .Where(p => !recentlyClosed.Contains(QuarterEngine.NormalizedPairKey(p.Origin, p.Destination)))
             .Where(p => p.DistanceKm <= aircraft.RangeKm)
             .Where(p => validOriginCityIds.Contains(p.Origin.Id) || validOriginCityIds.Contains(p.Destination.Id))
+            .Where(p => p.PassengersPerQuarter >= MinLoadFactorForNewPair * new Route(p.Origin, p.Destination, aircraft, AircraftCount: 1).SeatsPerQuarter)
             .OrderByDescending(p => IsCrossRegion(p, context))
             .ThenByDescending(p => AiToolkit.EffectiveDemandScore(p, shareByCityId))
             .ThenBy(p => p.Origin.Id, StringComparer.Ordinal)
