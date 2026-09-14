@@ -210,54 +210,30 @@ public class GameSetupTests
     }
 
     [Fact]
-    public void CreateSeats_HumanSharesRegionWithAi_AiPicksTheRichestThreeRegionsOverall_IncludingTheHumansOwn()
+    public void CreateSeats_HumanSharesRegionWithAi_AiStillPicksRichestOtherUnclaimedRegion()
     {
-        // AI-vs-human region overlap is now legal: one human takes
-        // NorthAmerica (the richest region - see
-        // CreateSeats_ZeroHumans_AllFourSeatsAreDeterministicAi), so AI's
-        // own 3 picks are the three richest regions *overall*
-        // (NorthAmerica, EastAsia, SouthAmerica - the same richest-3 the
-        // zero-human case's own top-4 already established), not "the next
-        // three excluding NorthAmerica." NorthAmerica ends up doubly
-        // represented - one human seat, one AI seat.
+        // AI never contests a human's own region (a direct product/UX
+        // decision - see this class's own top-level doc comment). One
+        // human takes NorthAmerica (the richest region), so AI's 3 picks
+        // should be the next-richest three distinct, still-unclaimed
+        // regions - same "richest unclaimed" logic as the zero-human case,
+        // just starting from a smaller pool.
         var choices = new[] { new HumanPlayerChoice("Atlas Air", "ord") };
 
         var seats = GameSetup.CreateSeats(choices, RealCities);
 
         Assert.Equal(4, seats.Count);
-        Assert.Equal(2, seats.Count(s => s.HomeRegion == Region.NorthAmerica));
-        Assert.Equal(
-            new[] { Region.NorthAmerica, Region.NorthAmerica, Region.EastAsia, Region.SouthAmerica }.OrderBy(r => r),
-            seats.Select(s => s.HomeRegion).OrderBy(r => r));
+        Assert.Equal(1, seats.Count(s => s.HomeRegion == Region.NorthAmerica));
+        Assert.Equal(4, seats.Select(s => s.HomeRegion).Distinct().Count());
     }
 
     [Fact]
-    public void CreateSeats_HumanSharesRegionWithAi_AiPicksADifferentCityInThatRegion()
+    public void CreateSeats_TwoHumansClaimTheTwoRichestRegions_AiFillsTheNextTwoInstead()
     {
-        var choices = new[] { new HumanPlayerChoice("Atlas Air", "ord") }; // Chicago, not NorthAmerica's own richest city
-
-        var seats = GameSetup.CreateSeats(choices, RealCities);
-        var northAmericaSeats = seats.Where(s => s.HomeRegion == Region.NorthAmerica).ToList();
-
-        Assert.Equal(2, northAmericaSeats.Count);
-        Assert.Contains(northAmericaSeats, s => s.StartingCity.Id == "ord" && s.IsHuman);
-        // The AI seat lands on NorthAmerica's own richest *available* city
-        // (atl, per CreateSeats_ZeroHumans_PicksHighestDemandEligibleCityPerRegion)
-        // rather than colliding with the human's own pick.
-        Assert.Contains(northAmericaSeats, s => s.StartingCity.Id == "atl" && !s.IsHuman);
-    }
-
-    [Fact]
-    public void CreateSeats_TwoAiFillerSeats_NeverShareARegionWithEachOther()
-    {
-        // AI-vs-AI exclusivity is the one guarantee that survives: even
-        // though AI can now double up with a human, two AI seats in the
-        // same game are still always pairwise distinct by region. Two
-        // humans take the two richest regions overall (NorthAmerica,
-        // EastAsia); since human occupancy no longer excludes a region
-        // from AI's own pool, both AI seats land right back on those same
-        // two regions (still the richest available, by Factor) - not
-        // each other's.
+        // AI-vs-human exclusivity, extended: with both NorthAmerica and
+        // EastAsia (the two richest) already human-claimed, AI's own 2
+        // picks fall to the next tier down (SouthAmerica, Europe) rather
+        // than doubling up on either human's region.
         var choices = new[]
         {
             new HumanPlayerChoice("Atlas Air", "ord"),   // NorthAmerica
@@ -268,9 +244,8 @@ public class GameSetupTests
         var aiSeats = seats.Where(s => !s.IsHuman).ToList();
 
         Assert.Equal(2, aiSeats.Count);
-        Assert.Equal(2, aiSeats.Select(s => s.HomeRegion).Distinct().Count());
         Assert.Equal(
-            new[] { Region.NorthAmerica, Region.EastAsia }.OrderBy(r => r),
+            new[] { Region.SouthAmerica, Region.Europe }.OrderBy(r => r),
             aiSeats.Select(s => s.HomeRegion).OrderBy(r => r));
     }
 
@@ -395,34 +370,17 @@ public class GameSetupTests
     }
 
     [Fact]
-    public void CreateSeats_WithFillerRng_CanNowDrawAHumansOwnRegion_ButNeverRepeatsAmongAiSeatsThemselves()
+    public void CreateSeats_WithFillerRng_StillExcludesHumanClaimedRegions()
     {
-        // AI-vs-human overlap is legal (see the deterministic-path tests
-        // above); the weighted-random path only has to keep its own
-        // AI-vs-AI guarantee. A human takes Europe (mid-tier by Factor,
-        // real non-trivial weight), so across enough seeds the weighted
-        // draw should sometimes land an AI seat there too - proving the
-        // exclusion is really gone, not just untested - while every AI
-        // seat's own 3 regions stay pairwise distinct every single time.
         var choices = new[] { new HumanPlayerChoice("Human One", "cdg") }; // Europe
-        var sawAiInEurope = false;
 
-        for (var seed = 0; seed < 200; seed++)
+        for (var seed = 0; seed < 50; seed++)
         {
             var seats = GameSetup.CreateSeats(choices, RealCities, new SimRng(seed));
-            var aiSeats = seats.Where(s => !s.IsHuman).ToList();
 
             Assert.Equal(4, seats.Count);
-            Assert.Equal(3, aiSeats.Count);
-            Assert.Equal(3, aiSeats.Select(s => s.HomeRegion).Distinct().Count());
-
-            if (aiSeats.Any(s => s.HomeRegion == Region.Europe))
-            {
-                sawAiInEurope = true;
-            }
+            Assert.Equal(1, seats.Count(s => s.HomeRegion == Region.Europe)); // only the human's own seat
         }
-
-        Assert.True(sawAiInEurope, "an AI filler seat should be able to land in the human's own region at least once across 200 seeds.");
     }
 
     [Fact]
@@ -474,34 +432,5 @@ public class GameSetupTests
         var withExplicitOne = GameSetup.CreateSeats(Array.Empty<HumanPlayerChoice>(), RealCities, new SimRng(7), fillerWeightExponent: 1.0);
 
         Assert.Equal(withExplicitOne, withDefault);
-    }
-
-    /// <summary>
-    /// A minimal 6-region catalog (one city per region) with AustralAsia's
-    /// own single city given a far higher DemandWeight than every other
-    /// region's - guaranteeing it's the richest region overall, so the
-    /// deterministic richest-first AI draw reaches for it first. The real
-    /// dataset always has 6+ eligible cities per region, so this defensive
-    /// throw is unreachable there (at most 2 seats can ever want the same
-    /// region's city today) - this fixture is the only way to exercise it.
-    /// </summary>
-    private static IReadOnlyList<City> OneCityPerRegionWithAustralAsiaRichest() => new[]
-    {
-        new City("na1", "NA", Region.NorthAmerica, 0, 0, 10, false, null),
-        new City("eu1", "EU", Region.Europe, 0, 0, 10, false, null),
-        new City("ea1", "EA", Region.EastAsia, 0, 0, 10, false, null),
-        new City("swa1", "SWA", Region.SouthWestAsia, 0, 0, 10, false, null),
-        new City("aa1", "AA", Region.AustralAsia, 0, 0, 1000, false, null),
-        new City("sa1", "SA", Region.SouthAmerica, 0, 0, 10, false, null),
-    };
-
-    [Fact]
-    public void CreateSeats_NoEligibleCityLeftInAisOwnRegion_ThrowsAClearError()
-    {
-        var cities = OneCityPerRegionWithAustralAsiaRichest();
-        var choices = new[] { new HumanPlayerChoice("Atlas Air", "aa1") }; // takes AustralAsia's only eligible city
-
-        var ex = Assert.Throws<InvalidOperationException>(() => GameSetup.CreateSeats(choices, cities));
-        Assert.Contains("AustralAsia", ex.Message);
     }
 }

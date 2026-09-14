@@ -30,60 +30,54 @@ public sealed record AirlineSeat(string AirlineName, bool IsHuman, Region HomeRe
 /// Since the Asia region split (HomeRegions.All has 6 members for exactly 4
 /// player slots), this is a genuine draft rather than "one seat per region":
 /// humans claim any home region they like, and whichever slots remain go to
-/// the richest regions by RegionalEconomics.Factor, one per AI filler seat
-/// (never repeating a region another filler already took this game) — so
-/// not every home region appears in every game.
+/// the richest *unclaimed* regions by RegionalEconomics.Factor — so not
+/// every home region appears in every game.
 ///
-/// **Regions are no longer exclusive.** Multiple humans (or a human and an
-/// AI) can now share a home region, as long as their starting cities are
-/// distinct — CLAUDE.md's "a home region cannot fund a win" pillar already
-/// assumes rivals can converge on the same demand pool; a region was never
-/// meant to be a private lane.
-///
-/// **AI-vs-AI stays exclusive; AI-vs-human doesn't.** Each filler seat's
-/// own region draw (richest-first, or the weighted alternative below) now
-/// runs over every home region, not just ones no human already claimed —
-/// so an AI can land in a human's region when its own normal criteria
-/// (wealth, or a weighted roll) says that's the pick. Two AI fillers can
-/// never land in the *same* region, though: each draw removes its own
-/// pick from the pool the next AI draw sees, exactly as it always has —
-/// this is the one guarantee this change is actually about; previously
-/// the guarantee was accidental (AI's own candidate pool happened to
-/// exclude every human region too, so AI-vs-AI exclusivity and
-/// AI-never-shares-with-humans were the same mechanism). Note this is
-/// separate from — and doesn't fix — a related, real collision found
-/// tracing an AustralAsia bankruptcy regression (docs/OPEN_WORK.md): two
-/// *simulated human* seats (`AeroNext.QaHarness.GameConfigGenerator`'s
-/// own uniform-random region draw, used only to stress-test this method)
-/// independently landing on Saipan and Guam, each other's own "most
-/// profitable" route. That's a QA-harness generator question, not a
-/// CreateSeats one — same-region humans are legal, working-as-designed
-/// behavior here.
+/// **Regions are no longer exclusive between humans.** Multiple humans can
+/// share a home region, as long as their starting cities are distinct —
+/// CLAUDE.md's "a home region cannot fund a win" pillar already assumes
+/// rivals can converge on the same demand pool; a region was never meant to
+/// be a private lane between humans. **AI never contests a human's own
+/// region, though** — a direct product/UX decision, not a balance one: an
+/// AI seat competing with a human from turn one, in a region the human
+/// specifically chose, isn't a fair fight the human opted into the way two
+/// humans sharing a region (with the real UI expected to surface a warning
+/// about it — a tooltip or similar, out of this headless core's scope) are.
+/// AI filler's own region draw excludes every human-claimed region, exactly
+/// as it always has; AI-vs-AI collisions stay impossible too, by the same
+/// without-replacement draw. This was tried the other way once — letting
+/// filler reach for a human's own region under its normal richest-first
+/// criteria — and reverted after measurement showed a real regression
+/// (docs/OPEN_WORK.md): total bankruptcy 2.33%→3.00%, concentrated in the
+/// richest regions getting contested *more* often, not less, since nothing
+/// about that change addressed the underlying deterministic-collision
+/// problem it was meant to route around.
 /// </summary>
 public static class GameSetup
 {
     /// <param name="fillerRegionRng">
     /// docs/OPEN_WORK.md's filler-seat investigation: null (the default)
-    /// keeps this method's own long-shipped behavior — richest-region-
-    /// first (a human's own region no longer excludes it, only another AI
-    /// filler's own pick does), deterministic, byte-identical. When
-    /// supplied, each remaining slot instead draws a region by weighted
-    /// random (weight = <see cref="RegionalEconomics.Factor"/> raised to
+    /// keeps this method's own long-shipped behavior — richest-unclaimed-
+    /// region-first, deterministic, byte-identical. When supplied, each
+    /// remaining slot instead draws a region by weighted random (weight =
+    /// <see cref="RegionalEconomics.Factor"/> raised to
     /// <paramref name="fillerWeightExponent"/>) without replacement, via
     /// <see cref="WeightedRandomRegionsWithoutReplacement"/> — richer
     /// regions stay more likely, but AustralAsia/SouthWestAsia are no
     /// longer excluded from filler outright, and EastAsia/NorthAmerica no
-    /// longer co-occur as filler in almost every AI-heavy game. Per
-    /// CLAUDE.md's determinism rules, the caller's own seeded
-    /// <see cref="SimRng"/> — never a new ambient random source.
+    /// longer co-occur as filler in almost every AI-heavy game. Either way,
+    /// a human-claimed region is never a candidate at all — see this
+    /// class's own top-level doc comment for why. Per CLAUDE.md's
+    /// determinism rules, the caller's own seeded <see cref="SimRng"/> —
+    /// never a new ambient random source.
     /// </param>
     /// <param name="fillerWeightExponent">
     /// Only read when <paramref name="fillerRegionRng"/> is supplied. 1.0
     /// (the default) weights draws by the raw Factor. 0.0 makes every
-    /// region equally likely regardless of wealth (pure uniform random).
-    /// Above 1.0 sharpens the bias back toward richer regions without
-    /// returning to a strict deterministic cut — e.g. 2.0 squares each
-    /// region's own Factor before weighting.
+    /// unclaimed region equally likely regardless of wealth (pure uniform
+    /// random). Above 1.0 sharpens the bias back toward richer regions
+    /// without returning to a strict deterministic cut — e.g. 2.0 squares
+    /// each region's own Factor before weighting.
     /// </param>
     public static IReadOnlyList<AirlineSeat> CreateSeats(
         IReadOnlyList<HumanPlayerChoice> humanChoices, IReadOnlyList<City> allCities,
@@ -97,6 +91,7 @@ public static class GameSetup
         var citiesById = allCities.ToDictionary(c => c.Id, StringComparer.OrdinalIgnoreCase);
         var claimedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var claimedCityIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var claimedRegions = new HashSet<Region>();
         var humanSeats = new List<AirlineSeat>();
 
         foreach (var choice in humanChoices)
@@ -126,45 +121,30 @@ public static class GameSetup
                 throw new ArgumentException($"'{city.Id}' is already claimed by another airline.", nameof(humanChoices));
             }
 
+            claimedRegions.Add(city.Region);
             humanSeats.Add(new AirlineSeat(choice.AirlineName, IsHuman: true, city.Region, city));
         }
 
         var seats = new List<AirlineSeat>(humanSeats);
         var remainingSlots = 4 - seats.Count;
-
-        // Every home region is a candidate for filler, including ones a
-        // human already claimed — only another AI filler's own region is
-        // off the table (each region below is drawn without replacement
-        // from this same list, one per remaining slot).
-        var aiRegionCandidates = HomeRegions.All.ToList();
+        var unclaimedRegions = HomeRegions.All.Where(r => !claimedRegions.Contains(r)).ToList();
 
         var aiRegions = fillerRegionRng is null
-            ? aiRegionCandidates
+            ? unclaimedRegions
                 .Select(r => (Region: r, Factor: RegionalEconomics.Factor(r, allCities)))
                 .OrderByDescending(x => x.Factor)
                 .ThenBy(x => x.Region.ToString(), StringComparer.Ordinal)
                 .Take(remainingSlots)
                 .Select(x => x.Region)
-            : WeightedRandomRegionsWithoutReplacement(aiRegionCandidates, allCities, remainingSlots, fillerRegionRng, fillerWeightExponent)
+            : WeightedRandomRegionsWithoutReplacement(unclaimedRegions, allCities, remainingSlots, fillerRegionRng, fillerWeightExponent)
                 .OrderBy(r => r.ToString(), StringComparer.Ordinal);
 
         foreach (var region in aiRegions)
         {
-            // A human may already hold this region's own richest city
-            // (or another AI filler might, in principle, once ties are
-            // possible in a smaller catalog) - skip to the richest one
-            // actually still available rather than assuming the top pick
-            // is free.
             var startingCity = HomeRegions.EligibleStartingCities(region, allCities)
-                .Where(c => !claimedCityIds.Contains(c.Id))
                 .OrderByDescending(c => c.DemandWeight)
                 .ThenBy(c => c.Id, StringComparer.Ordinal)
-                .FirstOrDefault();
-
-            if (startingCity is null)
-            {
-                throw new InvalidOperationException($"No eligible starting city left unclaimed in {region} for an AI filler seat.");
-            }
+                .First();
 
             var aiName = $"{region} Air";
             if (!claimedNames.Add(aiName))
@@ -172,7 +152,6 @@ public static class GameSetup
                 throw new ArgumentException($"AI airline name '{aiName}' collides with a human-chosen name.", nameof(humanChoices));
             }
 
-            claimedCityIds.Add(startingCity.Id);
             seats.Add(new AirlineSeat(aiName, IsHuman: false, region, startingCity));
         }
 
@@ -190,9 +169,8 @@ public static class GameSetup
     /// regions stay more likely per draw, but every candidate has a real,
     /// nonzero chance — unlike a strict ranked cut. <paramref
     /// name="candidates"/> must already be in a stable, deterministic order
-    /// (it is — <see cref="HomeRegions.All"/> itself, or a stable subset of
-    /// it) so the same <paramref name="rng"/> sequence always reproduces
-    /// the same draw.
+    /// (it is — <see cref="HomeRegions.All"/> filtered by a `Where`) so the
+    /// same <paramref name="rng"/> sequence always reproduces the same draw.
     /// </summary>
     private static IReadOnlyList<Region> WeightedRandomRegionsWithoutReplacement(
         IReadOnlyList<Region> candidates, IReadOnlyList<City> allCities, int count, SimRng rng, double weightExponent)

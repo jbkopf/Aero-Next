@@ -908,53 +908,72 @@ un-scoped question if it's ever revisited.
        `AeroNext.QaHarness.GameConfigGenerator` — its own uniform-random
        region draw for simulated humans, independent per seat with no
        collision awareness, frequently lands 2-3 of the 4 seats in the
-       same region purely by chance. **Fixed a related, real gap in real
-       gameplay code while investigating**: `GameSetup.CreateSeats`'s own
-       AI filler previously never shared a region with a human at all (an
-       accidental side effect of "richest *unclaimed* region," never a
-       deliberate design) — now an AI filler's region draw runs over every
-       home region, human-occupied or not; only AI-vs-AI collisions stay
-       impossible. Measured (300-game canonical sweep): total bankruptcy
+       same region purely by chance.
+
+       **A related change was tried and reverted while investigating.**
+       `GameSetup.CreateSeats`'s own AI filler had always excluded every
+       human-claimed region from its own candidate pool (an accidental
+       side effect of "richest *unclaimed* region," never a deliberate
+       design) — this was loosened, per direct instruction, to let AI
+       reach for a human's own region too, keeping only AI-vs-AI
+       exclusivity. Measured (300-game canonical sweep): total bankruptcy
        2.33%→3.00%, driven by NorthAmerica (0.4%→1.4%) and EastAsia
        (2.1%→3.2%) — the richest regions, now shared far more often
-       (EastAsia's own seat count rose 290→341 across the same 300 games),
-       which almost certainly re-triggers Mechanism A there instead of
-       fixing it, since nothing here touches the underlying deterministic-
-       collision problem. AustralAsia's own rate was unchanged (12.4%→12.4%),
-       confirming its own bankruptcies were never from this fix's own case
-       (human-vs-AI overlap) to begin with — they're `GameConfigGenerator`'s
-       human-vs-human collisions, a QA-harness-only generator question,
-       still open. Shipped anyway, per direct instruction — a real,
-       correct capability (AI can now compete for a human's own region, as
-       intended) whose net aggregate effect is presently negative until
-       Mechanism A itself is addressed.
+       (EastAsia's own seat count rose 290→341 across the same 300 games)
+       — re-triggering Mechanism A there instead of fixing it, since
+       nothing about that change touched the underlying deterministic-
+       collision problem. **Reverted per direct follow-up instruction**:
+       AI should never contest a human's own region at all — a
+       deliberate product/UX decision (an AI competing with a human from
+       turn one, in a region the human specifically chose, isn't the same
+       kind of fair fight two humans sharing a region is, especially once
+       the real UI is expected to warn about that latter case) rather than
+       a balance question this investigation should resolve on its own.
+       `GameSetup.CreateSeats` is back to its original behavior: AI filler
+       excludes every human-claimed region, exactly as it always did
+       before this investigation touched it.
 
-       **Contested-vs-uncontested breakdown, 300-game canonical sweep**:
-       confirms Mechanism A is the dominant driver everywhere it can
-       reach. Uncontested games (all 4 seats in distinct regions, 146/300):
-       0.86% total bankruptcy — the real baseline. Every region's own rate
-       jumps well above that the moment it's contested: NorthAmerica
-       3.61% (40 games), Europe 0.00% (14 games), EastAsia 8.80% (58
-       games — contested most often, since it's rich and both humans and
-       the filler fix above now reach for it), SouthWestAsia 11.76% (17
-       games), SouthAmerica 0.00% (26 games), AustralAsia **21.74%** (10
-       games) — contested *least* often but hurt *worst*, consistent with
-       its own thin starting cash absorbing a demand split worse than any
-       other region.
+       **Contested-vs-uncontested breakdown, 300-game canonical sweep,
+       measured twice** — once while the filler-AI region-sharing change
+       above was still live, once after its revert — to isolate what
+       Mechanism A looks like from real gameplay's own perspective versus
+       what the (reverted) change was contributing on top of it.
 
-       **Directly verified, not inferred**: across all 300 games,
-       AustralAsia holds 97 total seats and every single one is human
-       (`IsHuman: true`); zero are AI filler. Structural, not incidental —
-       AustralAsia ranks 5th or 6th of 6 home regions by
-       `RegionalEconomics.Factor`, and the deterministic filler (the only
-       kind any of these sweeps exercise; `fillerRegionRng` is still off
-       by default, wired to nothing real) only ever takes the *richest*
-       remaining regions, at most 4 of them — AustralAsia never clears
-       that bar regardless of human occupancy. So every one of
-       AustralAsia's own contested games is two or more *humans*
-       independently landing there via `GameConfigGenerator`'s own
-       uncoordinated random draw, and the filler-AI fix above is
-       completely orthogonal to it.
+       *Post-revert (current shipped state)*: uncontested games (all 4
+       seats in distinct regions) rose from 146/300 (48.7%) to **219/300
+       (73.0%)** — most of the contestation the filler change had been
+       creating is gone with it. Uncontested bankruptcy: 0.80% (7/876) —
+       the real baseline. Every region's own rate still jumps well above
+       that the moment it's contested, confirming Mechanism A is real
+       gameplay behavior, not an artifact of the reverted change:
+       NorthAmerica 0.00% (15 games — down from 40; most of its own
+       contestation *was* the reverted AI-vs-human overlap), Europe 0.00%
+       (14 games, unchanged), EastAsia 19.35% (15 games — down from 58,
+       but *more* dangerous per instance now that it's purely human-vs-
+       human, not a mix that included AI), SouthWestAsia 11.76% (17
+       games, unchanged — SouthWestAsia sits below the filler's own reach
+       just like AustralAsia, so was never affected either way),
+       SouthAmerica 0.00% (14 games — down from 26), AustralAsia
+       **21.74%** (10 games, unchanged in both counts and rate — see
+       below for why). The overall shape (contested >> uncontested,
+       AustralAsia worst per-instance) holds in both measurements; only
+       the raw frequency of NorthAmerica/EastAsia/SouthAmerica's own
+       contestation moved, exactly tracking how much of it the reverted
+       change had been adding.
+
+       **Directly verified, not inferred**: across all 300 games (in
+       both measurements), AustralAsia holds 97 total seats and every
+       single one is human (`IsHuman: true`); zero are AI filler.
+       Structural, not incidental — AustralAsia ranks 5th or 6th of 6 home
+       regions by `RegionalEconomics.Factor`, and the deterministic filler
+       (the only kind any of these sweeps exercise; `fillerRegionRng` is
+       still off by default, wired to nothing real) only ever takes the
+       *richest* remaining regions, at most 4 of them — AustralAsia never
+       clears that bar regardless of human occupancy, with or without the
+       reverted change. So every one of AustralAsia's own contested games
+       is two or more *humans* independently landing there via
+       `GameConfigGenerator`'s own uncoordinated random draw — completely
+       orthogonal to the filler-AI question either way.
 
        **User's own call, given this: not worth pursuing further for
        AustralAsia specifically.** Real human players independently
@@ -972,8 +991,11 @@ un-scoped question if it's ever revisited.
        own stress-test distribution, but likely overstate a real game's
        actual risk — recorded here so a future reader doesn't re-alarm on
        them without this context. Mechanism A stays a real, worth-fixing
-       problem for the regions filler *can* reach (NorthAmerica/EastAsia
-       above), just not framed as an AustralAsia-specific one anymore.
+       problem for the regions two *humans* can still independently
+       collide in (NorthAmerica/EastAsia/SouthAmerica above), just not one
+       this project should solve by letting AI compete with a human —
+       that's the UI's own job (a warning, per direct instruction), not
+       this method's.
      - **Mechanism B — the idle second aircraft gets a bad second route.**
        No demand mismatch in the solo (non-contested) case: Q1 alone is
        fine, even better than the heuristic's (+$447K vs. +$167K). By

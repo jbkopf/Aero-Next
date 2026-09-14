@@ -48,9 +48,7 @@ public class GameSetupIntegrationTests
     {
         var seats = GameSetup.CreateSeats(humanChoices, Cities);
         Assert.Equal(4, seats.Count);
-        // Regions aren't required to be distinct across seats (an AI
-        // filler can now land in a human-occupied region too) - only
-        // starting cities are.
+        Assert.Equal(4, seats.Select(s => s.HomeRegion).Distinct().Count());
         Assert.Equal(4, seats.Select(s => s.StartingCity.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count());
 
         var conditionsBySeat = seats.ToDictionary(s => s, s => StartingConditionsResolver.Resolve(s, Cities, Fleet, GrowthSchedule));
