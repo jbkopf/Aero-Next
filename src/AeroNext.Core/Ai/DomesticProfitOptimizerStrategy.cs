@@ -120,6 +120,20 @@ namespace AeroNext.Core.Ai;
 /// compares types within one already-chosen pair, never across pairs, so
 /// it can't leak a capacity bias back into pair selection regardless of
 /// what Phase 1 ranks by.
+///
+/// Capacity-mismatch follow-up (docs/OPEN_WORK.md): a real traced
+/// bankruptcy (Saipan) found Phase 1+2 can still land on a genuinely
+/// catastrophic combination (~23% load factor) even under raw-demand
+/// ranking - "good enough to carry its own capacity" isn't actually
+/// enforced anywhere, it just usually happens to hold. Rather than a
+/// fifth attempt at changing the ranking (the exact shape all four M56
+/// attempts shared, and the reason each one leaked a catalog accident
+/// into pair selection), <see cref="MeetsCatastropheFloor"/> is a
+/// post-hoc gate: Phase 1 and Phase 2 run completely unmodified and
+/// still pick exactly what they always would; only whether to *act* on
+/// that already-chosen pick is now conditional. See that method's own
+/// doc comment for the full reasoning and why this is structurally
+/// different from the four reverted attempts.
 /// </summary>
 public sealed class DomesticProfitOptimizerStrategy : IAiStrategy
 {
@@ -154,6 +168,10 @@ public sealed class DomesticProfitOptimizerStrategy : IAiStrategy
         if (domesticRouteCount < MaxDomesticRoutes && spent + 1 <= context.ActionCap)
         {
             var idleBest = FindMostProfitableDomesticPairUsingIdleFleet(context, reservedUnitIds, validOriginCityIds);
+            if (idleBest is not null && !MeetsCatastropheFloor(idleBest.Value.Pair, idleBest.Value.Aircraft))
+            {
+                idleBest = null; // catastrophic mismatch - skip this resource rather than commit; falls through to the buy-new branch below, a genuinely different resource, not a downgrade to a worse pair
+            }
 
             if (idleBest is not null && AiToolkit.TryOrientFromValidOrigin(idleBest.Value.Pair, validOriginCityIds, out var origin, out var destination)
                 && BaselineAi.HasSlotAtEveryGateway(origin, destination, context.AvailableSlotsByCity, slotsReservedByCity)
@@ -176,6 +194,11 @@ public sealed class DomesticProfitOptimizerStrategy : IAiStrategy
                 // bigger/faster aircraft isn't automatically the most
                 // profitable one on a short intra-region hop.
                 var bestOrdered = FindMostProfitableDomesticPairAcrossTypes(context, context.EraAvailableTypes, validOriginCityIds);
+                if (bestOrdered is not null && !MeetsCatastropheFloor(bestOrdered.Value.Pair, bestOrdered.Value.Aircraft))
+                {
+                    bestOrdered = null; // catastrophic mismatch - skip opening anything this quarter rather than commit
+                }
+
                 var oriented = bestOrdered is not null && AiToolkit.TryOrientFromValidOrigin(bestOrdered.Value.Pair, validOriginCityIds, out var newOrigin, out var newDestination)
                     ? (Origin: newOrigin, Destination: newDestination)
                     : ((City Origin, City Destination)?)null;
@@ -464,5 +487,36 @@ public sealed class DomesticProfitOptimizerStrategy : IAiStrategy
         var cappedCarried = Math.Min(pair.PassengersPerQuarter + hubBonusDemand, hypotheticalRoute.SeatsPerQuarter);
 
         return FareCalculator.EstimatedProfit(hypotheticalRoute, cappedCarried);
+    }
+
+    /// <summary>
+    /// Capacity-mismatch follow-up (docs/OPEN_WORK.md): a genuinely
+    /// different angle from the four already-tried-and-reverted fixes the
+    /// class doc comment above documents (real profit, real captured
+    /// demand, a minimum profitability floor, a load-factor-derated
+    /// ranking) — every one of those changed the *ranking itself*, which
+    /// is exactly what let a catalog accident (which pair happens to have
+    /// an available type near its own best fit) leak into *which pair
+    /// wins* across a cross-pair comparison. This gate never touches
+    /// ranking at all: Phase 1 and Phase 2 run completely unmodified and
+    /// pick exactly what they always would; this only decides, after the
+    /// fact, whether to act on their own already-chosen (pair, aircraft)
+    /// at all. A real traced case (Saipan, docs/OPEN_WORK.md): this
+    /// strategy's own Phase 1+2 chose a pair/aircraft combination whose
+    /// real load factor was ~23% — a structural, compounding loss from
+    /// the quarter it opened, not a slow-growing one, since operating
+    /// cost is charged on capacity offered, not seats filled.
+    /// <see cref="MinLoadFactorBeforeSkipping"/> is deliberately far below
+    /// FareCalculator's own break-even load factor (~77%, 1/1.3) — this
+    /// is a catastrophe backstop, not a profitability gate; a genuinely
+    /// mediocre-but-viable pick (the ordinary outcome this strategy's own
+    /// M56/M57 history already tuned for) still goes through untouched.
+    /// </summary>
+    private const double MinLoadFactorBeforeSkipping = 0.25;
+
+    private static bool MeetsCatastropheFloor(PairDemand pair, AircraftType aircraft)
+    {
+        var route = new Route(pair.Origin, pair.Destination, aircraft, AircraftCount: 1);
+        return pair.PassengersPerQuarter >= MinLoadFactorBeforeSkipping * route.SeatsPerQuarter;
     }
 }

@@ -693,4 +693,58 @@ public class DomesticProfitOptimizerStrategyTests
         var negotiation = Assert.Single(orders.OfType<NegotiationOrder>());
         Assert.Equal("next", negotiation.TargetCity.Id);
     }
+
+    // --- Capacity-mismatch follow-up (docs/OPEN_WORK.md): MeetsCatastropheFloor ---
+
+    [Fact]
+    public void DecideOrders_IdleAircraftGrosslyOversizedForOnlyPair_SkipsIdle_FallsThroughToBuyingAWellFittedType()
+    {
+        // MeetsCatastropheFloor (the "Saipan" case): idle "big" is
+        // grossly oversized for the only reachable pair - verified
+        // numerically against these exact fixtures (not guessed): real
+        // demand here is 30,331/quarter, comfortably clearing "fit"'s own
+        // 25% floor (1,885) but nowhere near "big"'s (56,550, a >7x gap).
+        // The idle-fleet branch must skip committing "big" to this pair
+        // rather than lock in a structural loss, falling through to the
+        // buy-new branch below where "fit" (the only era-available type)
+        // passes the same gate comfortably.
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 10);
+        var near = MakeCity("near", Region.NorthAmerica, 1, 1, 10);
+        var cities = new[] { home, near };
+        var big = new AircraftType("big", "Big", Seats: 300, RangeKm: 10_000);
+        var fit = new AircraftType("fit", "Fit", Seats: 10, RangeKm: 10_000, Cost: Money.FromDollars(500_000));
+        var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, big, quantity: 1, FleetOwnershipMode.Owned);
+
+        var context = MakeContext(Array.Empty<Route>(), cities, new[] { fit }, Region.NorthAmerica, fleet, cash: Money.FromDollars(3_000_000));
+
+        var orders = Strategy.DecideOrders(context);
+
+        var order = Assert.Single(orders.OfType<AircraftOrder>());
+        Assert.Equal("fit", order.Type.Id);
+        Assert.Empty(orders.OfType<RouteOrder>());
+        Assert.Empty(orders.OfType<LeaseAircraftOrder>());
+    }
+
+    [Fact]
+    public void DecideOrders_OnlyAvailableTypeGrosslyOversized_SkipsOpeningRatherThanCommittingToACatastrophicMismatch()
+    {
+        // Mirrors the idle-fleet case above but for the buy-new path: no
+        // idle fleet at all, and the only era-available type ("big") is
+        // just as grossly oversized for the only reachable pair (demand
+        // 30,331 vs "big"'s own 25% floor of 56,550). With no alternative
+        // resource to fall through to, the strategy must skip opening
+        // anything this quarter rather than commit to a structural loss.
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 10);
+        var near = MakeCity("near", Region.NorthAmerica, 1, 1, 10);
+        var cities = new[] { home, near };
+        var big = new AircraftType("big", "Big", Seats: 300, RangeKm: 10_000, Cost: Money.FromDollars(500_000));
+
+        var context = MakeContext(Array.Empty<Route>(), cities, new[] { big }, Region.NorthAmerica, cash: Money.FromDollars(10_000_000));
+
+        var orders = Strategy.DecideOrders(context);
+
+        Assert.Empty(orders.OfType<RouteOrder>());
+        Assert.Empty(orders.OfType<AircraftOrder>());
+        Assert.Empty(orders.OfType<LeaseAircraftOrder>());
+    }
 }

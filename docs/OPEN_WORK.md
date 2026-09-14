@@ -1056,17 +1056,45 @@ un-scoped question if it's ever revisited.
        pair gets chosen at all. Phase 2 (already real, cost-subtracted
        profit-based) only ever picks the best *aircraft* for whichever
        pair Phase 1 already locked in — it can't rescue a badly-chosen
-       pair. Not yet reattempted: the extensively-documented four-strikes
-       history is real prior art any fifth attempt needs to reckon with,
-       and the `RapidExpansionStrategy` episode just above independently
+       pair. The extensively-documented four-strikes history is real prior
+       art any fifth attempt needs to reckon with, and the
+       `RapidExpansionStrategy` episode just above independently
        demonstrated the exact same "broadening a search space quietly
-       enables more/worse activity" failure shape firsthand. One
-       genuinely different angle worth trying if this gets picked back
-       up: a post-hoc "skip, don't downgrade" gate on the *already-chosen*
-       (pair, aircraft) from Phases 1+2 unmodified — refusing to act at
-       all when that specific combination's own load factor is
-       catastrophic, never influencing which pair wins the way all four
-       prior attempts did.
+       enables more/worse activity" failure shape firsthand.
+
+       **Fifth attempt, genuinely different shape, real and positive
+       result.** Rather than touching Phase 1/2 ranking at all (the exact
+       mechanism every prior attempt shared, and the reason each one
+       leaked a catalog accident into pair selection), added
+       `MeetsCatastropheFloor` — a post-hoc gate applied *after* Phases 1
+       and 2 have already picked their (pair, aircraft), for both the
+       idle-fleet and buy-new call sites independently. Phase 1/2 run
+       completely unmodified and still pick exactly what they always
+       would; the gate only decides whether to *act* on that pick at all.
+       If the pick's own real load factor
+       (`pair.PassengersPerQuarter / route.SeatsPerQuarter`) is below
+       `MinLoadFactorBeforeSkipping` (0.25 — deliberately far below
+       `FareCalculator`'s own ~77% break-even, a catastrophe backstop, not
+       a profitability gate), that candidate is nulled out: the idle-fleet
+       case falls through to try buying new instead (a genuinely
+       different resource, not a downgrade to a worse pair on the same
+       resource); the buy-new case has nothing left to fall through to
+       and skips opening anything that quarter.
+
+       Measured on the same canonical 300-game sweep (seed 1, 244
+       quarters): **total bankruptcy 2.33%→1.92%, AustralAsia
+       12.4%→7.2%**, with NorthAmerica (0.4%), Europe (1.0%), EastAsia
+       (2.1%), SouthWestAsia (3.8%) and SouthAmerica (1.3%) all
+       byte-identical to the pre-fix baseline — the first clean,
+       targeted, zero-side-effect improvement to AustralAsia's own
+       bankruptcy rate found across this whole investigation. Two new
+       unit tests (`DomesticProfitOptimizerStrategyTests.cs`) cover both
+       null-out branches directly — a grossly oversized idle aircraft
+       falling through to a well-fitted buy-new type, and a grossly
+       oversized-only era-available type causing a clean skip — both
+       fixture demand/capacity numbers verified numerically against the
+       exact test cities/aircraft, not guessed. `DomesticProfitOptimizerStrategy.cs`
+       reads fully covered by the merged coverage report.
 
 ---
 
