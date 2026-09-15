@@ -4,7 +4,9 @@ namespace AeroNext.Core.Competition;
 /// M23: the campaign's actual win condition — Aerobiz Supersonic's own
 /// "greatest passengers in multiple regions," adapted to this game's data.
 /// An airline wins the instant it simultaneously leads
-/// <see cref="RequiredRegionCount"/> different home regions, each for at
+/// <see cref="RequiredRegionCount"/> different regions (out of
+/// DominanceTrackedRegions.All — the 6 home regions plus Africa, see that
+/// class's own doc comment), each for at
 /// least <see cref="RequiredStreakQuarters"/> consecutive quarters — a
 /// single achievement ("you now dominate N markets at once"), not a
 /// historical checklist of regions ever led separately across the
@@ -30,7 +32,13 @@ namespace AeroNext.Core.Competition;
 /// </summary>
 public static class WinConditionChecker
 {
-    /// <summary>Half of the 6 home regions — a real, contestable bar, not a formality.</summary>
+    /// <summary>
+    /// A real, contestable bar, not a formality. Left at 3 rather than
+    /// raised when Africa joined DominanceTrackedRegions.All (7 total,
+    /// so this is no longer exactly half) — changing the threshold at the
+    /// same time as adding a new trackable region would confound
+    /// measuring whether Africa itself moved anything.
+    /// </summary>
     public const int RequiredRegionCount = 3;
 
     /// <summary>One year — long enough that a single lucky quarter can't flip the game.</summary>

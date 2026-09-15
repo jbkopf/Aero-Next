@@ -309,7 +309,19 @@ public static class FullGameRunner
                         RouteHistoryByPair: routeHistoryByAirlineName[name],
                         InDistress: finances[name].InDistress,
                         RivalPresenceByPairKey: rivalPresenceByPairKey,
-                        RivalPresenceByRegion: rivalPresenceByRegion);
+                        RivalPresenceByRegion: rivalPresenceByRegion,
+                        // Win-condition-awareness follow-up (docs/OPEN_WORK.md):
+                        // this real loop never actually populated this field -
+                        // AeroNext.Sim's own M13 demo loop did, but this is the
+                        // harness every real sweep runs on, so the mechanism
+                        // it feeds (AiToolkit.RegionsNotYetLed) has been dead
+                        // in every measurement that ever ran here. dominanceState
+                        // still holds last quarter's fully-resolved value at
+                        // this point in the loop (only advanced later, once
+                        // this quarter's market resolves), giving the same
+                        // one-quarter lag every other real-competitive field
+                        // here already has.
+                        RegionsLedLastQuarter: DominanceTrackedRegions.All.Where(r => dominanceState.StreakFor(name, r) >= 1).ToHashSet());
 
                     // Bankruptcy-conditions follow-up: SelectStrategy's own
                     // year-boundary rotation keeps advancing regardless of
@@ -539,7 +551,7 @@ public static class FullGameRunner
             ? CampaignRanking.Rank(dominanceState, lastMarket!, netWorth).Select(r => r.AirlineName).ToList()
             : new List<string> { winner };
 
-        var winnerRegionsDominated = winner is null ? 0 : HomeRegions.All.Count(r =>
+        var winnerRegionsDominated = winner is null ? 0 : DominanceTrackedRegions.All.Count(r =>
             dominanceState.StreakFor(winner, r) >= WinConditionChecker.RequiredStreakQuarters);
 
         return new FullGameResult(

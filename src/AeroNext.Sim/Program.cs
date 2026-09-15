@@ -748,7 +748,7 @@ for (var q = 1; q <= campaignQuarters; q++)
             campaignRoutes[name], campaignCaps[name], cities, yearDemandModel, availableFleet, campaignFleets[name], campaignHomeRegionByName[name],
             HomeCity: campaignSeats[name].StartingCity,
             AvailableSlotsByCity: null, AvailableCash: campaignFinances[name].CashBalance, CurrentDebtBalance: campaignFinances[name].DebtBalance,
-            RegionsLedLastQuarter: HomeRegions.All.Where(r => campaignDominance.StreakFor(name, r) >= 1).ToHashSet());
+            RegionsLedLastQuarter: DominanceTrackedRegions.All.Where(r => campaignDominance.StreakFor(name, r) >= 1).ToHashSet());
         var campaignStrategy = BaselineAi.SelectStrategy(campaignCurrentStrategyByName[name], q, campaignStrategyContext);
         campaignCurrentStrategyByName[name] = campaignStrategy;
         var orders = campaignStrategy.DecideOrders(campaignStrategyContext);
