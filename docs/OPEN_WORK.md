@@ -727,6 +727,88 @@ un-scoped question if it's ever revisited.
   in Europe specifically (some idle units really were useful again once
   solvent) - the shipped version relies on `ApplyManagementToolkit`'s own
   narrower stranded-unit check instead.
+- ~~**Africa never counts toward regional dominance**~~ — closed on the
+  `africa-win-condition` branch (not yet merged to `main`, kept separate
+  by the user's own explicit request "so we can tweak it"; validated and
+  confirmed final). User's own hypothesis, tested directly: the "Africa
+  is a bridge region" exclusion (`RegionalDominanceTracker`'s prior doc
+  comment, unchanged since M24) predates the Asia split
+  (`bb07d41`/`ac7e0ad`, both 2026-08-29) that turned one undifferentiated
+  "Asia" into three home regions including AustralAsia - the current
+  weakest home region by `RegionalEconomics.Factor` (0.756). A real
+  comparison found Africa's own eligible cities (Cairo 50, Lagos 45,
+  Nairobi 40...) carry demand in the same range as AustralAsia's or
+  SouthAmerica's, not the near-zero chokepoint numbers CLAUDE.md describes
+  for Wake/Honolulu/Anchorage/Gander/Azores - Africa's own
+  `RegionalEconomics.Factor` equivalent (0.689) is close to, not
+  dramatically below, AustralAsia's.
+
+  **The compromise landed**: Africa stays permanently non-home-eligible
+  (`HomeRegions.All`, `EligibleStartingCities`, `RegionalEconomics.Factor`
+  all untouched) but now counts toward the dominance win condition, via a
+  new `DominanceTrackedRegions.All` (`AeroNext.Core.Competition`) that
+  `RegionalDominanceTracker`/`WinConditionChecker`/`AiToolkit.RegionsNotYetLed`
+  all read instead of `HomeRegions.All`.
+
+  **An independent, genuinely important bug found and fixed along the
+  way**: `StrategyContext.RegionsLedLastQuarter` was only ever populated
+  in `AeroNext.Sim`'s own lighter M13 demo loop - never in
+  `FullGameRunner.cs`, the harness every real 300-game sweep (including
+  the original win-condition-awareness measurement, `BASELINE_AI_ROADMAP.md`'s
+  own section) actually runs on. The whole `regionsNotYetLed`
+  reinforcement mechanism shipped there has been dead code in every real
+  measurement since. **This retroactively changes how that section's own
+  "0/197, completely unmoved" result should be read** - see the
+  correction added to that section directly.
+
+  **Three-way isolated 300-game sweep** (seed 1, 244 quarters) separates
+  "did fixing the dead wiring help" from "did Africa specifically help":
+  | | Europe reaches3Led | Europe winShare | EastAsia reaches3Led | Total bankrupt | Avg quarters |
+  |---|---|---|---|---|---|
+  | Dead wiring, no Africa (prior baseline) | 0.5% | 6.0% | 60.0% | 1.92% | 139.4 |
+  | Wiring fixed, Africa still excluded | 0.5% (unchanged) | 4.7% | 69.7% | 1.92% | 128.0 |
+  | Wiring fixed + Africa counts | **18.8%** | **13.3%** | 58.6% | 1.67% | 94.4 |
+
+  The middle row is the control: fixing the dead-code bug *alone* changes
+  nothing for Europe (byte-identical 0.5%) - this actually **validates**
+  the original investigation's own conclusion ("a selection-priority
+  nudge can't manufacture investment") rather than overturning it, just
+  via a genuinely working mechanism this time instead of an accidentally
+  inert one. It's Africa specifically that moves Europe (0.5%→18.8%
+  reaches3Led) and SouthWestAsia (5.7%→43.8%, not shown above) - exactly
+  the two regions a touch-matrix diagnostic predicted, since they're the
+  only two whose eligible starting cities are geographically close enough
+  to reach Africa at all (see below). NorthAmerica/EastAsia both cede
+  some ground - a healthy rebalancing of a previously very lopsided
+  distribution (EastAsia 60-70% win share), not a regression: total
+  bankruptcy improved slightly and average game length dropped sharply
+  (more decisive competition, not a stalemate-reduction artifact).
+
+  **Contestedness check, run before calling this settled**: is Africa's
+  leadership genuinely fought over, or does whoever touches it first just
+  keep it? Real per-game leadership-handoff tracking found Africa is the
+  *least* contested region in the game (3.0% of games see a real
+  leadership change, vs. 4.7-11.7% for the six real regions and 32.0% for
+  AustralAsia specifically) with the lowest average handoff count (0.05).
+  Europe holds it at game-end in 57.3% of *all* 300 games; SouthWestAsia
+  15.7%; nobody else meaningfully. Traced to real geography, not an AI
+  artifact: average distance from each home region's eligible starting
+  cities to the *nearest* Africa city is 1,603km for Europe vs. 3,375km
+  for SouthWestAsia (next closest) vs. 6,381-10,733km for the other four
+  regions - Europe is genuinely, literally next door to North Africa the
+  way Madrid is to Casablanca, while NorthAmerica/EastAsia/AustralAsia
+  sit far enough away to be effectively locked out for most of the
+  campaign regardless of AI behavior. **Read as a real, earned strategic
+  asymmetry consistent with CLAUDE.md's own chokepoint-geography design
+  pillar** (asymmetric opportunity by geography is the point, not a
+  fairness bug to flatten) rather than something needing further
+  tuning - Africa functions as a private Europe-vs-SouthWestAsia arena,
+  not a universally-accessible 7th region, and that's judged acceptable
+  by the user's own final call.
+
+  985 tests passing, every changed file fully covered. Not yet merged to
+  `main` - sitting on `africa-win-condition` (commit `4823f39`) pending
+  the user's own decision on whether/when to merge.
 
 ### `HISTORICAL_DYNAMICS_ROADMAP.md`
 - **Gate capacity growing over time** — done, via

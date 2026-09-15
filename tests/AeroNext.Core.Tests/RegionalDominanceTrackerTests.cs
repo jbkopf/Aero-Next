@@ -187,10 +187,14 @@ public class RegionalDominanceTrackerTests
     }
 
     [Fact]
-    public void Advance_RouteTouchingOnlyAfrica_CreatesNoRegionEntry()
+    public void Advance_RouteTouchingOnlyAfrica_CreatesARegionEntry()
     {
-        // Africa isn't in HomeRegions.All, so a route entirely within
-        // Africa should never produce a leadership entry for anyone.
+        // Africa-counts-toward-the-win-condition follow-up: Africa isn't
+        // in HomeRegions.All (still never home-eligible - see
+        // HomeRegionsTests/RegionalEconomicsTests, both untouched by this
+        // change), but it is in DominanceTrackedRegions.All - a route
+        // entirely within Africa now creates a real leadership entry,
+        // same as any other tracked region.
         var cai = MakeCity("cai", 30.1, 31.4, 50, Region.Africa);
         var dkr = MakeCity("dkr", 14.7, -17.4, 50, Region.Africa);
         var aircraft = new AircraftType("t", "Test", Seats: 1000);
@@ -199,6 +203,36 @@ public class RegionalDominanceTrackerTests
 
         var state = RegionalDominanceTracker.Advance(RegionalDominanceState.Empty, market, new HashSet<string> { "A" });
 
-        Assert.Empty(state.StreakByLeader);
+        Assert.Equal(1, state.StreakFor("A", Region.Africa));
+    }
+
+    [Fact]
+    public void Advance_TwoAirlinesContestAfrica_LeaderStreakIncrementsLikeAnyOtherRegion()
+    {
+        // Real streak accrual, not just a single-quarter entry - "A"
+        // wins Africa's first quarter (more seats carried there), loses
+        // the next when "B" overtakes it. Mirrors the existing
+        // contested-region tests above for a real home region, just
+        // targeted at Africa specifically.
+        var cai = MakeCity("cai", 30.1, 31.4, 50, Region.Africa);
+        var dkr = MakeCity("dkr", 14.7, -17.4, 50, Region.Africa);
+        var big = new AircraftType("big", "Big", Seats: 1000);
+        var small = new AircraftType("small", "Small", Seats: 10);
+        var airlineA = new Airline("A", new[] { new Route(cai, dkr, big, 10) });
+        var airlineB = new Airline("B", new[] { new Route(cai, dkr, small, 1) });
+        var quarter1Market = CompetitiveMarket.Resolve(new[] { airlineA, airlineB }, new[] { cai, dkr }, DemandModel);
+        var eligible = new HashSet<string> { "A", "B" };
+
+        var afterQuarter1 = RegionalDominanceTracker.Advance(RegionalDominanceState.Empty, quarter1Market, eligible);
+        Assert.Equal(1, afterQuarter1.StreakFor("A", Region.Africa));
+        Assert.Equal(0, afterQuarter1.StreakFor("B", Region.Africa));
+
+        var airlineAShrunk = new Airline("A", new[] { new Route(cai, dkr, small, 1) });
+        var airlineBGrown = new Airline("B", new[] { new Route(cai, dkr, big, 10) });
+        var quarter2Market = CompetitiveMarket.Resolve(new[] { airlineAShrunk, airlineBGrown }, new[] { cai, dkr }, DemandModel);
+
+        var afterQuarter2 = RegionalDominanceTracker.Advance(afterQuarter1, quarter2Market, eligible);
+        Assert.Equal(0, afterQuarter2.StreakFor("A", Region.Africa));
+        Assert.Equal(1, afterQuarter2.StreakFor("B", Region.Africa));
     }
 }

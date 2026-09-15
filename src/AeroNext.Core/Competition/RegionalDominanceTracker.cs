@@ -3,15 +3,16 @@ using AeroNext.Core.World;
 namespace AeroNext.Core.Competition;
 
 /// <summary>
-/// M23: tracks which airline leads each home region's passenger traffic,
-/// and for how many consecutive quarters — the basis for the regional-
+/// M23: tracks which airline leads each region's passenger traffic, and
+/// for how many consecutive quarters — the basis for the regional-
 /// dominance win condition (see WinConditionChecker). "Leads" means carries
 /// the most passengers this quarter on routes it itself operates that
 /// touch that region (either endpoint) — CompetitiveRouteUsage.SeatsUsed,
 /// not CompetitivePairResult (which can include connecting itineraries
 /// through a hub the airline doesn't actually fly to). Scoped to
-/// HomeRegions.All only (6 regions) — Africa is a bridge region no airline
-/// is based in, the same boundary RegionalEconomics.Factor already draws.
+/// DominanceTrackedRegions.All (the 6 home regions plus Africa) — see
+/// that class's own doc comment for why Africa counts here despite still
+/// never being home-eligible.
 /// </summary>
 public static class RegionalDominanceTracker
 {
@@ -28,7 +29,7 @@ public static class RegionalDominanceTracker
     {
         var next = new Dictionary<(string, Region), int>();
 
-        foreach (var region in HomeRegions.All)
+        foreach (var region in DominanceTrackedRegions.All)
         {
             var carriedByAirlineName = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
 
