@@ -96,7 +96,7 @@
   { "id": "bog", "name": "Bogota",       "region": "SouthAmerica", "latitude": 4.7110,   "longitude": -74.0721,  "demandWeight": 55,  "isGateway": false, "gateCapacity": null, "autoCapacity": 2, "hubQuality": 10 },
   { "id": "lim", "name": "Lima",         "region": "SouthAmerica", "latitude": -12.0464, "longitude": -77.0428,  "demandWeight": 50,  "isGateway": false, "gateCapacity": null, "autoCapacity": 2, "hubQuality": 0 },
 
-  { "id": "cai", "name": "Cairo",        "region": "Africa",       "latitude": 30.1219,  "longitude": 31.4056,   "demandWeight": 50,  "isGateway": true,  "gateCapacity": 3, "autoCapacity": null, "hubQuality": 0 },
+  { "id": "cai", "name": "Cairo",        "region": "Africa",       "latitude": 30.1219,  "longitude": 31.4056,   "demandWeight": 70,  "isGateway": true,  "gateCapacity": 3, "autoCapacity": null, "hubQuality": 0 },
   { "id": "dss", "name": "Dakar",        "region": "Africa",       "latitude": 14.6708,  "longitude": -17.0733,  "demandWeight": 15,  "isGateway": true,  "gateCapacity": 2, "autoCapacity": null, "hubQuality": 0 },
   { "id": "los", "name": "Lagos",        "region": "Africa",       "latitude": 6.5244,   "longitude": 3.3792,    "demandWeight": 45,  "isGateway": false, "gateCapacity": null, "autoCapacity": 2, "hubQuality": 0 },
   { "id": "nbo", "name": "Nairobi",      "region": "Africa",       "latitude": -1.2921,  "longitude": 36.8219,   "demandWeight": 40,  "isGateway": false, "gateCapacity": null, "autoCapacity": 2, "hubQuality": 10 },

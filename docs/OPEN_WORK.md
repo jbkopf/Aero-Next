@@ -806,9 +806,31 @@ un-scoped question if it's ever revisited.
   not a universally-accessible 7th region, and that's judged acceptable
   by the user's own final call.
 
-  985 tests passing, every changed file fully covered. Not yet merged to
-  `main` - sitting on `africa-win-condition` (commit `4823f39`) pending
-  the user's own decision on whether/when to merge.
+  985 tests passing, every changed file fully covered. **Merged to `main`**
+  (the `africa-win-condition` branch, commits `4823f39`/`6ddacb7`),
+  confirmed final by the user; the branch itself has since been deleted.
+
+  **Cairo weight follow-up, same investigation.** A city-by-city
+  comparison against the rest of the 100-city roster (`data/cities.json`)
+  found Cairo (`demandWeight` 50) sitting well below its real-world tier -
+  tied with Zurich/Vienna despite being one of the ~20 largest metro areas
+  on Earth and a historically major aviation crossroads, while cities
+  with a comparable real hub role (Istanbul, Moscow) sit at 70. The rest
+  of Africa's roster (Lagos 45, Nairobi 40...) reads as internally
+  consistent with the same wealth/GDP-proxy pattern the *whole* dataset
+  already follows (small rich cities consistently outrank larger poorer
+  ones everywhere, not just in Africa) - Cairo was the one specific
+  outlier against that pattern. Bumped 50->70 to match Istanbul/Moscow's
+  tier and measured directly: a large, real move for one line of JSON -
+  **Europe winShare 13.3%->23.0%, EastAsia 47.7%<-56.7%** (essentially a
+  1:1 transfer), bankruptcy unchanged (1.67%->1.75%, noise), every other
+  region flat. Mechanistically consistent with the contestedness finding
+  above (Europe already wins Africa's leadership in 57.3% of all games) -
+  strengthening the dominant African gateway made an already-favored leg
+  more decisive. Kept at 70 by the user's own direct call after seeing
+  the real size of the move; a smaller bump (e.g. 60) or a matching Lagos
+  adjustment were both discussed as live alternatives if this needs
+  revisiting later.
 
 ### `HISTORICAL_DYNAMICS_ROADMAP.md`
 - **Gate capacity growing over time** — done, via
