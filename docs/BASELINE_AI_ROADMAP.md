@@ -2855,6 +2855,26 @@ multi-action "surge" investment toward one target region) is the natural
 next candidate for whoever picks this up, filed here rather than
 attempted this round.
 
+**Correction (Africa-counts-toward-the-win-condition follow-up,
+`docs/OPEN_WORK.md`):** the "0/197, completely unmoved" measurement above
+turns out to have run against dead code, not a genuinely-tested design.
+`StrategyContext.RegionsLedLastQuarter` - the signal this whole
+mechanism depends on - was only ever populated in `AeroNext.Sim`'s own
+lighter M13 demo loop, never in `FullGameRunner.cs`, the harness this
+measurement (and every other 300-game sweep in this document) actually
+runs on. `AiToolkit.RegionsNotYetLed(context)` therefore always returned
+null here, so `regionsNotYetLed`/`BothEndpointsTouchedAndAtLeastOneUnled`
+degenerated to a permanent no-op for the entire life of this measurement.
+Fixed and re-tested with a real, isolated ablation once the wiring bug
+was found: the wiring fix *alone* (still no Africa) reproduces this
+section's own "unmoved" result exactly (Europe reaches 3 led regions
+0.5% either way) - so the substantive conclusion here ("a
+selection-priority nudge can't manufacture investment") holds up even
+under a real test, it just wasn't actually tested by this section's own
+sweep at the time. See `docs/OPEN_WORK.md`'s own write-up for the full
+three-way isolation and what did move Europe's number (Africa counting
+toward dominance, a separate change).
+
 - **`AllianceCourtOrder`** — deliberately excluded from every milestone
   above, carrying forward `BaselineAi`'s own existing reasoning (M9):
   the alliance mechanic has no consequence today that would change this
