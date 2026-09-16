@@ -33,11 +33,26 @@ namespace AeroNext.Core.Competition;
 public static class WinConditionChecker
 {
     /// <summary>
-    /// A real, contestable bar, not a formality. Left at 3 rather than
-    /// raised when Africa joined DominanceTrackedRegions.All (7 total,
-    /// so this is no longer exactly half) — changing the threshold at the
-    /// same time as adding a new trackable region would confound
-    /// measuring whether Africa itself moved anything.
+    /// A real, contestable bar, not a formality. Tried at 4 as a
+    /// deliberate experiment once Africa's own effect on
+    /// DominanceTrackedRegions.All (7 total regions now, not 6) was
+    /// understood in isolation - 4 would have been the same "roughly
+    /// half, rounded up" bar the original 3-of-6 design intended. Measured
+    /// and reverted: genuine dominance wins collapsed from 89.7% of games
+    /// to 0.7%, with 99% of games instead falling back to
+    /// CampaignRanking's end-of-campaign tie-break - a fundamentally
+    /// weaker mechanic than the real win condition, and worse for Europe
+    /// specifically (winShare 24.0%->8.3%), not better. A follow-up
+    /// diagnostic (docs/OPEN_WORK.md) found this isn't a streak-length
+    /// problem - RequiredStreakQuarters is nearly irrelevant here, since
+    /// across 1,200 sampled airline-seats only 2 (0.17%, both
+    /// SouthWestAsia) ever reached 4 simultaneous regions led at all,
+    /// even momentarily. Every other region's hard ceiling, even
+    /// EastAsia's (the strongest, peaking at 3 in 75.9% of its games), is
+    /// 3. Raising this constant again would need a real structural
+    /// breadth mechanism first (e.g. a concentrated multi-action "surge"
+    /// lever, the same open item the win-condition-awareness investigation
+    /// already flagged), not just a number change.
     /// </summary>
     public const int RequiredRegionCount = 3;
 

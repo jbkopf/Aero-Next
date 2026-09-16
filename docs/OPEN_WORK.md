@@ -878,6 +878,40 @@ un-scoped question if it's ever revisited.
   all matching or improving on the Cairo-only baseline). Karachi, Manila,
   and Bangkok left untouched at their original values. 985 tests passing.
 
+  **Follow-up experiment: `WinConditionChecker.RequiredRegionCount` 3->4,
+  tried and reverted.** With Africa now in `DominanceTrackedRegions.All`
+  (7 regions instead of 6), 4 would restore the original "roughly half"
+  design intent 3-of-6 had. Measured directly (300-game sweep, seed 1):
+  genuine dominance wins collapsed **89.7% of games -> 0.7%**, with 99% of
+  games instead running the full 244-quarter campaign and falling back to
+  `CampaignRanking`'s end-of-campaign tie-break - a materially weaker
+  mechanic (no streak-length requirement) than the real win condition it
+  replaced. Worse for Europe specifically, not better (winShare
+  24.0%->8.3%), since EastAsia's raw strength wins the fallback tie-break
+  more often once nobody can reach the real bar at all.
+
+  **A direct follow-up question the user asked, answered cleanly**: is
+  this a streak-sustainment problem (airlines reach 4 but can't hold it
+  4 consecutive quarters) or a breadth-ceiling problem (airlines never
+  reach 4 at all)? A dedicated diagnostic (`MaxRegionsLedByName`, peak
+  simultaneous regions led per seat over the *full* campaign length,
+  independent of `RequiredStreakQuarters`) found it's overwhelmingly the
+  latter: across 1,200 sampled airline-seats, only **2 (0.17%, both
+  SouthWestAsia) ever reached 4 simultaneous regions led at any point,
+  even momentarily.** Every other region's hard ceiling is 3 - including
+  EastAsia, the strongest region in the game, which peaks at 3 in 75.9%
+  of its own games and never once reaches 4 across 290 sampled seats.
+  `RequiredStreakQuarters` is nearly irrelevant to this result - the
+  breadth ceiling itself sits at 3 for essentially the entire cast.
+
+  **Reverted to 3** by direct user decision. Raising this again would
+  need a real structural breadth mechanism first (a concentrated
+  multi-action "surge" lever, the same open item the win-condition-
+  awareness investigation already flagged - see this file's own section
+  above), not just a number change; the reasoning and full numbers are
+  recorded in `WinConditionChecker.RequiredRegionCount`'s own doc comment
+  so a future reader doesn't re-attempt this without the context.
+
 ### `HISTORICAL_DYNAMICS_ROADMAP.md`
 - **Gate capacity growing over time** — done, via
   `docs/ROUTE_CAPACITY_ROADMAP.md`'s M46. **A city that wasn't a gateway
