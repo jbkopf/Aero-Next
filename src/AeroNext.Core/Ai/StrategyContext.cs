@@ -138,6 +138,21 @@ namespace AeroNext.Core.Ai;
 /// complement and drove NorthAmerica's bankruptcy rate from 20.8% to
 /// 65.0%, removed entirely (see this file's own M58 note above). This
 /// field must never repeat that path.
+///
+/// Difficulty follow-up: TargetRegionCountOverride - GameDifficulty's own
+/// per-game region-count bar (see Competition.DifficultySettings), read
+/// only by BalancedGrowthStrategy (context.TargetRegionCountOverride ??
+/// BalancedGrowthStrategy.DefaultTargetRegionCount). Null (every existing
+/// caller before this round) reproduces GameDifficulty.Normal's own
+/// value exactly - the same permissive-default convention every field
+/// here already uses. Both real call sites (FullGameRunner.cs,
+/// AeroNext.Sim/Program.cs) populate this from the same GameDifficulty
+/// value they pass to WinConditionChecker.CheckWinner's own
+/// requiredRegionCount parameter, so the AI's own breadth ambition and
+/// the win condition's own bar never drift apart for a given game - see
+/// WinConditionChecker.RequiredRegionCount's own doc comment for why
+/// that pairing matters (raising one without the other was measured and
+/// found to very nearly break the win condition outright).
 /// </summary>
 public sealed record StrategyContext(
     IReadOnlyList<Route> CurrentRoutes,
@@ -161,4 +176,5 @@ public sealed record StrategyContext(
     bool InDistress = false,
     IReadOnlyDictionary<(string OriginId, string DestinationId), int>? RivalPresenceByPairKey = null,
     IReadOnlyDictionary<Region, int>? RivalPresenceByRegion = null,
-    IReadOnlySet<Region>? RegionsLedLastQuarter = null);
+    IReadOnlySet<Region>? RegionsLedLastQuarter = null,
+    int? TargetRegionCountOverride = null);

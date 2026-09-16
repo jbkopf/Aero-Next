@@ -10,9 +10,15 @@ namespace AeroNext.Core.Competition;
 /// least <see cref="RequiredStreakQuarters"/> consecutive quarters — a
 /// single achievement ("you now dominate N markets at once"), not a
 /// historical checklist of regions ever led separately across the
-/// campaign. Both constants are tunable defaults, not derived from
-/// anything — difficulty tiers (which would vary RequiredRegionCount)
-/// don't exist anywhere in the game yet.
+/// campaign.
+///
+/// Difficulty follow-up: <see cref="RequiredRegionCount"/> is now a real,
+/// setup-time-selectable difficulty axis - see <see cref="GameDifficulty"/>
+/// and <see cref="DifficultySettings"/>. The constant below is
+/// <see cref="GameDifficulty.Normal"/>'s own value and the default for any
+/// caller that doesn't pass an explicit one (every existing call site
+/// before this round); <see cref="CheckWinner"/>'s own optional parameter
+/// is what a real difficulty-aware caller overrides.
 ///
 /// M23 follow-up: a second, real win path - the moment only one airline
 /// remains solvent, "at any point" per the user's own direction, that
@@ -33,26 +39,20 @@ namespace AeroNext.Core.Competition;
 public static class WinConditionChecker
 {
     /// <summary>
-    /// A real, contestable bar, not a formality. Tried at 4 as a
-    /// deliberate experiment once Africa's own effect on
-    /// DominanceTrackedRegions.All (7 total regions now, not 6) was
-    /// understood in isolation - 4 would have been the same "roughly
-    /// half, rounded up" bar the original 3-of-6 design intended. Measured
-    /// and reverted: genuine dominance wins collapsed from 89.7% of games
-    /// to 0.7%, with 99% of games instead falling back to
-    /// CampaignRanking's end-of-campaign tie-break - a fundamentally
-    /// weaker mechanic than the real win condition, and worse for Europe
-    /// specifically (winShare 24.0%->8.3%), not better. A follow-up
-    /// diagnostic (docs/OPEN_WORK.md) found this isn't a streak-length
-    /// problem - RequiredStreakQuarters is nearly irrelevant here, since
-    /// across 1,200 sampled airline-seats only 2 (0.17%, both
-    /// SouthWestAsia) ever reached 4 simultaneous regions led at all,
-    /// even momentarily. Every other region's hard ceiling, even
-    /// EastAsia's (the strongest, peaking at 3 in 75.9% of its games), is
-    /// 3. Raising this constant again would need a real structural
-    /// breadth mechanism first (e.g. a concentrated multi-action "surge"
-    /// lever, the same open item the win-condition-awareness investigation
-    /// already flagged), not just a number change.
+    /// A real, contestable bar, not a formality - GameDifficulty.Normal's
+    /// own value. Raising this alone to 4 (round 1 of the difficulty
+    /// investigation, docs/OPEN_WORK.md) very nearly breaks the win
+    /// condition outright: genuine dominance wins collapsed from 89.7% of
+    /// games to 0.7%. A follow-up diagnostic found why: not a
+    /// streak-length problem (RequiredStreakQuarters is nearly irrelevant
+    /// here) - a breadth-*ambition* problem. BalancedGrowthStrategy's own
+    /// "keep chasing new regions" gate was still capped at 3, so every
+    /// region except Europe/SouthWestAsia never even attempted a 4th
+    /// region - only 2 of 1,200 sampled seats (0.17%) ever touched 4
+    /// simultaneous regions led at all, even momentarily. Round 2 (raising
+    /// both in lockstep) recovered a real 40.7% genuine-dominance rate,
+    /// still meaningfully harder than Normal - that pairing is now
+    /// GameDifficulty.Hard, see DifficultySettings.
     /// </summary>
     public const int RequiredRegionCount = 3;
 
@@ -60,13 +60,22 @@ public static class WinConditionChecker
     public const int RequiredStreakQuarters = 4;
 
     /// <param name="eligibleAirlineNames">Non-bankrupt airlines as of this exact quarter — see the class doc comment's own sole-survivor path.</param>
+    /// <param name="requiredRegionCount">
+    /// Difficulty follow-up: defaults to <see cref="RequiredRegionCount"/>
+    /// (GameDifficulty.Normal) for every pre-existing call site - a real
+    /// difficulty-aware caller passes <see cref="DifficultySettings.RegionCounts"/>'s
+    /// own value instead. Never read from the constant implicitly inside
+    /// this method, so there is exactly one place a caller can get this
+    /// wrong: forgetting to pass it at all, which is the same as choosing
+    /// Normal.
+    /// </param>
     /// <returns>The winning airline's name, or null if nobody has met either condition yet.</returns>
-    public static string? CheckWinner(RegionalDominanceState state, IReadOnlySet<string> eligibleAirlineNames)
+    public static string? CheckWinner(RegionalDominanceState state, IReadOnlySet<string> eligibleAirlineNames, int requiredRegionCount = RequiredRegionCount)
     {
         var dominanceWinner = state.StreakByLeader
             .Where(kv => kv.Value >= RequiredStreakQuarters)
             .GroupBy(kv => kv.Key.AirlineName, kv => kv.Key.Region)
-            .Where(g => g.Count() >= RequiredRegionCount)
+            .Where(g => g.Count() >= requiredRegionCount)
             .Select(g => g.Key)
             .OrderBy(name => name, StringComparer.Ordinal)
             .FirstOrDefault();

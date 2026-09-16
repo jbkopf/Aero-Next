@@ -1,5 +1,6 @@
 using AeroNext.Core;
 using AeroNext.Core.Airlines;
+using AeroNext.Core.Competition;
 using AeroNext.Core.Setup;
 using AeroNext.Core.World;
 using AeroNext.QaHarness;
@@ -51,6 +52,23 @@ public class FullGameRunnerTuningTests
 
         AssertSameOutcome(noTuning, baseline);
         AssertSameOutcome(noTuning, freshDefault);
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(7)]
+    public void Run_DefaultDifficultyParameter_MatchesExplicitGameDifficultyNormal(int seed)
+    {
+        // Difficulty follow-up: every caller before this round never
+        // passed a difficulty at all - omitting it must reproduce
+        // GameDifficulty.Normal exactly, byte-identical, the same
+        // guarantee this file's own tuning knobs already carry.
+        var seats = Seats(seed);
+        var omitted = FullGameRunner.Run(seed, seed, seed + 500_000, Quarters, seats, Cities, Fleet, Growth);
+        var explicitNormal = FullGameRunner.Run(seed, seed, seed + 500_000, Quarters, seats, Cities, Fleet, Growth, difficulty: GameDifficulty.Normal);
+
+        AssertSameOutcome(omitted, explicitNormal);
     }
 
     [Fact]

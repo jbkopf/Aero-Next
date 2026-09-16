@@ -119,8 +119,25 @@ namespace AeroNext.Core.Ai;
 /// </summary>
 public sealed class BalancedGrowthStrategy : IAiStrategy
 {
-    /// <summary>The user's own explicit target - CLAUDE.md's win condition itself requires leading 3 of 6 regions simultaneously; this is the much lower "has a real foothold there at all" precursor, not that dominance bar.</summary>
-    private const int TargetRegionCount = 3;
+    /// <summary>
+    /// The user's own explicit target - tracks WinConditionChecker.RequiredRegionCount
+    /// (this is the much lower "has a real foothold there at all" precursor,
+    /// not that dominance bar). GameDifficulty.Normal's own value -
+    /// difficulty follow-up: a real setup-time caller overrides this per
+    /// game via StrategyContext.TargetRegionCountOverride (see
+    /// DifficultySettings, which raises this in lockstep with
+    /// WinConditionChecker.RequiredRegionCount for GameDifficulty.Hard -
+    /// the AI's own breadth *ambition* was found to be the actual
+    /// bottleneck once RequiredRegionCount alone was raised, see that
+    /// constant's own doc comment for the full history: every region
+    /// except Europe/SouthWestAsia never even attempted a 4th region,
+    /// because this constant capped the search before strength was ever
+    /// tested). Public, not private, so DifficultySettings can read the
+    /// real shipped default instead of duplicating the literal 3 - the
+    /// same visibility WinConditionChecker.RequiredRegionCount already
+    /// uses for the identical reason.
+    /// </summary>
+    public const int DefaultTargetRegionCount = 3;
 
     public string Name => "Balanced Growth";
 
@@ -137,6 +154,7 @@ public sealed class BalancedGrowthStrategy : IAiStrategy
         var spent = 0;
         var validOriginCityIds = AiToolkit.ValidOriginCityIds(context);
         var touchedRegions = AiToolkit.TouchedRegions(context);
+        var targetRegionCount = context.TargetRegionCountOverride ?? DefaultTargetRegionCount;
 
         // Reinforce what's already there first - the same "proven demand
         // beats an open bet" priority NetworkOptimizerStrategy's own step
@@ -181,7 +199,7 @@ public sealed class BalancedGrowthStrategy : IAiStrategy
         }
 
         // Case 1: reach a region not yet touched, chosen by real profit.
-        if (touchedRegions.Count < TargetRegionCount && spent + 1 <= context.ActionCap)
+        if (touchedRegions.Count < targetRegionCount && spent + 1 <= context.ActionCap)
         {
             var wonSlotPair = AiToolkit.FindBestUnservedPairTouchingWonSlot(context, reservedUnitIds);
             var best = wonSlotPair is not null
@@ -215,7 +233,7 @@ public sealed class BalancedGrowthStrategy : IAiStrategy
         }
 
         var withinRegionGateway = FindBestUnservedGateway(context, c => touchedRegions.Contains(c.Region));
-        AiToolkit.NegotiateOrBorrow(context, touchedRegions.Count < TargetRegionCount ? newRegionGateway : withinRegionGateway, orders, ref spent);
+        AiToolkit.NegotiateOrBorrow(context, touchedRegions.Count < targetRegionCount ? newRegionGateway : withinRegionGateway, orders, ref spent);
 
         // Low priority, same placement as RapidExpansionStrategy - this
         // is a growth-focused strategy, not a fix-what's-broken one

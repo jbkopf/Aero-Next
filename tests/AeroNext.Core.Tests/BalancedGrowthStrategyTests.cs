@@ -31,11 +31,11 @@ public class BalancedGrowthStrategyTests
         IReadOnlyDictionary<(string, string), int>? rivalPresenceByPairKey = null,
         IReadOnlyDictionary<Region, int>? rivalPresenceByRegion = null,
         IReadOnlySet<Region>? regionsLed = null,
-        int actionCap = 3) =>
+        int actionCap = 3, int? targetRegionCountOverride = null) =>
         new(routes ?? Array.Empty<Route>(), actionCap, cities, DemandModel, eraTypes ?? new[] { Wide, Small }, fleet ?? AirlineFleet.Empty,
             homeCity.Region, homeCity, AvailableCash: availableCash,
             RivalPresenceByPairKey: rivalPresenceByPairKey, RivalPresenceByRegion: rivalPresenceByRegion,
-            RegionsLedLastQuarter: regionsLed);
+            RegionsLedLastQuarter: regionsLed, TargetRegionCountOverride: targetRegionCountOverride);
 
     [Fact]
     public void ApplicableEras_CoversMidGameAndLateGame_NeverStarting()
@@ -188,33 +188,37 @@ public class BalancedGrowthStrategyTests
     [Fact]
     public void DecideOrders_Case2_RestrictsToTouchedRegions_IgnoringAHigherProfitUntouchedCandidate()
     {
-        // 3 regions already touched (NorthAmerica home, Europe, EastAsia
-        // via existing routes) - Case 1 doesn't run at all. "within" (both
-        // endpoints touched, real profit $785,668.00) is a legal Case 2
-        // candidate; candB (AustralAsia, untouched, real profit
-        // $1,694,264.00 - genuinely higher) is excluded outright by Case
-        // 2's own BothEndpointsTouched filter, regardless of its own
-        // superior economics.
-        // Europe-EastAsia is a third existing route, already served -
-        // otherwise it would be an unserved, within-touched-region
-        // candidate of its own (pre-verified: a real, much higher profit
-        // than "within"'s own $785,668.00), which would win Case 2's own
-        // search for a completely different reason than the one this
-        // test exists to isolate. With it already served, "within" is
-        // the sole real Case 2 candidate. Real cash shifts grow-existing
-        // to the free ($0 Wide) AircraftOrder branch (1 action, not a
-        // 2-action lease), leaving room for Case 2 to actually run.
+        // 4 regions already touched (NorthAmerica home, Europe, EastAsia,
+        // SouthAmerica via existing routes) - TargetRegionCount=4, so Case
+        // 1 doesn't run at all. "within" (both endpoints touched, real
+        // profit $785,668.00) is a legal Case 2 candidate; candB
+        // (AustralAsia, untouched, real profit $1,694,264.00 - genuinely
+        // higher) is excluded outright by Case 2's own BothEndpointsTouched
+        // filter, regardless of its own superior economics.
+        // Europe-EastAsia is already served, and saHub's own weight (1)
+        // is deliberately too weak for any new pair touching it
+        // (euhub-sahub, asiahub-sahub) to outrank "within" - otherwise
+        // adding SouthAmerica as a 4th touched region would open a new,
+        // unserved, within-touched-region candidate of its own, winning
+        // Case 2's own search for a completely different reason than the
+        // one this test exists to isolate. With both neutralized,
+        // "within" is the sole real Case 2 candidate. Real cash shifts
+        // grow-existing to the free ($0 Wide) AircraftOrder branch (1
+        // action, not a 2-action lease), leaving room for Case 2 to
+        // actually run.
         var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
         var europeHub = MakeCity("euhub", Region.Europe, 10, 10, 100);
         var asiaHub = MakeCity("asiahub", Region.EastAsia, 20, 20, 100);
+        var saHub = MakeCity("sahub", Region.SouthAmerica, -10, -10, 1);
         var within = MakeCity("within", Region.NorthAmerica, 1, 1, 15);
         var candB = MakeCity("candB", Region.AustralAsia, 3, 3, 10);
-        var cities = new[] { home, europeHub, asiaHub, within, candB };
+        var cities = new[] { home, europeHub, asiaHub, saHub, within, candB };
         var existing = new[]
         {
             new Route(home, europeHub, Wide, AircraftCount: 1),
             new Route(home, asiaHub, Wide, AircraftCount: 1),
             new Route(europeHub, asiaHub, Wide, AircraftCount: 1),
+            new Route(home, saHub, Wide, AircraftCount: 1),
         };
         var context = MakeContext(cities, home, routes: existing, availableCash: Money.FromDollars(50_000_000));
 
@@ -378,23 +382,27 @@ public class BalancedGrowthStrategyTests
         // only Wide-reachable candidates - Small is excluded from this
         // fixture's own era types) to clear the profitability floor -
         // pre-verified (Wide, all three: -$10.7M/-$1.9M/-$9.2M) - so Case
-        // 2's own new-pair search leaves it alone. Europe-EastAsia is a
-        // third existing route, already served - it would otherwise be a
-        // real, highly profitable ($2,966,496.00 pre-verified) Case 2
-        // candidate of its own, consuming the whole remaining budget and
-        // leaving nothing for negotiation - exactly what this test exists
-        // to isolate.
+        // 2's own new-pair search leaves it alone. Europe-EastAsia and
+        // home-auHub are already-served routes - either would otherwise
+        // be a real, profitable Case 2 candidate of its own, consuming
+        // the whole remaining budget and leaving nothing for negotiation
+        // - exactly what this test exists to isolate. auHub (AustralAsia)
+        // is the 4th touched region, matching TargetRegionCount=4, so the
+        // negotiation ternary resolves to the within-touched-region
+        // gateway search, not the reach-a-new-region one.
         var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
         var europeHub = MakeCity("euhub", Region.Europe, 10, 10, 100);
         var asiaHub = MakeCity("asiahub", Region.EastAsia, 20, 20, 100);
+        var auHub = MakeCity("auhub", Region.AustralAsia, -20, -20, 1);
         var withinEuropeGateway = MakeCity("eugw", Region.Europe, 11, 11, 1, isGateway: true);
         var untouchedGateway = MakeCity("elsewheregw", Region.SouthAmerica, -30, -30, 5000, isGateway: true);
-        var cities = new[] { home, europeHub, asiaHub, withinEuropeGateway, untouchedGateway };
+        var cities = new[] { home, europeHub, asiaHub, auHub, withinEuropeGateway, untouchedGateway };
         var existing = new[]
         {
             new Route(home, europeHub, Wide, AircraftCount: 1),
             new Route(home, asiaHub, Wide, AircraftCount: 1),
             new Route(europeHub, asiaHub, Wide, AircraftCount: 1),
+            new Route(home, auHub, Wide, AircraftCount: 1),
         };
         var context = MakeContext(cities, home, routes: existing, availableCash: Money.FromDollars(50_000_000), eraTypes: new[] { Wide });
 
@@ -482,5 +490,66 @@ public class BalancedGrowthStrategyTests
 
         var borrowOrder = Assert.Single(orders.OfType<RefinanceOrder>());
         Assert.Equal(Money.FromDollars(3_000_000), borrowOrder.AdditionalBorrowing);
+    }
+
+    // --- Difficulty follow-up: StrategyContext.TargetRegionCountOverride ---
+
+    [Fact]
+    public void DecideOrders_TargetRegionCountOverride_Null_StopsChasingANewRegionAtTheDefaultOfThree()
+    {
+        // home (NorthAmerica) + hubA (Europe) + hubB (EastAsia) already
+        // touched via existing routes - 3 regions, matching
+        // BalancedGrowthStrategy.DefaultTargetRegionCount. With no
+        // override (the pre-existing, every-caller-before-this-round
+        // default), Case 1 must not reach for newRegion (AustralAsia),
+        // even though it would otherwise be a real, profitable candidate.
+        // One idle "wide" unit so the reinforce step's own 1-action
+        // idle-unit branch fires (not its 2-action lease fallback),
+        // leaving real budget for Case 1 to actually act on if it were
+        // active - isolates the region-count gate itself, not a starved
+        // action budget, as what's actually blocking newregion.
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
+        var hubA = MakeCity("hubA", Region.Europe, 10, 10, 100);
+        var hubB = MakeCity("hubB", Region.EastAsia, 20, 20, 100);
+        var newRegion = MakeCity("newregion", Region.AustralAsia, 3, 3, 20);
+        var cities = new[] { home, hubA, hubB, newRegion };
+        var existing = new[]
+        {
+            new Route(home, hubA, Wide, AircraftCount: 1),
+            new Route(home, hubB, Wide, AircraftCount: 1),
+        };
+        var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, Wide, quantity: 1, FleetOwnershipMode.Owned);
+        var context = MakeContext(cities, home, routes: existing, fleet: fleet, targetRegionCountOverride: null);
+
+        var orders = Strategy.DecideOrders(context);
+
+        Assert.DoesNotContain(orders.OfType<RouteOrder>(), o => new[] { o.Origin.Id, o.Destination.Id }.Contains("newregion"));
+    }
+
+    [Fact]
+    public void DecideOrders_TargetRegionCountOverride_Four_KeepsChasingANewRegionPastTheDefault()
+    {
+        // Identical fixture to the test directly above (including the
+        // idle "wide" unit, for the same reason - real budget for Case 1
+        // to actually act on) - only the override differs (4,
+        // GameDifficulty.Hard's own value via DifficultySettings). 3
+        // touched regions is no longer enough to stop Case 1, so it
+        // reaches for newRegion (AustralAsia) as its real, profitable 4th.
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
+        var hubA = MakeCity("hubA", Region.Europe, 10, 10, 100);
+        var hubB = MakeCity("hubB", Region.EastAsia, 20, 20, 100);
+        var newRegion = MakeCity("newregion", Region.AustralAsia, 3, 3, 20);
+        var cities = new[] { home, hubA, hubB, newRegion };
+        var existing = new[]
+        {
+            new Route(home, hubA, Wide, AircraftCount: 1),
+            new Route(home, hubB, Wide, AircraftCount: 1),
+        };
+        var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, Wide, quantity: 1, FleetOwnershipMode.Owned);
+        var context = MakeContext(cities, home, routes: existing, fleet: fleet, targetRegionCountOverride: 4);
+
+        var orders = Strategy.DecideOrders(context);
+
+        Assert.Contains(orders.OfType<RouteOrder>(), o => new[] { o.Origin.Id, o.Destination.Id }.Contains("newregion"));
     }
 }

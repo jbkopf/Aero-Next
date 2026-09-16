@@ -52,13 +52,21 @@ public static class FullGameRunner
     /// allow sharing a home region since the same-region change) — only
     /// airline names and starting cities are checked below.
     /// </param>
+    /// <param name="difficulty">
+    /// Difficulty follow-up: one value for the whole game, drives both
+    /// WinConditionChecker.CheckWinner's own requiredRegionCount and every
+    /// seat's own StrategyContext.TargetRegionCountOverride each quarter
+    /// (see DifficultySettings.RegionCounts) - defaults to
+    /// GameDifficulty.Normal, byte-identical to every pre-existing caller.
+    /// </param>
     public static FullGameResult Run(
         int gameIndex, int configSeed, int campaignSeed, int quarters,
         IReadOnlyList<AirlineSeat> seats,
         IReadOnlyList<City> cities, IReadOnlyList<AircraftType> fleetCatalog, IReadOnlyList<DemandGrowthPoint> growthSchedule,
-        ExperimentTuning? tuning = null)
+        ExperimentTuning? tuning = null, GameDifficulty difficulty = GameDifficulty.Normal)
     {
         tuning ??= ExperimentTuning.Baseline;
+        var regionCounts = DifficultySettings.RegionCounts(difficulty);
         var violations = new List<GameViolation>();
         var campaignRng = new SimRng(campaignSeed);
         // A separate stream from campaignRng (offset, not reused) so
@@ -321,7 +329,8 @@ public static class FullGameRunner
                         // this quarter's market resolves), giving the same
                         // one-quarter lag every other real-competitive field
                         // here already has.
-                        RegionsLedLastQuarter: DominanceTrackedRegions.All.Where(r => dominanceState.StreakFor(name, r) >= 1).ToHashSet());
+                        RegionsLedLastQuarter: DominanceTrackedRegions.All.Where(r => dominanceState.StreakFor(name, r) >= 1).ToHashSet(),
+                        TargetRegionCountOverride: regionCounts.TargetRegionCount);
 
                     // Bankruptcy-conditions follow-up: SelectStrategy's own
                     // year-boundary rotation keeps advancing regardless of
@@ -514,7 +523,7 @@ public static class FullGameRunner
             lastEligibleNames = names.Where(n => !finances[n].IsBankrupt).ToHashSet(StringComparer.OrdinalIgnoreCase);
             dominanceState = RegionalDominanceTracker.Advance(dominanceState, market, lastEligibleNames);
 
-            var checkedWinner = WinConditionChecker.CheckWinner(dominanceState, lastEligibleNames);
+            var checkedWinner = WinConditionChecker.CheckWinner(dominanceState, lastEligibleNames, regionCounts.RequiredRegionCount);
             if (checkedWinner is not null)
             {
                 winner = checkedWinner;

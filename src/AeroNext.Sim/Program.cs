@@ -698,6 +698,10 @@ string ChokepointStatus(int year)
 // quarters). Checkpoints below show that whole short arc.
 var checkpoints = new HashSet<int> { 1, 4, 7, 10 };
 
+// Difficulty follow-up: this demo loop stays on GameDifficulty.Normal -
+// see FullGameRunner.Run's own difficulty parameter for the real,
+// setup-time-selectable mechanism every QA sweep can use.
+var campaignRegionCounts = DifficultySettings.RegionCounts(GameDifficulty.Normal);
 var campaignDominance = RegionalDominanceState.Empty;
 string? campaignWinner = null;
 int? campaignWinQuarter = null;
@@ -748,7 +752,8 @@ for (var q = 1; q <= campaignQuarters; q++)
             campaignRoutes[name], campaignCaps[name], cities, yearDemandModel, availableFleet, campaignFleets[name], campaignHomeRegionByName[name],
             HomeCity: campaignSeats[name].StartingCity,
             AvailableSlotsByCity: null, AvailableCash: campaignFinances[name].CashBalance, CurrentDebtBalance: campaignFinances[name].DebtBalance,
-            RegionsLedLastQuarter: DominanceTrackedRegions.All.Where(r => campaignDominance.StreakFor(name, r) >= 1).ToHashSet());
+            RegionsLedLastQuarter: DominanceTrackedRegions.All.Where(r => campaignDominance.StreakFor(name, r) >= 1).ToHashSet(),
+            TargetRegionCountOverride: campaignRegionCounts.TargetRegionCount);
         var campaignStrategy = BaselineAi.SelectStrategy(campaignCurrentStrategyByName[name], q, campaignStrategyContext);
         campaignCurrentStrategyByName[name] = campaignStrategy;
         var orders = campaignStrategy.DecideOrders(campaignStrategyContext);
@@ -780,7 +785,7 @@ for (var q = 1; q <= campaignQuarters; q++)
     campaignLastEligible = campaignAirlineNames.Where(n => !campaignFinances[n].IsBankrupt).ToHashSet(StringComparer.OrdinalIgnoreCase);
     campaignDominance = RegionalDominanceTracker.Advance(campaignDominance, campaignMarket, campaignLastEligible);
 
-    var checkedCampaignWinner = WinConditionChecker.CheckWinner(campaignDominance, campaignLastEligible);
+    var checkedCampaignWinner = WinConditionChecker.CheckWinner(campaignDominance, campaignLastEligible, campaignRegionCounts.RequiredRegionCount);
     if (checkedCampaignWinner is not null)
     {
         campaignWinner = checkedCampaignWinner;

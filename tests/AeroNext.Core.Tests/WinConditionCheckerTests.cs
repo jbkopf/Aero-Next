@@ -118,4 +118,35 @@ public class WinConditionCheckerTests
         // bankrupt the same quarter, nobody left to declare a winner from.
         Assert.Null(WinConditionChecker.CheckWinner(RegionalDominanceState.Empty, NoEligibility));
     }
+
+    // --- Difficulty follow-up: the requiredRegionCount override ---
+
+    [Fact]
+    public void CheckWinner_RequiredRegionCountOverride_HarderBarRejectsWhatTheDefaultWouldAccept()
+    {
+        // Exactly RequiredRegionCount (the default/Normal bar) regions at
+        // the required streak - wins under the default, but not once a
+        // caller passes a harder override (GameDifficulty.Hard's own 4).
+        var regions = HomeRegions.All.Take(WinConditionChecker.RequiredRegionCount).ToList();
+        var streaks = regions.ToDictionary(r => ("A", r), _ => WinConditionChecker.RequiredStreakQuarters);
+        var state = new RegionalDominanceState(streaks);
+        var eligible = new HashSet<string> { "A", "B" };
+
+        Assert.Equal("A", WinConditionChecker.CheckWinner(state, eligible));
+        Assert.Null(WinConditionChecker.CheckWinner(state, eligible, requiredRegionCount: WinConditionChecker.RequiredRegionCount + 1));
+    }
+
+    [Fact]
+    public void CheckWinner_RequiredRegionCountOverride_EasierBarAcceptsWhatTheDefaultWouldReject()
+    {
+        // One region short of the default bar - null under the default,
+        // but a caller can pass an easier override that accepts it.
+        var regions = HomeRegions.All.Take(WinConditionChecker.RequiredRegionCount - 1).ToList();
+        var streaks = regions.ToDictionary(r => ("A", r), _ => WinConditionChecker.RequiredStreakQuarters);
+        var state = new RegionalDominanceState(streaks);
+        var eligible = new HashSet<string> { "A", "B" };
+
+        Assert.Null(WinConditionChecker.CheckWinner(state, eligible));
+        Assert.Equal("A", WinConditionChecker.CheckWinner(state, eligible, requiredRegionCount: WinConditionChecker.RequiredRegionCount - 1));
+    }
 }

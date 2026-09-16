@@ -904,13 +904,56 @@ un-scoped question if it's ever revisited.
   `RequiredStreakQuarters` is nearly irrelevant to this result - the
   breadth ceiling itself sits at 3 for essentially the entire cast.
 
-  **Reverted to 3** by direct user decision. Raising this again would
-  need a real structural breadth mechanism first (a concentrated
-  multi-action "surge" lever, the same open item the win-condition-
-  awareness investigation already flagged - see this file's own section
-  above), not just a number change; the reasoning and full numbers are
-  recorded in `WinConditionChecker.RequiredRegionCount`'s own doc comment
-  so a future reader doesn't re-attempt this without the context.
+  **Reverted to 3 as the shipped default** by direct user decision (the
+  const on both `WinConditionChecker.RequiredRegionCount` and
+  `BalancedGrowthStrategy.DefaultTargetRegionCount` reads 3 again,
+  byte-identical to every pre-existing caller). The reasoning and full
+  numbers stay recorded in each constant's own doc comment so a future
+  reader doesn't re-attempt this blind.
+
+  **Follow-up: productized as a real, setup-time-selectable difficulty
+  mechanism instead of a one-off tuning knob**, per direct user request -
+  "tied into the difficulty selection." New `GameDifficulty` enum
+  (`AeroNext.Core.Competition`) with two real, measured tiers - `Normal`
+  (3, the shipped default) and `Hard` (4, the round-2 pairing above -
+  genuine dominance wins at 40.7% of games rather than a placeholder
+  value). `DifficultySettings.RegionCounts(GameDifficulty)` maps a
+  difficulty to a `RegionCountSettings(RequiredRegionCount, TargetRegionCount)`
+  record - both counts always move together, never independently, since
+  round 1 of this same investigation already proved raising
+  `RequiredRegionCount` alone very nearly breaks the win condition.
+
+  **Wired through both real call sites** (`FullGameRunner.Run` gained a
+  `GameDifficulty difficulty = GameDifficulty.Normal` parameter;
+  `AeroNext.Sim/Program.cs`'s own demo loop stays pinned to `Normal`) -
+  each computes `DifficultySettings.RegionCounts` once and threads it two
+  ways: `WinConditionChecker.CheckWinner`'s new optional
+  `requiredRegionCount` parameter (default = the constant, so every
+  existing caller is unaffected), and a new
+  `StrategyContext.TargetRegionCountOverride` (nullable, permissive-
+  default, read only by `BalancedGrowthStrategy` as
+  `context.TargetRegionCountOverride ?? DefaultTargetRegionCount`) built
+  fresh into every seat's own `StrategyContext` each quarter.
+
+  **Before any measurement, audited for other hidden ambition caps** per
+  the user's own explicit instruction - found none. `TargetRegionCount`
+  is the only region-count cap anywhere in the AI (confirmed by a full
+  grep across every strategy file). `NetworkOptimizerStrategy` can
+  structurally never open a cross-region route at all, but that's
+  deliberate ("stabilize, don't expand") and only takes over during real
+  financial trouble (`NetworkTroubleRatio > 0`) - a healthy airline stays
+  on `BalancedGrowthStrategy` and keeps chasing breadth.
+  `RapidExpansionStrategy` has no region cap at all.
+  `DomesticProfitOptimizerStrategy` never opens cross-region routes but
+  is Starting-era only, out of scope by the same framing the original
+  win-condition-awareness investigation used.
+
+  985 tests grew to 995 (two dedicated `BalancedGrowthStrategyTests`
+  proving the override changes real `DecideOrders` behavior end-to-end,
+  three `GameDifficultyTests`, two new `WinConditionCheckerTests` for the
+  override parameter, one `FullGameRunnerTuningTests` byte-identical
+  regression guard) - every changed file fully covered by the merged
+  coverage report.
 
 ### `HISTORICAL_DYNAMICS_ROADMAP.md`
 - **Gate capacity growing over time** — done, via
