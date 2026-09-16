@@ -832,6 +832,52 @@ un-scoped question if it's ever revisited.
   adjustment were both discussed as live alternatives if this needs
   revisiting later.
 
+  **Follow-up: a full-dataset pass (`data/cities.json`, all 100 cities)
+  for the same pattern.** Real-world population/GDP/aviation-hub
+  comparison flagged six candidates: Karachi (50, tied with Zurich/Vienna
+  despite being one of the world's largest cities - the same pre-bump
+  Cairo pattern), Lagos (45, already flagged above), Manila (55, hub=0,
+  despite genuine historic Pacific-gateway significance), Cairo's own
+  `hubQuality` (still 0 despite the weight bump), Bangkok (65, hub=0),
+  and Brussels (55, hub=0, despite outsized EU-institutional travel
+  significance for its size). Delhi (70)/Mumbai (65) already getting real
+  population recognition elsewhere in the dataset made Karachi/Lagos read
+  as inconsistent treatment, not a deliberate policy.
+
+  **Tried as a full batch first, per the user's own explicit process
+  ("try the full batch; if negative, narrow to individual cities").**
+  Real regression found immediately: 3 `GameSetupTests` failures traced
+  to Karachi's bump flipping `RegionalEconomics.Factor`'s ranking -
+  SouthWestAsia has only 9 eligible cities, so +15 to one of them swung
+  its own average enough to edge out Europe for the filler-AI "richest 4"
+  pool. Measured directly: Europe's own seat count collapsed 197->96
+  (SouthWestAsia's own seat count nearly doubled, 105->206), Europe
+  winShare **23.0%->8.0%** - worse than before Cairo was ever bumped, the
+  exact opposite of this whole investigation's own goal. AustralAsia
+  bankruptcy also spiked 7.2%->15.5%.
+
+  **Isolated city by city.** Reverting Karachi alone fixed Europe
+  completely (seats back to 197, winShare actually improved to 24.7%,
+  even better than Cairo-only) - confirms Karachi specifically, not the
+  batch generally, broke the ranking; **rejected**, kept at 50. AustralAsia's
+  bankruptcy spike persisted at 15.5% even with Karachi reverted, isolating
+  it to Manila and/or Bangkok (the only two changes inside AustralAsia
+  itself). Tested each alone: Manila alone -> 8.2% (noise-level vs. the
+  7.2% baseline), Bangkok alone -> 7.2% (exact match) - **both clean
+  individually**. Manila + Bangkok *together* -> 15.5% again - a real
+  compounding interaction between two individually-safe changes, the same
+  "additive assumptions don't hold" shape this session has hit before
+  (M45's AutoCapacity+idle-recontest interaction). Since neither showed a
+  clear *positive* effect on its own either (Bangkok: literally zero
+  measurable change; Manila: noise-level), both were **dropped** rather
+  than keeping one arbitrarily.
+
+  **Final landed state**: Lagos 45->60, Cairo `hubQuality` 0->20,
+  Brussels `hubQuality` 0->10 - all three confirmed clean in the same
+  sweep (total bankruptcy 1.67%, AustralAsia 7.2%, Europe winShare 24.0%,
+  all matching or improving on the Cairo-only baseline). Karachi, Manila,
+  and Bangkok left untouched at their original values. 985 tests passing.
+
 ### `HISTORICAL_DYNAMICS_ROADMAP.md`
 - **Gate capacity growing over time** — done, via
   `docs/ROUTE_CAPACITY_ROADMAP.md`'s M46. **A city that wasn't a gateway
