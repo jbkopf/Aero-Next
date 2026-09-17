@@ -797,24 +797,19 @@ open item any more.
   (10.5%→12.2%). The 100%-clean/100%-real-winner game-health metric held
   at ceiling both before and after — none of M56's own four reverted
   designs' regression signature (win rate collapsing to 10-29%).
-- **Europe's own idle-fleet stall under `DomesticProfitOptimizerStrategy`**
-  — Europe remains a weak-performing region; root cause not yet isolated.
-- **EastAsia's own dominance, now sharper (70.0% win share) once
-  NorthAmerica stops self-destructing** — real, not newly introduced by
-  the M56-follow-up fix above: EastAsia was already the single strongest
-  region before it (52.0% win share, already more than double anyone
-  else), and Europe/SouthAmerica's own win shares (25.3%→2.7%,
-  4.0%→0.0%) were being propped up by inheriting wins whenever
-  NorthAmerica collapsed into bankruptcy rather than by winning against
-  a full field. Once that artificial clearing stopped, EastAsia's
-  already-existing structural edge (a compact, naturally-contiguous city
-  pool that doesn't overreach into marginal candidates the way
-  NorthAmerica's larger 22-city pool used to) simply became visible
-  instead of masked. This is the same shape of finding as the older
-  "NorthAmerica's own post-M44 dominance (87.6% win share)" entry this
-  replaces — which region ends up lopsided keeps moving, the underlying
-  regional-balance question doesn't. Feeds directly into the active
-  regional-balance work; not itself a reason to hold this fix back.
+- ~~**Europe's own idle-fleet stall under `DomesticProfitOptimizerStrategy`**~~
+  — resolved since; duplicate of the same item closed in the "Active
+  priority" section above (Europe is now the leading region, 31.3-34.0%
+  win share, 0.5-1.0% bankrupt — see that section for the full mechanism).
+- ~~**EastAsia's own dominance, now sharper (70.0% win share) once
+  NorthAmerica stops self-destructing**~~ — resolved by the same
+  full-random-filler fix documented above (`GAME_SETUP_ROADMAP.md`
+  section): EastAsia's win share is now 11.3%, down from the 47-70% range
+  every number in this bullet described, once its structural filler
+  walkover was removed. The bullet's own closing observation held up
+  correctly — "which region ends up lopsided keeps moving" — it was
+  EastAsia's turn next, and now neither NorthAmerica nor EastAsia is
+  lopsided; Europe is, in the opposite (healthy) direction.
 - **Changing an existing route's aircraft *type*** — no atomic order
   exists (M54); growing a route requires the exact type already flying
   it. A genuine "swap type" capability needs a new order type or
@@ -840,9 +835,17 @@ open item any more.
   exists anywhere yet.
 - **Briefing integration** — win-streak progress isn't surfaced in
   `BriefingGenerator`'s exception queue.
-- **Reconciling the QA harness's old informal "wins" column** (highest
-  final cash — never a real victory condition) **with real win data.**
-  Both coexist today.
+- ~~**Reconciling the QA harness's old informal "wins" column** (highest
+  final cash — never a real victory condition) **with real win data.**~~
+  Closed: `RegionalOutcomeReport.Aggregate`'s "Wins" column was exactly
+  this stale final-cash-comparison metric, silently never updated once
+  the real win condition (`FullGameResult.Winner`) existed — found while
+  re-evaluating the M63 regression, fixed to read `Winner` directly, with
+  regression tests (`RegionalOutcomeReportTests.cs`). It had been silently
+  wrong for an unknown span of prior investigations that trusted the
+  CLI's own printed table rather than reading `FullGameResult` fields
+  directly - see this document's own full-random-filler section above for
+  the one specific conclusion it's confirmed to have skewed.
 - ~~**Whether permanent, unrecoverable bankruptcy needs campaign-pacing
   revisiting**~~ — investigated directly (`BASELINE_AI_ROADMAP.md`'s own
   "Bankruptcy conditions" section): real 300-game instrumentation found
@@ -1220,6 +1223,17 @@ open item any more.
    *city* choice only is a narrower option) rather than another drive-by
    experiment. Not designed or scoped here, flagged for whoever picks up
    regional balance next.
+
+   ~~**Closed, later and independently — same diagnosis, same fix.**~~ A
+   separate investigation (this document's own EastAsia-dominance section,
+   under `GAME_SETUP_ROADMAP.md` above) re-derived the identical root cause
+   from a different angle (EastAsia's own walkover rate, not
+   SouthAmerica/Rio) and landed on exactly the fix flagged as unscoped
+   here: randomizing filler *region* choice
+   (`fillerRegionRng`/`fillerWeightExponent: 0.0`, shipped as the real
+   default in `AeroNext.QaHarness/Program.cs`). Confirmed to be the same
+   mechanism, not a coincidence - `GameSetup.CreateSeats`'s richest-first
+   cut is the shared cause both investigations independently traced.
 
    **Two real fixes landed from this investigation, both real gameplay
    code (not QA-harness knobs), both validated by a real 300-game canonical
