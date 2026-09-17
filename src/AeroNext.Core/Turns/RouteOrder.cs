@@ -10,8 +10,9 @@ namespace AeroNext.Core.Turns;
 /// No frequency field anymore (M32): WeeklyRoundTrips is derived from how
 /// many aircraft end up assigned, not chosen here. Always costs 1 action —
 /// see <see cref="QuarterEngine"/>. A pair already served by a *different*
-/// aircraft type rejects this order outright; swapping a route's type
-/// isn't supported yet (no detach action exists to free the old units).
+/// aircraft type rejects this order outright — use
+/// <see cref="AdjustRouteOrder"/> to change a served pair's type instead,
+/// then grow it with further RouteOrders if a bigger count is wanted.
 /// </summary>
 public sealed record RouteOrder(City Origin, City Destination, AircraftType Aircraft) : QuarterOrder
 {

@@ -166,4 +166,84 @@ public class BriefingGeneratorTests
 
         Assert.Contains(briefing, i => i.Kind == ExceptionKind.ActionCapIncreased);
     }
+
+    [Fact]
+    public void Generate_AdjustRouteOrderChangesAircraftType_IsReported()
+    {
+        var a = MakeCity("a", 0, 0, 50);
+        var b = MakeCity("b", 1, 1, 50);
+        var cities = new[] { a, b };
+
+        var quarter1 = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { new RouteOrder(a, b, Aircraft) }, cities, DemandModel);
+        var quarter2 = QuarterEngine.RunQuarter(2, quarter1.Routes, quarter1.ActionCap, new[] { new AdjustRouteOrder(a, b, BigAircraft) }, cities, DemandModel);
+
+        var briefing = BriefingGenerator.Generate(quarter1, quarter2);
+
+        var changed = Assert.Single(briefing.Where(i => i.Kind == ExceptionKind.RouteAircraftTypeChanged));
+        Assert.Contains("a-b", changed.Message);
+        Assert.Contains("capacity reset to 1", changed.Message);
+    }
+
+    [Fact]
+    public void Generate_SameTypeGrowth_DoesNotReportAircraftTypeChanged()
+    {
+        // Ordinary same-type growth (not a swap) must never be mistaken
+        // for a type change, even though AircraftCount itself changes.
+        var a = MakeCity("a", 0, 0, 50);
+        var b = MakeCity("b", 1, 1, 50);
+        var cities = new[] { a, b };
+
+        var quarter1 = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { new RouteOrder(a, b, Aircraft) }, cities, DemandModel);
+        var quarter2 = QuarterEngine.RunQuarter(2, quarter1.Routes, quarter1.ActionCap, new[] { new RouteOrder(a, b, Aircraft) }, cities, DemandModel);
+
+        var briefing = BriefingGenerator.Generate(quarter1, quarter2);
+
+        Assert.DoesNotContain(briefing, i => i.Kind == ExceptionKind.RouteAircraftTypeChanged);
+    }
+
+    [Fact]
+    public void Generate_RejectedAdjustRouteOrder_OutOfRange_IsReported()
+    {
+        var a = MakeCity("a", 0, 0, 50);
+        var b = MakeCity("b", 50, 50, 50); // ~7,800km apart
+        var shortRange = new AircraftType("sr", "ShortRange", Seats: 100, RangeKm: 100);
+        var cities = new[] { a, b };
+
+        var quarter1 = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { new RouteOrder(a, b, Aircraft) }, cities, DemandModel);
+        var quarter2 = QuarterEngine.RunQuarter(2, quarter1.Routes, quarter1.ActionCap, new[] { new AdjustRouteOrder(a, b, shortRange) }, cities, DemandModel);
+
+        var briefing = BriefingGenerator.Generate(quarter1, quarter2);
+
+        Assert.Contains(briefing, i => i.Kind == ExceptionKind.OrderRejectedOutOfRange);
+    }
+
+    [Fact]
+    public void Generate_RejectedAdjustRouteOrder_NotYetAvailable_IsReported()
+    {
+        // Distinct from the out-of-range test above - this one is
+        // in-range but era-gated, so it falls through the earlier range
+        // check and exercises DescribeRejection's own AdjustRouteOrder
+        // arm of the aircraft-lookup switch.
+        var a = MakeCity("a", 0, 0, 50);
+        var b = MakeCity("b", 1, 1, 50);
+        var futureAircraft = new AircraftType("fa", "Future", Seats: 100, AvailableFromYear: 2050);
+        var cities = new[] { a, b };
+
+        var quarter1 = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { new RouteOrder(a, b, Aircraft) }, cities, DemandModel);
+        var quarter2 = QuarterEngine.RunQuarter(2, quarter1.Routes, quarter1.ActionCap, new[] { new AdjustRouteOrder(a, b, futureAircraft) }, cities, DemandModel);
+
+        var briefing = BriefingGenerator.Generate(quarter1, quarter2);
+
+        Assert.Contains(briefing, i => i.Kind == ExceptionKind.OrderRejectedAircraftNotYetAvailable);
+    }
+
+    [Fact]
+    public void Generate_RejectedHireExecutiveOrder_AtHeadcountCap_IsReportedAsOverBudget()
+    {
+        var quarter = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.MaxActionCap, new QuarterOrder[] { new HireExecutiveOrder() }, Array.Empty<City>(), DemandModel);
+
+        var briefing = BriefingGenerator.Generate(null, quarter);
+
+        Assert.Contains(briefing, i => i.Kind == ExceptionKind.OrderRejectedOverBudget && i.Message.Contains("hire executive"));
+    }
 }

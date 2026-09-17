@@ -2952,10 +2952,17 @@ toward dominance, a separate change).
   removing EastAsia's own structural advantage. Full write-up in
   `docs/OPEN_WORK.md`'s Africa section and its full-random-filler
   section.
-- **Changing an existing route's aircraft *type*** — no atomic order
-  exists for this (M54): growing a route requires the exact type already
-  flying it, `QuarterEngine` rejects a mismatch. A genuine "swap type"
-  capability needs either a new order type or deliberate close-then-reopen
-  sequencing with cross-quarter intent tracking — real, separate
-  engine/AI work, and doubly blocked on the same cross-quarter-state gap
-  as the thrash-cycle item above, since a swap is a close plus a reopen.
+- ~~**Changing an existing route's aircraft *type***~~ — closed. New
+  `AdjustRouteOrder` (`src/AeroNext.Core/Turns/AdjustRouteOrder.cs`), per
+  the user's own direct design request — resets a served pair to exactly
+  1 aircraft of the new type, same-quarter, no gap (avoiding the
+  cross-quarter-state problem this bullet originally flagged entirely,
+  rather than solving it): the fold that builds `QuarterResult.Routes`
+  mutates the pair's entry in place, so `CompetitiveMarket`/
+  `NetworkPlanner` never see an intermediate "removed" state. Reaching a
+  bigger final count is ordinary `RouteOrder` growth afterward, same
+  quarter or later, at its existing unchanged price — no new growth
+  logic needed. Fare resets to the computed default (a real, deliberate
+  consequence of aircraft cost, not preserved). Full design and every
+  rule's reasoning: `docs/ROUTE_AIRCRAFT_ADJUSTMENT_DESIGN.md`.
+  Player-only this round — no AI strategy submits this order yet.

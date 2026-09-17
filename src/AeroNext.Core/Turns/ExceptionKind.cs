@@ -9,4 +9,5 @@ public enum ExceptionKind
     OrderRejectedOutOfRange,
     OrderRejectedAircraftNotYetAvailable,
     ActionCapIncreased,
+    RouteAircraftTypeChanged,
 }

@@ -417,13 +417,15 @@ public class QuarterEngineTests
     }
 
     [Fact]
-    public void RunQuarter_ExistingRoute_AircraftTypeMismatch_RejectedOutright_SwappingNotSupported()
+    public void RunQuarter_ExistingRoute_AircraftTypeMismatch_RejectedOutright_UseAdjustRouteOrderInstead()
     {
-        // M32: swapping a route's aircraft type isn't supported — there's
-        // no detach action to free the old units yet (future work). A
-        // RouteOrder naming a different type than what's already flying
-        // the pair is rejected outright, even with an idle unit of the new
-        // type sitting there ready to go.
+        // M32: RouteOrder itself still means "assign one more of this
+        // exact type" - a different type than what's already flying the
+        // pair is rejected outright, even with an idle unit of the new
+        // type sitting there ready to go. Swapping type is a real,
+        // supported operation now, just via AdjustRouteOrder instead (see
+        // the AdjustRouteOrder tests below) - this guard on RouteOrder
+        // itself is unchanged and still correct.
         var demandModel = new GravityDemandModel();
         var a = MakeCity("a", 0, 0, 50);
         var b = MakeCity("b", 1, 1, 50);
@@ -1904,4 +1906,240 @@ public class QuarterEngineTests
         Assert.Empty(result.RejectedOrders);
         Assert.Single(result.AppliedOrders);
     }
+
+    // --- AdjustRouteOrder: changing an existing route's aircraft type ---
+
+    private static readonly AircraftType OtherAircraft = new("t2", "Test2", Seats: 100);
+
+    [Fact]
+    public void RunQuarter_AdjustRouteOrder_UnservedPair_Rejected()
+    {
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 50);
+        var b = MakeCity("b", 1, 1, 50);
+        var order = new AdjustRouteOrder(a, b, OtherAircraft);
+
+        var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, new[] { a, b }, demandModel);
+
+        Assert.Empty(result.AppliedOrders);
+        Assert.Single(result.RejectedOrders);
+    }
+
+    [Fact]
+    public void RunQuarter_AdjustRouteOrder_SameTypeAsCurrent_Rejected()
+    {
+        // Not a real type change — allowing it would be a strictly-worse
+        // paid alternative to CloseRouteOrder's already-free shrink.
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 50);
+        var b = MakeCity("b", 1, 1, 50);
+        var existing = new[] { new Route(a, b, Aircraft, AircraftCount: 3) };
+        var order = new AdjustRouteOrder(a, b, Aircraft);
+
+        var result = QuarterEngine.RunQuarter(1, existing, QuarterEngine.BaseActionCap, new[] { order }, new[] { a, b }, demandModel);
+
+        Assert.Empty(result.AppliedOrders);
+        Assert.Single(result.RejectedOrders);
+        Assert.Equal(3, result.Routes.Single().AircraftCount); // untouched
+    }
+
+    [Fact]
+    public void RunQuarter_AdjustRouteOrder_TargetTypeOutOfRange_Rejected()
+    {
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 50);
+        var b = MakeCity("b", 50, 50, 50); // ~7,800km apart
+        var shortRange = new AircraftType("sr", "ShortRange", Seats: 100, RangeKm: 100);
+        var existing = new[] { new Route(a, b, Aircraft, AircraftCount: 1) };
+        var order = new AdjustRouteOrder(a, b, shortRange);
+
+        var result = QuarterEngine.RunQuarter(1, existing, QuarterEngine.BaseActionCap, new[] { order }, new[] { a, b }, demandModel);
+
+        Assert.Empty(result.AppliedOrders);
+        Assert.Single(result.RejectedOrders);
+        Assert.Equal(Aircraft, result.Routes.Single().Aircraft); // untouched
+    }
+
+    [Fact]
+    public void RunQuarter_AdjustRouteOrder_TargetTypeNotYetAvailable_Rejected()
+    {
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 50);
+        var b = MakeCity("b", 1, 1, 50);
+        var futureAircraft = new AircraftType("fa", "Future", Seats: 100, AvailableFromYear: 2050);
+        var existing = new[] { new Route(a, b, Aircraft, AircraftCount: 1) };
+        var order = new AdjustRouteOrder(a, b, futureAircraft);
+
+        var result = QuarterEngine.RunQuarter(1, existing, QuarterEngine.BaseActionCap, new[] { order }, new[] { a, b }, demandModel); // quarter 1 -> year 1955
+
+        Assert.Empty(result.AppliedOrders);
+        Assert.Single(result.RejectedOrders);
+    }
+
+    [Fact]
+    public void RunQuarter_AdjustRouteOrder_NoIdleUnitOfTargetType_Rejected()
+    {
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 50);
+        var b = MakeCity("b", 1, 1, 50);
+        var existing = new[] { new Route(a, b, Aircraft, AircraftCount: 1) };
+        var withOld = FleetLedger.ApplyDelivery(AirlineFleet.Empty, Aircraft, quantity: 1, FleetOwnershipMode.Owned);
+        var fleet = FleetLedger.Assign(withOld, withOld.Units.Single().Id, "a-b"); // no OtherAircraft units at all
+        var order = new AdjustRouteOrder(a, b, OtherAircraft);
+
+        var result = QuarterEngine.RunQuarter(2, existing, QuarterEngine.BaseActionCap, new[] { order }, new[] { a, b }, demandModel, fleet);
+
+        Assert.Empty(result.AppliedOrders);
+        Assert.Single(result.RejectedOrders);
+        Assert.Equal("a-b", result.UpdatedFleet!.Units.Single().AssignedRouteKey); // untouched
+    }
+
+    [Fact]
+    public void RunQuarter_AdjustRouteOrder_Applied_ResetsToOneOfTheNewType_FreesEveryOldUnit_ResetsFare()
+    {
+        // The reset-to-1 behavior is only really exercised by starting
+        // from MORE than one aircraft - proves it's a real reset, not a
+        // no-op that happens to look right at count 1.
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 50);
+        var b = MakeCity("b", 1, 1, 50);
+        var existing = new[] { new Route(a, b, Aircraft, AircraftCount: 3, FareOverride: Money.FromDollars(999)) };
+        var withThreeOld = FleetLedger.ApplyDelivery(AirlineFleet.Empty, Aircraft, quantity: 3, FleetOwnershipMode.Owned);
+        var oldIds = withThreeOld.Units.Select(u => u.Id).ToList();
+        var assigned = oldIds.Aggregate(withThreeOld, (f, id) => FleetLedger.Assign(f, id, "a-b"));
+        var fleet = FleetLedger.ApplyDelivery(assigned, OtherAircraft, quantity: 1, FleetOwnershipMode.Owned);
+        var order = new AdjustRouteOrder(a, b, OtherAircraft);
+
+        var result = QuarterEngine.RunQuarter(2, existing, QuarterEngine.BaseActionCap, new[] { order }, new[] { a, b }, demandModel, fleet);
+
+        Assert.Single(result.AppliedOrders);
+        Assert.Empty(result.RejectedOrders);
+        Assert.Equal(1, QuarterEngine.Cost(order, existing));
+
+        var route = result.Routes.Single();
+        Assert.Equal(OtherAircraft, route.Aircraft);
+        Assert.Equal(1, route.AircraftCount);
+        Assert.Null(route.FareOverride); // reset, not carried over
+
+        var oldUnits = result.UpdatedFleet!.Units.Where(u => u.Type == Aircraft).ToList();
+        Assert.Equal(3, oldUnits.Count);
+        Assert.All(oldUnits, u => Assert.Null(u.AssignedRouteKey)); // every old unit freed, none retired
+
+        var newUnit = result.UpdatedFleet.Units.Single(u => u.Type == OtherAircraft);
+        Assert.Equal("a-b", newUnit.AssignedRouteKey);
+    }
+
+    [Fact]
+    public void RunQuarter_AdjustRouteOrder_PermissiveMode_NoFleetTracked_StillApplies()
+    {
+        // AdjustRouteOrder's own "unserved pair"/"same type" checks are
+        // unconditional (unlike RouteOrder's own committedType check,
+        // which is fleet-gated for historical reasons) - so it applies in
+        // permissive mode too, resetting to 1 of the new type exactly as
+        // in fleet-aware mode.
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 50);
+        var b = MakeCity("b", 1, 1, 50);
+        var existing = new[] { new Route(a, b, Aircraft, AircraftCount: 4) };
+        var order = new AdjustRouteOrder(a, b, OtherAircraft);
+
+        var result = QuarterEngine.RunQuarter(1, existing, QuarterEngine.BaseActionCap, new[] { order }, new[] { a, b }, demandModel); // no fleet passed
+
+        Assert.Single(result.AppliedOrders);
+        var route = result.Routes.Single();
+        Assert.Equal(OtherAircraft, route.Aircraft);
+        Assert.Equal(1, route.AircraftCount);
+    }
+
+    [Fact]
+    public void RunQuarter_AdjustRouteOrder_AtAGatewayWithZeroSpareSlots_NeverRejected_NoSlotCheckApplies()
+    {
+        // The key regression guard: the route already holds 3 slots'
+        // worth of usage at this gateway (currentRoutes' own AircraftCount
+        // is already baked into availableSlotsByCity), and the swap can
+        // only ever hold flat or free that usage (reset to 1, never more
+        // than the old count) - so it must never be rejected for gate
+        // scarcity, even with zero spare balance.
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 50);
+        var gateway = MakeGateway("gw", 1, 1, 50, gateCapacity: 3);
+        var existing = new[] { new Route(a, gateway, Aircraft, AircraftCount: 3) };
+        var withThreeOld = FleetLedger.ApplyDelivery(AirlineFleet.Empty, Aircraft, quantity: 3, FleetOwnershipMode.Owned);
+        var oldIds = withThreeOld.Units.Select(u => u.Id).ToList();
+        var assigned = oldIds.Aggregate(withThreeOld, (f, id) => FleetLedger.Assign(f, id, RouteKeyStringForTests(a, gateway)));
+        var fleet = FleetLedger.ApplyDelivery(assigned, OtherAircraft, quantity: 1, FleetOwnershipMode.Owned);
+        var order = new AdjustRouteOrder(a, gateway, OtherAircraft);
+        var availableSlotsByCity = new Dictionary<string, int> { ["gw"] = 0 }; // fully spent
+
+        var result = QuarterEngine.RunQuarter(2, existing, QuarterEngine.BaseActionCap, new[] { order }, new[] { a, gateway }, demandModel, fleet, availableSlotsByCity: availableSlotsByCity);
+
+        Assert.Single(result.AppliedOrders);
+        Assert.Empty(result.RejectedOrders);
+        Assert.Equal(1, result.Routes.Single().AircraftCount);
+    }
+
+    [Fact]
+    public void RunQuarter_AdjustRouteOrder_FollowedByGrowthRouteOrders_SameQuarterSwapThenGrow_CostsExactlyFinalCount()
+    {
+        // "The player can then increase the number, even in the same
+        // turn, using the existing cost structure" - one AdjustRouteOrder
+        // (cost 1, -> 1 of the new type) followed by 2 ordinary
+        // RouteOrders (cost 1 each) for the same pair/new type reaches a
+        // final count of 3, total cost 3 - exactly BaseActionCap.
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 50);
+        var b = MakeCity("b", 1, 1, 50);
+        var existing = new[] { new Route(a, b, Aircraft, AircraftCount: 1) };
+        var withOld = FleetLedger.ApplyDelivery(AirlineFleet.Empty, Aircraft, quantity: 1, FleetOwnershipMode.Owned);
+        var oldAssigned = FleetLedger.Assign(withOld, withOld.Units.Single().Id, "a-b");
+        var fleet = FleetLedger.ApplyDelivery(oldAssigned, OtherAircraft, quantity: 3, FleetOwnershipMode.Owned);
+        var orders = new QuarterOrder[]
+        {
+            new AdjustRouteOrder(a, b, OtherAircraft),
+            new RouteOrder(a, b, OtherAircraft),
+            new RouteOrder(a, b, OtherAircraft),
+        };
+
+        var result = QuarterEngine.RunQuarter(2, existing, QuarterEngine.BaseActionCap, orders, new[] { a, b }, demandModel, fleet);
+
+        Assert.Equal(3, result.AppliedOrders.Count);
+        Assert.Empty(result.RejectedOrders);
+        var route = result.Routes.Single();
+        Assert.Equal(OtherAircraft, route.Aircraft);
+        Assert.Equal(3, route.AircraftCount);
+    }
+
+    [Fact]
+    public void RunQuarter_GrowthRouteOrderBeforeAdjustRouteOrder_WrongOrder_RouteOrderRejected_AdjustRouteOrderStillApplies()
+    {
+        // Submission order matters: a RouteOrder for the new type placed
+        // BEFORE the AdjustRouteOrder in the same batch sees the pair's
+        // still-old committed type (from currentRoutes) and is rejected
+        // as a mismatch - the AdjustRouteOrder later in the same list is
+        // unaffected by that rejection and still applies on its own.
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 50);
+        var b = MakeCity("b", 1, 1, 50);
+        var existing = new[] { new Route(a, b, Aircraft, AircraftCount: 1) };
+        var withOld = FleetLedger.ApplyDelivery(AirlineFleet.Empty, Aircraft, quantity: 1, FleetOwnershipMode.Owned);
+        var oldAssigned = FleetLedger.Assign(withOld, withOld.Units.Single().Id, "a-b");
+        var fleet = FleetLedger.ApplyDelivery(oldAssigned, OtherAircraft, quantity: 1, FleetOwnershipMode.Owned);
+        var orders = new QuarterOrder[]
+        {
+            new RouteOrder(a, b, OtherAircraft), // wrong order - type still committed to Aircraft here
+            new AdjustRouteOrder(a, b, OtherAircraft),
+        };
+
+        var result = QuarterEngine.RunQuarter(2, existing, QuarterEngine.BaseActionCap, orders, new[] { a, b }, demandModel, fleet);
+
+        Assert.Single(result.RejectedOrders);
+        Assert.IsType<RouteOrder>(result.RejectedOrders.Single());
+        Assert.Single(result.AppliedOrders);
+        Assert.IsType<AdjustRouteOrder>(result.AppliedOrders.Single());
+        var route = result.Routes.Single();
+        Assert.Equal(OtherAircraft, route.Aircraft);
+        Assert.Equal(1, route.AircraftCount); // the growth order never landed
+    }
+
+    private static string RouteKeyStringForTests(City origin, City destination) => $"{origin.Id}-{destination.Id}";
 }

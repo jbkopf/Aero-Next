@@ -810,11 +810,10 @@ open item any more.
   correctly — "which region ends up lopsided keeps moving" — it was
   EastAsia's turn next, and now neither NorthAmerica nor EastAsia is
   lopsided; Europe is, in the opposite (healthy) direction.
-- **Changing an existing route's aircraft *type*** — no atomic order
-  exists (M54); growing a route requires the exact type already flying
-  it. A genuine "swap type" capability needs a new order type or
-  deliberate close-then-reopen sequencing, and is doubly blocked on the
-  same cross-quarter-state gap as the thrash-cycle item above.
+- ~~**Changing an existing route's aircraft *type***~~ — closed. New
+  `AdjustRouteOrder`, same-quarter, no gap — see
+  `docs/BASELINE_AI_ROADMAP.md`'s own closure note above and the full
+  design at `docs/ROUTE_AIRCRAFT_ADJUSTMENT_DESIGN.md`.
 
 ### `HUB_DEMAND_DESIGN.md`
 - **Player-designated hubs** — a real system letting the player (and AI)

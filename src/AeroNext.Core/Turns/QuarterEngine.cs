@@ -234,6 +234,12 @@ public static class QuarterEngine
                 continue;
             }
 
+            if (order is AdjustRouteOrder swapRangeOrder && !swapRangeOrder.IsWithinRange)
+            {
+                rejected.Add(order);
+                continue;
+            }
+
             if (!IsAircraftAvailable(order, year))
             {
                 rejected.Add(order);
@@ -244,6 +250,37 @@ public static class QuarterEngine
             {
                 rejected.Add(order);
                 continue;
+            }
+
+            // AdjustRouteOrder is only ever a genuine type change on an
+            // already-served pair - checked unconditionally (both fleet-
+            // aware and permissive mode), unlike RouteOrder's own
+            // committedType check below, which is fleet-gated for
+            // historical reasons (M32 added it to fleet-aware mode only,
+            // after RouteOrder already existed permissively). This order
+            // is new, so there's no legacy permissive behavior to
+            // preserve - "unserved pair" and "same type" are basic
+            // logical-validity checks, not ownership checks, so both
+            // apply regardless of fleet mode. Reads committedTypeByPair
+            // first so a same-quarter order earlier in this batch that
+            // already touched this pair (a RouteOrder or another
+            // AdjustRouteOrder) is respected, falling back to
+            // currentRoutes exactly like RouteOrder's own check does.
+            if (order is AdjustRouteOrder swapValidityOrder)
+            {
+                var swapPairKey = (swapValidityOrder.Origin.Id, swapValidityOrder.Destination.Id);
+
+                if (!committedTypeByPair.TryGetValue(swapPairKey, out var swapCommittedType))
+                {
+                    var existingSwapRoute = currentRoutes.FirstOrDefault(r => r.Origin.Id == swapValidityOrder.Origin.Id && r.Destination.Id == swapValidityOrder.Destination.Id);
+                    swapCommittedType = existingSwapRoute?.Aircraft;
+                }
+
+                if (swapCommittedType is null || swapCommittedType.Id == swapValidityOrder.AircraftType.Id)
+                {
+                    rejected.Add(order);
+                    continue;
+                }
             }
 
             if (order is AircraftOrder aircraftOrder && availableCash is not null)
@@ -467,6 +504,26 @@ public static class QuarterEngine
                 }
             }
 
+            FleetUnit? unitToAssignForSwap = null;
+            IReadOnlyList<FleetUnit>? unitsToDetachForSwap = null;
+
+            if (order is AdjustRouteOrder swapOrder && workingFleet is not null)
+            {
+                var swapRouteKey = RouteKeyString(swapOrder.Origin, swapOrder.Destination);
+                unitsToDetachForSwap = workingFleet.Units.Where(u => u.AssignedRouteKey == swapRouteKey).OrderBy(u => u.Id).ToList();
+
+                unitToAssignForSwap = workingFleet.Idle
+                    .Where(u => u.Type.Id == swapOrder.AircraftType.Id)
+                    .OrderBy(u => u.Id)
+                    .FirstOrDefault();
+
+                if (unitToAssignForSwap is null)
+                {
+                    rejected.Add(order);
+                    continue;
+                }
+            }
+
             var cost = Cost(order, currentRoutes);
 
             if (spent + cost > currentActionCap)
@@ -492,6 +549,18 @@ public static class QuarterEngine
                 var routeKey = RouteKeyString(appliedRouteOrder.Origin, appliedRouteOrder.Destination);
                 workingFleet = FleetLedger.Assign(workingFleet, unitToAssign.Id, routeKey);
                 committedTypeByPair[(appliedRouteOrder.Origin.Id, appliedRouteOrder.Destination.Id)] = appliedRouteOrder.Aircraft;
+            }
+
+            if (order is AdjustRouteOrder appliedSwapOrder && unitToAssignForSwap is not null && workingFleet is not null)
+            {
+                foreach (var unit in unitsToDetachForSwap!)
+                {
+                    workingFleet = FleetLedger.Unassign(workingFleet, unit.Id);
+                }
+
+                var swapRouteKey = RouteKeyString(appliedSwapOrder.Origin, appliedSwapOrder.Destination);
+                workingFleet = FleetLedger.Assign(workingFleet, unitToAssignForSwap.Id, swapRouteKey);
+                committedTypeByPair[(appliedSwapOrder.Origin.Id, appliedSwapOrder.Destination.Id)] = appliedSwapOrder.AircraftType;
             }
 
             if (order is RetireAircraftOrder && unitToRetire is not null && workingFleet is not null)
@@ -583,7 +652,7 @@ public static class QuarterEngine
             spent += cost;
         }
 
-        var routes = ApplyRouteOrders(currentRoutes, applied.Where(o => o is RouteOrder or CloseRouteOrder or SetFareOrder));
+        var routes = ApplyRouteOrders(currentRoutes, applied.Where(o => o is RouteOrder or CloseRouteOrder or SetFareOrder or AdjustRouteOrder));
         var nextActionCap = Math.Min(MaxActionCap, currentActionCap + applied.OfType<HireExecutiveOrder>().Count() * ActionCapPerExecutive);
         var plan = NetworkPlanner.Plan(routes, cities, demandModel);
 
@@ -598,10 +667,17 @@ public static class QuarterEngine
     /// Negotiations, aircraft orders, leases, and alliance courting always
     /// cost 1 — contested actions (and leasing, which spends the same
     /// attention even though it isn't contested) have no free variant.
+    /// AdjustRouteOrder also costs 1, flat, regardless of how many
+    /// aircraft were on the route before the swap — it always resets to
+    /// exactly 1 of the new type, so there's no count to scale the price
+    /// by. Reaching a bigger final count afterward is ordinary RouteOrder
+    /// growth at its own existing price, submitted later in the same
+    /// batch or a later quarter — see AdjustRouteOrder's own doc comment.
     /// </summary>
     public static int Cost(QuarterOrder order, IReadOnlyList<Route> currentRoutes) => order switch
     {
         RouteOrder => 1,
+        AdjustRouteOrder => 1,
         HireExecutiveOrder => 0,
         RefinanceOrder => 0,
         RetireAircraftOrder => 0,
@@ -629,8 +705,17 @@ public static class QuarterEngine
     /// AircraftCount drops by 1, and the entry is removed entirely rather
     /// than left behind as a zero-capacity ghost once it reaches zero.
     /// Each applied SetFareOrder (M34) overrides FareOverride directly.
-    /// This single fold is correct in both fleet-aware and permissive
-    /// mode without needing to know which one produced `orders`.
+    /// Each applied AdjustRouteOrder replaces the pair's entry outright —
+    /// new Aircraft, AircraftCount reset to 1, FareOverride reset to null
+    /// — the one order here that doesn't build on whatever was already at
+    /// that key. Because byKey is mutated in place as this fold runs, a
+    /// RouteOrder for the same pair later in the same `orders` sequence
+    /// correctly sees the just-applied AdjustRouteOrder's new type as
+    /// "already there" and grows AircraftCount from 1, with no special
+    /// casing needed in the RouteOrder branch above — this is what lets a
+    /// same-quarter swap-then-grow work end to end. This single fold is
+    /// correct in both fleet-aware and permissive mode without needing to
+    /// know which one produced `orders`.
     /// </summary>
     private static IReadOnlyList<Route> ApplyRouteOrders(IReadOnlyList<Route> currentRoutes, IEnumerable<QuarterOrder> orders)
     {
@@ -679,6 +764,11 @@ public static class QuarterEngine
                     byKey[key] = existing with { FareOverride = fareOrder.FarePerPassenger };
                 }
             }
+            else if (order is AdjustRouteOrder adjustOrder)
+            {
+                var key = (adjustOrder.Origin.Id, adjustOrder.Destination.Id);
+                byKey[key] = new Route(adjustOrder.Origin, adjustOrder.Destination, adjustOrder.AircraftType, AircraftCount: 1, FareOverride: null);
+            }
         }
 
         return byKey.Values
@@ -718,6 +808,7 @@ public static class QuarterEngine
     private static bool IsAircraftAvailable(QuarterOrder order, int year) => order switch
     {
         RouteOrder ro => Timeline.IsAvailable(ro.Aircraft, year),
+        AdjustRouteOrder aro => Timeline.IsAvailable(aro.AircraftType, year),
         AircraftOrder ao => Timeline.IsAvailable(ao.Type, year),
         LeaseAircraftOrder lo => Timeline.IsAvailable(lo.Type, year),
         _ => true, // orders with no aircraft (negotiations, alliances, private actions) are never era-gated

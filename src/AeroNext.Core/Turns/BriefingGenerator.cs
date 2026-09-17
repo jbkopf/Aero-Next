@@ -49,6 +49,23 @@ public static class BriefingGenerator
 
         if (previous is not null)
         {
+            var previousRouteByKey = previous.Routes.ToDictionary(QuarterEngine.RouteKey);
+
+            // Diff-derived, same pattern as RouteEntered above - no new
+            // state on QuarterResult needed. AdjustRouteOrder is the only
+            // thing that can change Aircraft.Id on an already-served pair
+            // today, but this doesn't need to know that; it just reports
+            // whatever changed.
+            foreach (var route in current.Routes
+                .Where(r => previousRouteByKey.TryGetValue(QuarterEngine.RouteKey(r), out var previousRoute) && previousRoute.Aircraft.Id != r.Aircraft.Id)
+                .OrderBy(r => r.Origin.Id, StringComparer.Ordinal)
+                .ThenBy(r => r.Destination.Id, StringComparer.Ordinal))
+            {
+                items.Add(new BriefingItem(
+                    ExceptionKind.RouteAircraftTypeChanged,
+                    $"{route.Origin.Id}-{route.Destination.Id}: aircraft changed to {route.Aircraft.Id}, capacity reset to 1 aircraft, fare reset to {route.FarePerPassenger}"));
+            }
+
             var previousLoadFactorByRoute = previous.Plan.RouteUsage.ToDictionary(u => QuarterEngine.RouteKey(u.Route), u => u.LoadFactor);
 
             foreach (var usage in current.Plan.RouteUsage
@@ -84,6 +101,7 @@ public static class BriefingGenerator
     private static string Describe(QuarterOrder order) => order switch
     {
         RouteOrder ro => $"{ro.Origin.Id}-{ro.Destination.Id}",
+        AdjustRouteOrder aro => $"{aro.Origin.Id}-{aro.Destination.Id}",
         HireExecutiveOrder => "hire executive",
         _ => order.GetType().Name,
     };
@@ -95,9 +113,15 @@ public static class BriefingGenerator
             return new BriefingItem(ExceptionKind.OrderRejectedOutOfRange, $"Order rejected, aircraft out of range: {Describe(order)}");
         }
 
+        if (order is AdjustRouteOrder aro && !aro.IsWithinRange)
+        {
+            return new BriefingItem(ExceptionKind.OrderRejectedOutOfRange, $"Order rejected, aircraft out of range: {Describe(order)}");
+        }
+
         var aircraft = order switch
         {
             RouteOrder r => r.Aircraft,
+            AdjustRouteOrder a => a.AircraftType,
             AircraftOrder a => a.Type,
             LeaseAircraftOrder l => l.Type,
             _ => null,
