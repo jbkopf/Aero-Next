@@ -2941,9 +2941,17 @@ toward dominance, a separate change).
   `RapidExpansionStrategy`'s own proven-safe metric) is the real
   remaining candidate, filed for a future round with its own check-in
   first - see M57's own writeup above.
-- **Europe's own idle-fleet stall under `DomesticProfitOptimizerStrategy`**
-  — flagged in M43, not yet root-caused. A natural next round in the
-  regional-balance effort, alongside the thrash-cycle item above.
+- ~~**Europe's own idle-fleet stall under `DomesticProfitOptimizerStrategy`**~~
+  — flagged in M43, resolved since (not by a dedicated fix, by the
+  cumulative effect of later work): Europe is now the *leading* region
+  in every real sweep, 31.3-34.0% win share and 0.5-1.0% bankrupt, up
+  from 86.3% bankrupt here. The win-condition-awareness mechanism above
+  measured a real null result on its own; Africa counting toward
+  dominance (geographically favoring Europe above every other region)
+  was the decisive lever, plus the later full-random-filler default
+  removing EastAsia's own structural advantage. Full write-up in
+  `docs/OPEN_WORK.md`'s Africa section and its full-random-filler
+  section.
 - **Changing an existing route's aircraft *type*** — no atomic order
   exists for this (M54): growing a route requires the exact type already
   flying it, `QuarterEngine` rejects a mismatch. A genuine "swap type"

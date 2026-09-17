@@ -288,17 +288,33 @@ quality first.
 
 Three items found during these investigations, deliberately deferred
 rather than folded in — all filed under `BASELINE_AI_ROADMAP.md`'s own
-"Kept in mind" now:
-- **The route open/shrink/regrow thrash cycle** — real, but a tried
-  static-threshold fix measurably made things *worse* (win rate
-  98.0%→85.3%); the real fix needs cross-quarter state, filed for a
-  future AI-strategy-expansion round.
-- **Europe's own idle-fleet stall** under `DomesticProfitOptimizerStrategy`
-  — Europe remains the worst-performing region (86.3% bankrupt after
-  both rounds) throughout; root cause not yet isolated.
-- **NorthAmerica's own post-M44 dominance (87.6% win share)** — real,
-  causally understood (dense local network), but flagged for a decision
-  on whether it's acceptable as-is.
+"Kept in mind" at the time. Re-checked here against the current state of
+`main`, since two of the three turn out to be stale:
+- ~~**The route open/shrink/regrow thrash cycle**~~ — the growth
+  (open/shrink/regrow) side closed by M55's cross-quarter route memory;
+  the open/close/reopen side is a separate, still-open, still-real
+  problem (route-*opening* selection quality, not timing) — see
+  `BASELINE_AI_ROADMAP.md`'s own "Kept in mind" section for the current,
+  accurate split.
+- ~~**Europe's own idle-fleet stall**~~ under `DomesticProfitOptimizerStrategy`
+  — resolved, not by a dedicated fix but by the cumulative effect of
+  later work: Europe went from the worst-performing region here (86.3%
+  bankrupt) to the **leading region** in every sweep this session
+  (31.3-34.0% win share, 0.5-1.0% bankrupt) — this section's own
+  full-random-filler table above has the verified numbers. The specific
+  mechanism (win-condition-awareness alone measured a real null result;
+  Africa counting toward dominance, geographically favoring Europe above
+  every other region, was the decisive lever) has its own full write-up
+  in this document's Africa section below.
+- ~~**NorthAmerica's own post-M44 dominance (87.6% win share)**~~ — not
+  a stable trait to accept or reject after all; NorthAmerica is now one
+  of the *weakest* regions (10.0-12.7% win share, second-lowest of six)
+  despite the same dense 22-city local network this bullet flagged as
+  the cause. Consistent with this document's own recurring finding that
+  "which single region ends up lopsided keeps moving" (see the
+  NetworkOptimizerStrategy-fix and demand-ranking sections above) — the
+  underlying regional-balance question was never really about
+  NorthAmerica specifically.
 
 `RegionalEconomics.Factor` is confirmed not the cause of the original
 imbalance (NorthAmerica and EastAsia shared the same 1.117 factor yet
