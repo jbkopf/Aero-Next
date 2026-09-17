@@ -402,22 +402,35 @@ own design pillar directly (CLAUDE.md: "any feature that makes this feel
 more like a spreadsheet and less like a territorial fight is suspect") -
 shipped with this understanding in hand, by explicit user decision.
 
-**A new, still-real NorthAmerica cluster remains, at years 23-25 this
-time (Q91-100, 78% of its bankruptcies) - the live follow-up target.**
-Confirmed genuine (not a bug) via the same closure-timing diagnostic:
-organic, freshly-started ~8-quarter streaks, not a backlog artifact.
-Very plausibly the 1973 oil crisis (years 19-22) pushing many
-independent routes into unprofitability at the same real time, with the
-matching 8-quarters-later closure wave landing in the same narrow
-window - a genuinely harder problem than a synchronization bug, since a
-uniform patience threshold can't desynchronize a real, shared external
-shock. Concrete next step for whoever picks this up: either a
-per-route-timing-aware threshold (harder, no obvious design yet) or
-accepting this as an inherent, authored-history-driven pattern rather
-than something to eliminate. The low overall win rate/high stalemate
-rate (94.7%), while now understood, was not itself judged a problem to
-fix this round - `WinConditionChecker`'s own design is a separate,
-un-scoped question if it's ever revisited.
+**A new NorthAmerica cluster was found at years 23-25 (Q91-100, 78% of
+its bankruptcies), very plausibly the 1973 oil crisis (years 19-22)
+pushing many independent routes into unprofitability at the same real
+time, with the matching 8-quarters-later closure wave landing in the
+same narrow window** - flagged at the time as a genuinely harder problem
+than a synchronization bug, since a uniform patience threshold can't
+desynchronize a real, shared external shock, and left as the "live
+follow-up target" with no concrete design yet.
+
+**Resolved since, as a side effect of unrelated work - re-confirmed
+directly under today's game state.** `BASELINE_AI_ROADMAP.md`'s own M56
+follow-up (switching `DomesticProfitOptimizerStrategy`'s Phase 1 ranking
+from `EstimatedRevenue` to raw demand + hub bonus, done for a completely
+different reason - fixing that strategy's own capacity-blind pair
+selection) eliminated NorthAmerica's structural growth-into-bankruptcy
+pattern outright: 74.1%→0.4% bankrupt, and the Q91-100 spike specifically
+went from 161 events to zero in that same sweep. This section's own
+"live follow-up target" framing was never updated to reflect that at the
+time. **Re-checked freshly here, under the current game state** (every
+change this session - Cairo/Lagos/Brussels weights, Africa counting
+toward the win condition, the `GameDifficulty` mechanism, and especially
+the full-random filler default, which reshuffled regional win-share
+patterns broadly): a 300-game sweep on the real production wiring found
+NorthAmerica bankruptcy at 1.52% (3/197 seats) - and **zero of those
+three land anywhere near Q91-100**; all three cluster instead around
+Q31-40 (~1962), a sample far too small (n=3) to read as a real pattern
+rather than noise. The oil-crisis cluster is gone, not just smaller, and
+stays gone after everything else that's changed since. Closed - not an
+open item any more.
 
 ---
 
