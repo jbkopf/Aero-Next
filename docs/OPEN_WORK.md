@@ -831,8 +831,13 @@ open item any more.
   that proxy rather than coexist with it.
 
 ### `WIN_CONDITIONS_ROADMAP.md`
-- **Difficulty tiers** — explicitly deferred, no `Difficulty` concept
-  exists anywhere yet.
+- **Difficulty tiers** — partially closed: a real `GameDifficulty` enum
+  (Normal/Hard) now exists (`AeroNext.Core.Competition`), tying
+  `RequiredRegionCount`/`TargetRegionCount` to difficulty selection at
+  game setup, per the user's own direct request. Still open: every other
+  axis a "difficulty" concept implies (AI strength/aggressiveness,
+  starting cash, demand-shock severity) - only the win-condition bar
+  itself is tunable today.
 - **Briefing integration** — win-streak progress isn't surfaced in
   `BriefingGenerator`'s exception queue.
 - ~~**Reconciling the QA harness's old informal "wins" column** (highest
