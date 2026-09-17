@@ -15,9 +15,26 @@ using AeroNext.QaHarness;
 //
 // Regions aren't exclusive in GameSetup.CreateSeats any more (a player can
 // share a home region with a rival), but its AI-fill logic still always
-// avoids regions already claimed, richest-unclaimed-first - so the normal
-// sweep never puts an AI seat in a shared region, only humans can create
-// that. --unconstrained-regions swaps GameSetup.CreateSeats entirely for
+// avoids regions already claimed - so the normal sweep never puts an AI
+// seat in a shared region, only humans can create that.
+//
+// EastAsia-dominance follow-up (docs/OPEN_WORK.md): filler region draw is
+// now uniform-random among unclaimed regions (fillerWeightExponent: 0.0),
+// not the old richest-unclaimed-first cut - a real 300-game sweep found
+// the deterministic cut structurally excluded AustralAsia/SouthWestAsia
+// from filler in most games, handing EastAsia a walkover (0% win rate
+// once both were actually seated by a real airline, vs 61.3% when
+// neither was) rather than a real fight. Measured on this actual wiring
+// across two independent 300-game seed ranges: EastAsia's own win share
+// collapsed from 47.0% to ~20-23%, NorthAmerica became the new leading
+// region at ~40% (its own real fundamentals - most cities, tied-highest
+// long-run Factor, no early-campaign historical handicap the way
+// EastAsia's Maoist-era suppression gives it), bankruptcy essentially
+// unchanged. Reuses configRng sequentially (already consumed by
+// GameConfigGenerator.Generate just above) rather than a second seed -
+// one continuous seeded stream per game, per CLAUDE.md's determinism rule.
+//
+// --unconstrained-regions swaps GameSetup.CreateSeats entirely for
 // UnconstrainedSeatGenerator (every one of the 4 seats independently
 // random, no richness bias, no avoiding claimed regions at all) - isolates
 // "is a region's disadvantage intrinsic, or an artifact of GameSetup's own
@@ -59,7 +76,7 @@ for (var i = 0; i < games; i++)
         var configRng = new SimRng(configSeed);
         IReadOnlyList<AirlineSeat> seats = unconstrainedRegions
             ? UnconstrainedSeatGenerator.Generate(configRng, cities)
-            : GameSetup.CreateSeats(GameConfigGenerator.Generate(configRng, cities), cities);
+            : GameSetup.CreateSeats(GameConfigGenerator.Generate(configRng, cities), cities, configRng, fillerWeightExponent: 0.0);
 
         var result = FullGameRunner.Run(i, configSeed, campaignSeed, quarters, seats, cities, fleetCatalog, growthSchedule);
         results.Add(result);

@@ -30,8 +30,30 @@ public sealed record AirlineSeat(string AirlineName, bool IsHuman, Region HomeRe
 /// Since the Asia region split (HomeRegions.All has 6 members for exactly 4
 /// player slots), this is a genuine draft rather than "one seat per region":
 /// humans claim any home region they like, and whichever slots remain go to
-/// the richest *unclaimed* regions by RegionalEconomics.Factor — so not
-/// every home region appears in every game.
+/// unclaimed regions — so not every home region appears in every game. Which
+/// unclaimed regions is itself a real, tunable choice: the plain default
+/// below (no fillerRegionRng) is a deterministic richest-*unclaimed*-first
+/// cut by RegionalEconomics.Factor, still exactly what it's always been —
+/// but the real QA harness (AeroNext.QaHarness/Program.cs, the closest
+/// thing to "the real game" this headless-sim phase has) no longer calls
+/// it that way. EastAsia-dominance follow-up (docs/OPEN_WORK.md): that
+/// deterministic cut structurally excluded AustralAsia/SouthWestAsia from
+/// filler in most games (both rank 5th/6th by Factor) — a real 300-game
+/// sweep found EastAsia's own win rate was 0% in the minority of games
+/// where both were actually seated by a real competing airline, vs 61.3%
+/// when neither was: EastAsia's whole dominance was a walkover, not a real
+/// fight. The real harness now passes fillerRegionRng with
+/// fillerWeightExponent: 0.0 (uniform-random among unclaimed regions,
+/// wealth ignored entirely) — measured on the actual shipped wiring across
+/// two independent 300-game seed ranges: EastAsia's own win share
+/// collapsed from 47.0% to ~20-23%, NorthAmerica became the new leading
+/// region at ~40% (plausible given its own real fundamentals — most
+/// cities, tied-highest long-run Factor, no early-campaign historical
+/// handicap the way EastAsia's Maoist-era suppression gives it), with
+/// bankruptcy essentially unchanged. The deterministic default here stays
+/// exactly as-is (many existing tests and callers rely on it
+/// byte-for-byte) — see fillerRegionRng's own doc comment below for the
+/// full mechanism.
 ///
 /// **Regions are no longer exclusive between humans.** Multiple humans can
 /// share a home region, as long as their starting cities are distinct —

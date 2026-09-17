@@ -483,6 +483,81 @@ un-scoped question if it's ever revisited.
   point on the dial. `StartingConditionsResolver.Resolve` was reverted to
   the original heuristic-first behavior at this point.
 
+- **EastAsia dominance, root-caused and fixed — the filler-region exponent
+  above stops being just a "future difficulty setting" scaffold and
+  becomes the real shipped default.** EastAsia won 47.0% of games in
+  every sweep this session (vs. Europe's 24.0%, the next highest) despite
+  starting *weak*, not strong: a real 1955-effective-demand check found
+  EastAsia's total (326) is the second-lowest of all six regions —
+  Beijing alone drops from a static weight of 95 to an effective 28.5
+  under the Maoist-era closed-economy multiplier (0.3x). A "does it win
+  late once China's real economic boom lands" follow-up was tested and
+  **refuted directly**: EastAsia's median win year is 1975, right in the
+  middle of the pack (Europe 1971, SouthWestAsia 1965, NorthAmerica/
+  SouthAmerica 1976) — 88.7% of its wins land in 1975-1984, while Beijing
+  is still under Deng's early-reform 0.4x, decades before the 2001 WTO
+  boom or the 2015 peak (3.5x).
+
+  **The real mechanism was geography plus a walkover, not strength or
+  timing.** EastAsia has the tightest, richest home cluster of any region
+  (1,433 km avg intra-region distance, tied-highest per-city demand
+  density) and sits closer to its two neighbors than any other region
+  sits to its own best neighbor (2,518 km to AustralAsia, 4,179 km to
+  SouthWestAsia — the asymmetry is stark: AustralAsia's own path back to
+  EastAsia is 5,067 km, roughly double). A dominated-region breakdown of
+  EastAsia's 136 genuine dominance wins found **99.3% are exclusively
+  {home, AustralAsia, SouthWestAsia}** — it essentially never expands
+  beyond this one 3-region combination. The decisive finding: EastAsia's
+  win rate is **61.3% when neither AustralAsia nor SouthWestAsia is
+  seated by a real competing airline, and exactly 0.0% (0/16 games) when
+  both are** — traced straight back to `GameSetup.CreateSeats`'s own
+  richest-4-by-`RegionalEconomics.Factor` filler cut, which structurally
+  excludes AustralAsia (rank 6, Factor 0.756) and SouthWestAsia (rank 5,
+  Factor 1.006 — a 2.3% miss behind Europe's own 4th-place 1.029) from
+  filler in most games. EastAsia's dominance was almost entirely about
+  walking into unclaimed land, not beating real rivals.
+
+  **Fixed by making the already-built weighted-random filler
+  (`fillerRegionRng`/`fillerWeightExponent`, this section's own scaffold
+  above) the real default at the one real "how does a game actually get
+  set up" call site, `AeroNext.QaHarness/Program.cs`** — reuses `configRng`
+  sequentially (already consumed by `GameConfigGenerator.Generate` just
+  above it) rather than a second seed, one continuous seeded stream per
+  game per CLAUDE.md's determinism rule, at `fillerWeightExponent: 0.0`
+  (pure uniform among unclaimed regions, ignoring wealth entirely — 0.0
+  vs. 0.5 were measured near-identical in an earlier screen, so the real
+  lever is abandoning the deterministic cut at all, not fine-tuning past
+  it). `GameSetup.CreateSeats`'s own method-level default is untouched
+  (still `fillerRegionRng: null` = the original deterministic cut,
+  byte-identical for every existing test/caller that doesn't opt in) —
+  only the real harness's own call site changed.
+
+  **Measured on the actual shipped wiring, not a scratchpad approximation
+  — two independent 300-game runs of the real CLI** (seed 1 and seed
+  1000, avoiding the earlier round's own scratchpad tool, which derived
+  its filler RNG from a separate offset stream and was never
+  cross-validated against a second seed range):
+  | | Seed 1 (300 games) | Seed 1000 (300 games) |
+  |---|---|---|
+  | NorthAmerica win share | 39.0% | 41.7% |
+  | EastAsia win share | 23.3% | 20.0% |
+  | SouthWestAsia win share | 14.0% | 11.7% |
+  | AustralAsia win share | 9.7% | 11.3% |
+  | Europe win share | 7.7% | 9.7% |
+  | SouthAmerica win share | 6.3% | 5.7% |
+  | Games with a bankruptcy | 19/300 | 17/300 |
+  | Avg win quarter | 118.6 | 110.2 |
+
+  Consistent across both independent seed ranges — real signal, not
+  noise. EastAsia's own share collapses from 47.0% to ~20-23%, more than
+  half; NorthAmerica becomes the new leading region at ~40%, plausible
+  given its own real fundamentals (most cities of any region, tied-highest
+  long-run `RegionalEconomics.Factor`, and — unlike EastAsia — no
+  early-campaign historical handicap to overcome first). Bankruptcy stays
+  essentially unchanged from every deterministic-filler baseline this
+  session measured (~1.7-1.9% per-seat) — this redistributes who gets a
+  fair shot at winning, it doesn't destabilize anything.
+
   **Root-caused instead of left rejected: a real bug, not an inherent
   tradeoff.** Every route-picking method here built its own
   `GravityDemandModel` with no `schedule`/`year` — invisible to
