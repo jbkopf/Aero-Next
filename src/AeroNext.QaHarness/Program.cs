@@ -26,13 +26,17 @@ using AeroNext.QaHarness;
 // once both were actually seated by a real airline, vs 61.3% when
 // neither was) rather than a real fight. Measured on this actual wiring
 // across two independent 300-game seed ranges: EastAsia's own win share
-// collapsed from 47.0% to ~20-23%, NorthAmerica became the new leading
-// region at ~40% (its own real fundamentals - most cities, tied-highest
-// long-run Factor, no early-campaign historical handicap the way
-// EastAsia's Maoist-era suppression gives it), bankruptcy essentially
-// unchanged. Reuses configRng sequentially (already consumed by
-// GameConfigGenerator.Generate just above) rather than a second seed -
-// one continuous seeded stream per game, per CLAUDE.md's determinism rule.
+// collapsed from 47.0% to 11.3%, Europe became the new leading region at
+// 31-34% (its own real fundamentals - most cities of any region, highest
+// total demand weight), bankruptcy essentially unchanged. NorthAmerica is
+// actually the second-weakest region (10-13%) despite its dense local
+// network - an earlier pass at this measurement wrongly named it the new
+// leader, from a since-fixed bug in RegionalOutcomeReport.cs that read
+// "who ended richest" instead of the real win condition (see
+// docs/OPEN_WORK.md's own correction). Reuses configRng sequentially
+// (already consumed by GameConfigGenerator.Generate just above) rather
+// than a second seed - one continuous seeded stream per game, per
+// CLAUDE.md's determinism rule.
 //
 // --unconstrained-regions swaps GameSetup.CreateSeats entirely for
 // UnconstrainedSeatGenerator (every one of the 4 seats independently

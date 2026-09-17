@@ -6,9 +6,17 @@ namespace AeroNext.QaHarness;
 /// <summary>
 /// One home region's outcome, averaged across every seat that started there
 /// in the sweep — not one per game: under the unconstrained-regions QA mode
-/// a single game can contribute 0-4 seats to any one region. "Wins" is a
-/// final-cash comparison only, not a modeled victory condition — the sim
-/// doesn't have one yet.
+/// a single game can contribute 0-4 seats to any one region.
+///
+/// Correctness follow-up: "Wins" used to be a final-cash comparison
+/// ("the sim doesn't have one yet"), predating M23/M24's own real win
+/// condition (WinConditionChecker/CampaignRanking, FullGameResult.Winner)
+/// - never updated once that landed, so this report silently kept
+/// reporting "who ended the game richest" as "Wins" for every sweep that
+/// read it, completely disconnected from which airline actually won.
+/// Fixed to read FullGameResult.Winner directly - see docs/OPEN_WORK.md's
+/// own write-up for the real numbers this changes for the full-random-filler
+/// default specifically (the regression this was caught investigating).
 /// </summary>
 public sealed record RegionalOutcome(
     Region Region,
@@ -38,12 +46,10 @@ public static class RegionalOutcomeReport
 
         foreach (var result in cleanResults)
         {
-            var bestCash = result.FinalCash.Values.Aggregate((a, b) => a > b ? a : b);
-
             foreach (var (name, region) in result.HomeRegionByName)
             {
                 var cash = result.FinalCash[name];
-                perRegion[region].Add((cash, result.BankruptcyQuarter[name], cash == bestCash));
+                perRegion[region].Add((cash, result.BankruptcyQuarter[name], name == result.Winner));
             }
         }
 

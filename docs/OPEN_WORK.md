@@ -329,14 +329,37 @@ NorthAmerica's 26.0%), still unexplained. **The user made an explicit,
 informed decision to ship M63 live with the full, real 2-strategy roster
 anyway**, accepting the known 6.3%-win-rate collapse as a real, load-
 bearing regression from the M59/M62 baseline (39.0%), rather than keep
-blocking on a fourth investigation round. **`DomesticProfitOptimizerStrategy`'s
+blocking on a fourth investigation round. `DomesticProfitOptimizerStrategy`'s
 own dedicated fix for its interaction with M63's boosted demand figures
-is now the active priority for this area** — not the same
-`ConsolidationMultiplier` approach already proven harmful there once (see
-M64's own write-up for the full evidence chain), a genuinely new design
-question. The smaller, still-unexplained EastAsia regional shift (present
-even in the healthy `RapidExpansionStrategy`-only state) is a real,
-separate follow-up once the primary collapse is fixed.
+was flagged as the active priority for this area at the time.
+
+**Re-evaluated against the current state of `main` — the regression is
+resolved, as a side effect of everything shipped since, not a dedicated
+fix.** A fresh 300-game sweep (seed 1, current shipped defaults: both
+real strategies, M63 enabled, full-random filler, the fixed
+`RegionalOutcomeReport`), measured with the exact same metric the
+original 6.3% used (`Winner is not null` out of all clean games):
+**6.3% (19/300) → 100.0% (300/300)**. Broken down by win type
+(`FullGameResult.WinnerRegionsDominated`/`SolventAtEnd` directly, not the
+report): 74.0% genuine regional dominance, 0.3% sole-survivor, 25.7%
+end-of-campaign ranking fallback — dominance alone, the strictest
+category, already exceeds the old *combined* rate twelvefold. Bankruptcy
+recovered just as sharply: the original write-up's own per-region table
+(Europe 95.4%, AustralAsia 87.6%, SouthAmerica 89.9%, SouthWestAsia
+55.2% bankrupt) is now Europe 0.5%, AustralAsia 3.6%, SouthAmerica 2.0%,
+SouthWestAsia 2.4% (the real CLI's own seed-1 run, this section's own
+verified numbers above). Not attributable to any single change — M63/M64
+shipped mid-session, before the M58-follow-up rounds (executive-cost
+gating, cross-quarter route memory, the sustained-single-aircraft-closure
+fix) and the full-random filler both landed; the cumulative stabilizing
+effect of that later work resolved this regression as a side effect,
+never targeted at it directly. The previously-flagged "smaller,
+still-unexplained EastAsia regional shift" is resolved too, for the
+separate, already-understood reason above: EastAsia's own filler-walkover
+advantage (11.3% win share now, not the outlier it was) rather than
+anything specific to M63. `DomesticProfitOptimizerStrategy`'s dedicated
+fix is no longer a blocking priority — the regression it was scoped
+against is gone.
 
 **A seventh round, `BASELINE_AI_ROADMAP.md`'s M58, surfaced a concrete
 NorthAmerica lead, then an eighth round (M58 follow-up) traced and
@@ -552,24 +575,48 @@ open item any more.
   cross-validated against a second seed range):
   | | Seed 1 (300 games) | Seed 1000 (300 games) |
   |---|---|---|
-  | NorthAmerica win share | 39.0% | 41.7% |
-  | EastAsia win share | 23.3% | 20.0% |
-  | SouthWestAsia win share | 14.0% | 11.7% |
-  | AustralAsia win share | 9.7% | 11.3% |
-  | Europe win share | 7.7% | 9.7% |
-  | SouthAmerica win share | 6.3% | 5.7% |
+  | Europe win share | 31.3% | 34.0% |
+  | SouthWestAsia win share | 23.3% | 24.0% |
+  | AustralAsia win share | 20.0% | 13.3% |
+  | EastAsia win share | 11.3% | 11.3% |
+  | NorthAmerica win share | 10.0% | 12.7% |
+  | SouthAmerica win share | 4.0% | 4.7% |
   | Games with a bankruptcy | 19/300 | 17/300 |
   | Avg win quarter | 118.6 | 110.2 |
 
   Consistent across both independent seed ranges — real signal, not
-  noise. EastAsia's own share collapses from 47.0% to ~20-23%, more than
-  half; NorthAmerica becomes the new leading region at ~40%, plausible
-  given its own real fundamentals (most cities of any region, tied-highest
-  long-run `RegionalEconomics.Factor`, and — unlike EastAsia — no
-  early-campaign historical handicap to overcome first). Bankruptcy stays
-  essentially unchanged from every deterministic-filler baseline this
-  session measured (~1.7-1.9% per-seat) — this redistributes who gets a
-  fair shot at winning, it doesn't destabilize anything.
+  noise. EastAsia's own share collapses from 47.0% to 11.3%, more than
+  three quarters; **Europe becomes the new leading region at 31-34%**,
+  plausible given its own real fundamentals (most cities of any region —
+  27 — and the highest total demand weight of any region, 1,443, per the
+  Europe/NorthAmerica GDP-comparison side-thread below). NorthAmerica does
+  *not* become dominant — despite the densest single-region local network
+  (M44) it lands at only 10-13%, the second-weakest region in both seed
+  ranges. Bankruptcy stays essentially unchanged from every
+  deterministic-filler baseline this session measured (~1.7-1.9%
+  per-seat) — this redistributes who gets a fair shot at winning, it
+  doesn't destabilize anything.
+
+  **Correction, found investigating the M63 regression below: these
+  numbers were originally mis-measured and mis-documented.** The first
+  pass at this validation trusted the real CLI's own printed "Regional
+  Outcome Breakdown" table, whose `Wins` column turned out to be a stale
+  final-cash comparison predating M23/M24's real win condition, never
+  updated once `FullGameResult.Winner` existed — see
+  `RegionalOutcomeReport.cs`'s own doc comment and
+  `RegionalOutcomeReportTests.cs` for the fix and its regression tests.
+  It silently reported "who ended richest," not "who actually won,"
+  which is how the original pass at this section got NorthAmerica
+  backwards as the "new leading region" when Europe was the real one all
+  along. Root-caused by cross-validating an independently-instrumented
+  per-game log (reading `FullGameResult.Winner` directly) against the
+  CLI's own printed table across the same 300 games — zero differences
+  in the underlying simulation, the discrepancy was entirely in the
+  report's own aggregation. The fix has no effect on any *other* number
+  in this document: every other investigation here always read
+  `WinnerRegionsDominated`/`SolventAtEnd`/`Winner` directly rather than
+  the CLI's own summary table, so only this one table's numbers were
+  ever wrong.
 
   **Root-caused instead of left rejected: a real bug, not an inherent
   tradeoff.** Every route-picking method here built its own

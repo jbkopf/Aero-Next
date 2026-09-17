@@ -46,11 +46,16 @@ public sealed record AirlineSeat(string AirlineName, bool IsHuman, Region HomeRe
 /// fillerWeightExponent: 0.0 (uniform-random among unclaimed regions,
 /// wealth ignored entirely) — measured on the actual shipped wiring across
 /// two independent 300-game seed ranges: EastAsia's own win share
-/// collapsed from 47.0% to ~20-23%, NorthAmerica became the new leading
-/// region at ~40% (plausible given its own real fundamentals — most
-/// cities, tied-highest long-run Factor, no early-campaign historical
-/// handicap the way EastAsia's Maoist-era suppression gives it), with
-/// bankruptcy essentially unchanged. The deterministic default here stays
+/// collapsed from 47.0% to 11.3%, Europe became the new leading region at
+/// 31-34% (plausible given its own real fundamentals — most cities of any
+/// region, highest total demand weight), with bankruptcy essentially
+/// unchanged. (An earlier pass at this measurement wrongly named
+/// NorthAmerica as the new leader, from a since-fixed bug in
+/// RegionalOutcomeReport.cs that read "who ended richest" instead of the
+/// real win condition — see docs/OPEN_WORK.md's own correction.
+/// NorthAmerica is actually the second-weakest region here, 10-13%.)
+///
+/// The deterministic default here stays
 /// exactly as-is (many existing tests and callers rely on it
 /// byte-for-byte) — see fillerRegionRng's own doc comment below for the
 /// full mechanism.
