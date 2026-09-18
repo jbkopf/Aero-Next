@@ -323,6 +323,82 @@ public class AircraftCatalogTests
     }
 
     [Fact]
+    public void Load_ParsesEndOfManufactureYear_WhenPresent()
+    {
+        const string json = """
+        [{ "id": "t", "name": "Test", "seats": 100, "rangeKm": 1000, "costDollars": 1, "productionRatePerQuarter": 4, "availableFromYear": 1960, "endOfManufactureYear": 1979 }]
+        """;
+
+        var fleet = AircraftCatalog.Load(json);
+
+        Assert.Equal(1979, fleet.Single().EndOfManufactureYear);
+    }
+
+    [Fact]
+    public void Load_EndOfManufactureYear_DefaultsToNull_WhenAbsent()
+    {
+        const string json = """
+        [{ "id": "t", "name": "Test", "seats": 100, "rangeKm": 1000, "costDollars": 1, "productionRatePerQuarter": 4, "availableFromYear": 1960 }]
+        """;
+
+        var fleet = AircraftCatalog.Load(json);
+
+        Assert.Null(fleet.Single().EndOfManufactureYear);
+    }
+
+    [Fact]
+    public void Load_ThrowsWhenEndOfManufactureYearIsBeforeAvailableFromYear()
+    {
+        const string json = """
+        [{ "id": "t", "name": "Test", "seats": 100, "rangeKm": 1000, "costDollars": 1, "productionRatePerQuarter": 4, "availableFromYear": 1960, "endOfManufactureYear": 1959 }]
+        """;
+
+        Assert.Throws<InvalidDataException>(() => AircraftCatalog.Load(json));
+    }
+
+    [Fact]
+    public void Load_EndOfManufactureYear_EqualToAvailableFromYear_IsAccepted()
+    {
+        // A vanishingly short real production run (e.g. Concorde) is still
+        // legal - only strictly before AvailableFromYear is rejected.
+        const string json = """
+        [{ "id": "t", "name": "Test", "seats": 100, "rangeKm": 1000, "costDollars": 1, "productionRatePerQuarter": 4, "availableFromYear": 1960, "endOfManufactureYear": 1960 }]
+        """;
+
+        var fleet = AircraftCatalog.Load(json);
+
+        Assert.Equal(1960, fleet.Single().EndOfManufactureYear);
+    }
+
+    [Fact]
+    public void LoadFile_RealFleet_NoEndOfManufactureYear_EverBeforeAvailableFromYear()
+    {
+        var fleet = AircraftCatalog.LoadFile(DataPath);
+
+        Assert.All(fleet.Where(a => a.EndOfManufactureYear is not null),
+            a => Assert.True(a.EndOfManufactureYear >= a.AvailableFromYear,
+                $"{a.Id}: EndOfManufactureYear {a.EndOfManufactureYear} is before its own AvailableFromYear {a.AvailableFromYear}."));
+    }
+
+    [Fact]
+    public void LoadFile_RealFleet_HasBothResearchedAndStillInProductionEntries()
+    {
+        // Phase (d) data-authoring pass (docs/AIRCRAFT_ACQUISITION_ROADMAP.md):
+        // every real entry was researched, not just left at the default -
+        // an aircraft with a real historical end (707, retired from
+        // production 1979) and one still in production as of the
+        // campaign's own 2015 end date (777, no fabricated future date)
+        // are both real, deliberate outcomes of that research, not gaps.
+        var fleet = AircraftCatalog.LoadFile(DataPath);
+
+        var boeing707 = fleet.Single(a => a.Id == "707");
+        Assert.Equal(1979, boeing707.EndOfManufactureYear);
+
+        var boeing777 = fleet.Single(a => a.Id == "777");
+        Assert.Null(boeing777.EndOfManufactureYear);
+    }
+
+    [Fact]
     public void Load_ConvertsCostDollarsToMoney()
     {
         const string json = """
@@ -382,6 +458,7 @@ public class AircraftCatalogTests
     [InlineData("""{ "id": "x", "name": "N", "seats": 100, "rangeKm": 1000, "costDollars": 1, "productionRatePerQuarter": 0, "availableFromYear": 1960 }""")]
     [InlineData("""{ "id": "x", "name": "N", "seats": 100, "rangeKm": 1000, "costDollars": 1, "productionRatePerQuarter": 4, "availableFromYear": 1960, "costPerAvailableSeatKm": 0 }""")]
     [InlineData("""{ "id": "x", "name": "N", "seats": 100, "rangeKm": 1000, "costDollars": 1, "productionRatePerQuarter": 4, "availableFromYear": 1960, "cruiseSpeedKmh": 0 }""")]
+    [InlineData("""{ "id": "x", "name": "N", "seats": 100, "rangeKm": 1000, "costDollars": 1, "productionRatePerQuarter": 4, "availableFromYear": 1960, "endOfManufactureYear": 1959 }""")]
     public void Load_ThrowsOnInvalidEntry(string entry)
     {
         var json = $"[{entry}]";
