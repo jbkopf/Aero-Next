@@ -1036,8 +1036,11 @@ public class AiToolkitTests
     }
 
     [Fact]
-    public void TryProposeTypeSwap_RequiresLease_EmitsLeaseThenAdjust_CostsTwoActions()
+    public void TryProposeTypeSwap_RequiresLease_EmitsLeaseAlone_CostsOneAction()
     {
+        // Leasing resolves next quarter now (two-phase,
+        // docs/AIRCRAFT_ACQUISITION_ROADMAP.md) - no AdjustRouteOrder yet,
+        // mirroring the CanBuyOutright path below.
         var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
         var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
         var route = new Route(a, b, BigAircraft, AircraftCount: 1);
@@ -1050,10 +1053,9 @@ public class AiToolkitTests
 
         AiToolkit.TryProposeTypeSwap(context, load, candidate, orders, reservedUnitIds, ref spent);
 
-        Assert.Equal(2, orders.Count);
-        Assert.IsType<LeaseAircraftOrder>(orders[0]);
-        Assert.IsType<AdjustRouteOrder>(orders[1]);
-        Assert.Equal(2, spent);
+        var order = Assert.Single(orders);
+        Assert.IsType<LeaseAircraftOrder>(order);
+        Assert.Equal(1, spent);
     }
 
     [Fact]
@@ -1141,14 +1143,14 @@ public class AiToolkitTests
         var candidate = (Type: Aircraft, ProfitDelta: Money.FromDollars(1), UsesIdleUnit: false, CanBuyOutright: false);
         var orders = new System.Collections.Generic.List<QuarterOrder>();
         var reservedUnitIds = new System.Collections.Generic.HashSet<int>();
-        var spent = 2; // 2 + 2 (lease path's own cost) > actionCap 3
+        var spent = 3; // 3 + 1 (lease path's own cost, now 1 not 2) > actionCap 3
         var load = new RouteLoad(route, DemandPassengers: 1, SeatsPerQuarter: 1, PassengersCarried: 1);
         var context = MakeContext(new[] { a, b }, a, routes: new[] { route }, actionCap: 3);
 
         AiToolkit.TryProposeTypeSwap(context, load, candidate, orders, reservedUnitIds, ref spent);
 
         Assert.Empty(orders);
-        Assert.Equal(2, spent);
+        Assert.Equal(3, spent);
     }
 
     // --- ApplyManagementToolkit: enableReactiveTypeSwap / enableProactiveTypeSwap / allowTypeSwapLeaseOrBuy integration ---

@@ -209,15 +209,17 @@ public sealed class DomesticProfitOptimizerStrategy : IAiStrategy
                     orders.Add(new AircraftOrder(bestOrdered.Value.Aircraft, Quantity: 1));
                     spent += 1;
                 }
-                else if (bestOrdered is not null && oriented is not null && spent + 2 <= context.ActionCap
+                else if (bestOrdered is not null && oriented is not null && spent + 1 <= context.ActionCap
                     && BaselineAi.HasSlotAtEveryGateway(oriented.Value.Origin, oriented.Value.Destination, context.AvailableSlotsByCity, slotsReservedByCity)
                     && AiToolkit.HasRoomAtEveryCity(oriented.Value.Origin, oriented.Value.Destination, context.CityWideSlotsRemaining, citySpendReservedByCity))
                 {
+                    // Leasing resolves next quarter now (two-phase,
+                    // docs/AIRCRAFT_ACQUISITION_ROADMAP.md) - submit it
+                    // alone, 1 action, no paired RouteOrder yet. Once
+                    // delivered it shows up idle and a later quarter's own
+                    // re-evaluation opens the pair.
                     orders.Add(new LeaseAircraftOrder(bestOrdered.Value.Aircraft, Quantity: 1));
-                    orders.Add(new RouteOrder(oriented.Value.Origin, oriented.Value.Destination, bestOrdered.Value.Aircraft));
-                    BaselineAi.ReserveSlots(oriented.Value.Origin, oriented.Value.Destination, slotsReservedByCity);
-                    AiToolkit.ReserveCityWideSlots(oriented.Value.Origin, oriented.Value.Destination, citySpendReservedByCity);
-                    spent += 2;
+                    spent += 1;
                 }
             }
         }

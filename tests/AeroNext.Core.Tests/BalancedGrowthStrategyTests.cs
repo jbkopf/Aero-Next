@@ -89,11 +89,12 @@ public class BalancedGrowthStrategyTests
 
         var orders = Strategy.DecideOrders(context);
 
+        // Leasing resolves next quarter now (two-phase,
+        // docs/AIRCRAFT_ACQUISITION_ROADMAP.md) - no RouteOrder yet.
         Assert.Empty(orders.OfType<AircraftOrder>());
         var lease = Assert.Single(orders.OfType<LeaseAircraftOrder>());
         Assert.Equal("wide", lease.Type.Id);
-        var routeOrder = Assert.Single(orders.OfType<RouteOrder>());
-        Assert.Equal(new HashSet<string> { "home", "candB" }, new HashSet<string> { routeOrder.Origin.Id, routeOrder.Destination.Id });
+        Assert.Empty(orders.OfType<RouteOrder>());
     }
 
     [Fact]
@@ -161,8 +162,11 @@ public class BalancedGrowthStrategyTests
 
         var orders = Strategy.DecideOrders(context);
 
-        var routeOrder = Assert.Single(orders.OfType<RouteOrder>());
-        Assert.Equal(new HashSet<string> { "home", "candB" }, new HashSet<string> { routeOrder.Origin.Id, routeOrder.Destination.Id });
+        // Leasing resolves next quarter now (two-phase,
+        // docs/AIRCRAFT_ACQUISITION_ROADMAP.md) - no RouteOrder yet.
+        Assert.Empty(orders.OfType<RouteOrder>());
+        var lease = Assert.Single(orders.OfType<LeaseAircraftOrder>());
+        Assert.Equal("wide", lease.Type.Id);
     }
 
     [Fact]
@@ -224,8 +228,11 @@ public class BalancedGrowthStrategyTests
 
         var orders = Strategy.DecideOrders(context);
 
-        var routeOrder = Assert.Single(orders.OfType<RouteOrder>());
-        Assert.Equal(new HashSet<string> { "home", "within" }, new HashSet<string> { routeOrder.Origin.Id, routeOrder.Destination.Id });
+        // Leasing resolves next quarter now (two-phase,
+        // docs/AIRCRAFT_ACQUISITION_ROADMAP.md) - no RouteOrder yet.
+        Assert.Empty(orders.OfType<RouteOrder>());
+        var lease = Assert.Single(orders.OfType<LeaseAircraftOrder>());
+        Assert.Equal("wide", lease.Type.Id);
     }
 
     [Fact]
@@ -279,24 +286,30 @@ public class BalancedGrowthStrategyTests
         // no-op; no idle fleet and no cash means the reinforce step's own
         // lease+route fallback (2 actions) leaves no budget for Case 2's
         // own 2-action fallback at the default actionCap (3), isolating
-        // the reinforce step's own choice cleanly.
+        // the reinforce step's own choice cleanly. Distinct-but-identical
+        // types (rather than one shared type), so the winner stays
+        // observable via the leased type now that leasing no longer
+        // produces a same-quarter RouteOrder (two-phase,
+        // docs/AIRCRAFT_ACQUISITION_ROADMAP.md).
         var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
         var highLf = MakeCity("highlf", Region.Europe, 1, 1, 200);
         var lowLf = MakeCity("lowlf", Region.EastAsia, 2, 2, 8);
         var cities = new[] { home, highLf, lowLf };
-        var aircraft = new AircraftType("t", "Test", Seats: 100, RangeKm: 10_000, CruiseSpeedKmh: 900, CostPerAvailableSeatKm: 0.1);
+        var highLfAircraft = new AircraftType("t-highlf", "Test", Seats: 100, RangeKm: 10_000, CruiseSpeedKmh: 900, CostPerAvailableSeatKm: 0.1);
+        var lowLfAircraft = new AircraftType("t-lowlf", "Test", Seats: 100, RangeKm: 10_000, CruiseSpeedKmh: 900, CostPerAvailableSeatKm: 0.1);
         var existing = new[]
         {
-            new Route(home, highLf, aircraft, AircraftCount: 1),
-            new Route(home, lowLf, aircraft, AircraftCount: 1),
+            new Route(home, highLf, highLfAircraft, AircraftCount: 1),
+            new Route(home, lowLf, lowLfAircraft, AircraftCount: 1),
         };
         var regionsLed = new HashSet<Region> { Region.NorthAmerica, Region.Europe };
         var context = MakeContext(cities, home, routes: existing, eraTypes: Array.Empty<AircraftType>(), regionsLed: regionsLed);
 
         var orders = Strategy.DecideOrders(context);
 
-        Assert.Contains(orders.OfType<RouteOrder>(), o => new HashSet<string> { "home", "lowlf" }.SetEquals(new[] { o.Origin.Id, o.Destination.Id }));
-        Assert.DoesNotContain(orders.OfType<RouteOrder>(), o => new HashSet<string> { "home", "highlf" }.SetEquals(new[] { o.Origin.Id, o.Destination.Id }));
+        Assert.Empty(orders.OfType<RouteOrder>());
+        var lease = Assert.Single(orders.OfType<LeaseAircraftOrder>());
+        Assert.Equal("t-lowlf", lease.Type.Id);
     }
 
     [Fact]
@@ -334,8 +347,28 @@ public class BalancedGrowthStrategyTests
 
         var orders = Strategy.DecideOrders(context);
 
-        Assert.Contains(orders.OfType<RouteOrder>(), o => new HashSet<string> { "asia1", "dom" }.SetEquals(new[] { o.Origin.Id, o.Destination.Id }));
-        Assert.DoesNotContain(orders.OfType<RouteOrder>(), o => new HashSet<string> { "home", "dom" }.SetEquals(new[] { o.Origin.Id, o.Destination.Id }));
+        // Leasing resolves next quarter now (two-phase,
+        // docs/AIRCRAFT_ACQUISITION_ROADMAP.md), so which pair Case 2
+        // actually picked is no longer visible as a same-quarter
+        // RouteOrder - both home-dom and asia1-dom would lease the same
+        // Wide type, so the type alone can't disambiguate either.
+        // Materialize the leased unit directly via LeaseAllocationResolver
+        // (QuarterEngine no longer owns lease delivery) and re-run
+        // DecideOrders one quarter later: whichever pair the now-idle unit
+        // gets assigned to, via the idle-unit path, reveals which
+        // candidate actually won.
+        var wideLease = Assert.Single(orders.OfType<LeaseAircraftOrder>().Where(o => o.Type.Id == "wide"));
+        var airline = new Airline("Test", Array.Empty<Route>());
+        var leaseBoard = LeaseAllocationResolver.Submit(LeaseRequestBoard.Empty, airline, wideLease, currentQuarter: 1);
+        var (_, deliveries) = LeaseAllocationResolver.ResolveQuarter(leaseBoard, currentQuarter: 2, year: 2000, new SimRng(1));
+        var delivery = Assert.Single(deliveries);
+        var fleetWithLeasedUnit = FleetLedger.ApplyDelivery(AirlineFleet.Empty, delivery.Type, delivery.Quantity, FleetOwnershipMode.Leased);
+        var nextContext = context with { OwnFleet = fleetWithLeasedUnit };
+
+        var nextOrders = Strategy.DecideOrders(nextContext);
+
+        Assert.Contains(nextOrders.OfType<RouteOrder>(), o => new HashSet<string> { "asia1", "dom" }.SetEquals(new[] { o.Origin.Id, o.Destination.Id }));
+        Assert.DoesNotContain(nextOrders.OfType<RouteOrder>(), o => new HashSet<string> { "home", "dom" }.SetEquals(new[] { o.Origin.Id, o.Destination.Id }));
     }
 
     [Fact]
@@ -441,11 +474,12 @@ public class BalancedGrowthStrategyTests
 
         var orders = Strategy.DecideOrders(context);
 
+        // Leasing resolves next quarter now (two-phase,
+        // docs/AIRCRAFT_ACQUISITION_ROADMAP.md) - no RouteOrder yet.
         Assert.Empty(orders.OfType<AircraftOrder>().Where(o => o.Type.Id == "wide"));
         var lease = Assert.Single(orders.OfType<LeaseAircraftOrder>().Where(o => o.Type.Id == "wide"));
-        var routeOrder = Assert.Single(orders.OfType<RouteOrder>(), o => new HashSet<string> { "home", "away" }.SetEquals(new[] { o.Origin.Id, o.Destination.Id }));
         Assert.NotNull(lease);
-        Assert.NotNull(routeOrder);
+        Assert.Empty(orders.OfType<RouteOrder>());
     }
 
     [Fact]
@@ -546,11 +580,17 @@ public class BalancedGrowthStrategyTests
             new Route(home, hubB, Wide, AircraftCount: 1),
         };
         var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, Wide, quantity: 1, FleetOwnershipMode.Owned);
-        var context = MakeContext(cities, home, routes: existing, fleet: fleet, targetRegionCountOverride: 4);
+        // actionCap 2, not the default 3: reinforce (1, idle unit) + Case
+        // 1's own lease (1, now that leasing is a single action instead of
+        // two - two-phase, docs/AIRCRAFT_ACQUISITION_ROADMAP.md) exactly
+        // exhausts it, leaving no room for Case 2 to also fire and
+        // muddying which lease is actually Case 1's own.
+        var context = MakeContext(cities, home, routes: existing, fleet: fleet, targetRegionCountOverride: 4, actionCap: 2);
 
         var orders = Strategy.DecideOrders(context);
 
-        Assert.Contains(orders.OfType<RouteOrder>(), o => new[] { o.Origin.Id, o.Destination.Id }.Contains("newregion"));
+        Assert.Empty(orders.OfType<RouteOrder>().Where(o => new[] { o.Origin.Id, o.Destination.Id }.Contains("newregion")));
+        Assert.Single(orders.OfType<LeaseAircraftOrder>());
     }
 
     [Fact]

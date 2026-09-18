@@ -550,17 +550,24 @@ public static class QuarterEngine
                 continue;
             }
 
-            // Leasing bypasses the production queue entirely and delivers
-            // the same quarter it's ordered — resolved right here, inline,
-            // so a RouteOrder later in this same batch can actually use
-            // the newly-leased unit. AircraftOrder (the production-queue
-            // path) genuinely needs cross-quarter, cross-airline board
-            // state this single airline's quarter doesn't have — that
-            // stays external, submitted by the caller as before.
-            if (order is LeaseAircraftOrder leaseOrder && workingFleet is not null)
-            {
-                workingFleet = FleetLedger.ApplyDelivery(workingFleet, leaseOrder.Type, leaseOrder.Quantity, FleetOwnershipMode.Leased);
-            }
+            // Aircraft-acquisition-limits follow-up (docs/AIRCRAFT_ACQUISITION_ROADMAP.md):
+            // leasing used to bypass the production queue and deliver
+            // inline, right here, so a RouteOrder later in this same
+            // batch could immediately use the newly-leased unit. Once a
+            // real cross-airline lease cap exists, that's no longer
+            // possible — QuarterEngine resolves one airline's own quarter
+            // at a time and has no visibility into what every other
+            // airline is also requesting this same quarter, so "who
+            // actually gets how many of this scarce type" can only be
+            // decided once every airline's own request is known. Leasing
+            // now resolves the same two-phase way AircraftOrder already
+            // does — accepted here (era + Quantity checks only, no fleet
+            // mutation), delivered by LeaseAllocationResolver.ResolveQuarter
+            // outside QuarterEngine entirely, the quarter after it's
+            // requested. See that class's own doc comment for the real
+            // allocation rule, and the AI-strategy call sites that used
+            // to pair a same-batch [LeaseAircraftOrder, RouteOrder] for
+            // how this is handled now that same-quarter use is gone.
 
             if (order is RouteOrder appliedRouteOrder && unitToAssign is not null && workingFleet is not null)
             {

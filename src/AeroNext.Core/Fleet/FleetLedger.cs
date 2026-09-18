@@ -14,10 +14,11 @@ public static class FleetLedger
 {
     /// <param name="mode">
     /// AircraftDelivery itself doesn't distinguish purchased from leased —
-    /// that's determined by which resolver method produced it
-    /// (AircraftOrderResolver.ResolveQuarter for purchases, ResolveLease
-    /// for leases), so the caller supplies it here rather than this ledger
-    /// trying to infer it.
+    /// that's determined by which resolver produced the delivery being
+    /// applied (AircraftOrderResolver.ResolveQuarter for purchases,
+    /// LeaseAllocationResolver.ResolveQuarter for leases — both two-phase
+    /// now, see docs/AIRCRAFT_ACQUISITION_ROADMAP.md), so the caller
+    /// supplies it here rather than this ledger trying to infer it.
     /// </param>
     public static AirlineFleet ApplyDelivery(AirlineFleet fleet, AircraftDelivery delivery, FleetOwnershipMode mode) =>
         ApplyDelivery(fleet, delivery.Type, delivery.Quantity, mode);

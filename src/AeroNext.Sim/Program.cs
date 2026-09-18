@@ -419,8 +419,17 @@ for (var q = 2; q <= 4; q++)
     }
 }
 
-var leaseDelivery = AircraftOrderResolver.ResolveLease(beta, new LeaseAircraftOrder(widebody, Quantity: 1), currentQuarter: 2);
-Console.WriteLine($"Beta Airways leases instead of waiting: {leaseDelivery.Quantity}x {leaseDelivery.Type.Name} delivered quarter {leaseDelivery.DeliveredQuarter} — instant, at a premium.");
+// Aircraft-acquisition-limits follow-up: leasing is two-phase now, like
+// ordering - a real, contested cross-airline pool (LeaseAllocationResolver),
+// not an instant same-quarter escape hatch anymore. Still faster than the
+// production queue above (one quarter's wait, not several), just no
+// longer zero.
+var leaseRequestBoard = LeaseAllocationResolver.Submit(LeaseRequestBoard.Empty, beta, new LeaseAircraftOrder(widebody, Quantity: 1), currentQuarter: 2);
+var (_, leaseDeliveries) = LeaseAllocationResolver.ResolveQuarter(leaseRequestBoard, currentQuarter: 3, year: Timeline.YearForQuarter(3), negotiationRng);
+foreach (var leaseDelivery in leaseDeliveries)
+{
+    Console.WriteLine($"{leaseDelivery.Airline.Name} leases instead of waiting: {leaseDelivery.Quantity}x {leaseDelivery.Type.Name} delivered quarter {leaseDelivery.DeliveredQuarter}, upfront cost {leaseDelivery.UpfrontCost} — one quarter's wait, not the production queue's several, at a real nominal cost.");
+}
 
 // Alliance courting — simultaneous, same-quarter, no queue, no money.
 var regionalX = new RegionalCarrier("regional-x", "Regional Air X");
@@ -585,6 +594,14 @@ var campaignCurrentStrategyByName = campaignAirlineNames.ToDictionary(n => n, n 
 var campaignFleets = campaignAirlineNames.ToDictionary(n => n, n => FleetLedger.ApplyDelivery(
     AirlineFleet.Empty, campaignConditions[n].StartingAircraft, StartingConditionsResolver.StartingAircraftQuantity, FleetOwnershipMode.Owned));
 var campaignAircraftOrderBoard = AircraftOrderBoard.Empty;
+var campaignLeaseRequestBoard = LeaseRequestBoard.Empty;
+// Aircraft-acquisition-limits follow-up: this demo loop has no other RNG
+// of its own (it never wires NegotiationOrders into LandingRightsResolver
+// either, the same pre-existing gap FullGameRunner.cs's own doc comment
+// already names) - a dedicated, fixed-seed stream, matching
+// negotiationRng's own simple convention above, rather than reusing that
+// one across two unrelated concerns.
+var campaignLeaseAllocationRng = new SimRng(seed: 11);
 
 // Reference chokepoint check: does the era's best available aircraft still
 // need Gander for JFK-LHR, or can it fly direct?
@@ -725,6 +742,14 @@ for (var q = 1; q <= campaignQuarters; q++)
         campaignFleets[delivery.Airline.Name] = FleetLedger.ApplyDelivery(campaignFleets[delivery.Airline.Name], delivery, FleetOwnershipMode.Owned);
     }
 
+    IReadOnlyList<LeaseDelivery> campaignLeaseDeliveries;
+    (campaignLeaseRequestBoard, campaignLeaseDeliveries) = LeaseAllocationResolver.ResolveQuarter(campaignLeaseRequestBoard, q, year, campaignLeaseAllocationRng);
+    foreach (var leaseDelivery in campaignLeaseDeliveries)
+    {
+        campaignFleets[leaseDelivery.Airline.Name] = FleetLedger.ApplyDelivery(campaignFleets[leaseDelivery.Airline.Name], leaseDelivery.Type, leaseDelivery.Quantity, FleetOwnershipMode.Leased);
+        campaignFinances[leaseDelivery.Airline.Name] = campaignFinances[leaseDelivery.Airline.Name] with { CashBalance = campaignFinances[leaseDelivery.Airline.Name].CashBalance - leaseDelivery.UpfrontCost };
+    }
+
     foreach (var name in campaignAirlineNames)
     {
         // A bankrupt airline is out: routes and action cap freeze at
@@ -768,6 +793,11 @@ for (var q = 1; q <= campaignQuarters; q++)
         foreach (var aircraftOrder in result.AppliedOrders.OfType<AircraftOrder>())
         {
             campaignAircraftOrderBoard = AircraftOrderResolver.Submit(campaignAircraftOrderBoard, campaignAirlineSnapshot, aircraftOrder, q);
+        }
+
+        foreach (var leaseOrder in result.AppliedOrders.OfType<LeaseAircraftOrder>())
+        {
+            campaignLeaseRequestBoard = LeaseAllocationResolver.Submit(campaignLeaseRequestBoard, campaignAirlineSnapshot, leaseOrder, q);
         }
     }
 

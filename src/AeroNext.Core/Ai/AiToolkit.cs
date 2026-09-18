@@ -351,7 +351,7 @@ public static class AiToolkit
         return best.Profit >= ProfitabilityFloor ? best : null;
     }
 
-    /// <summary>Builds the real order(s) for a winning candidate from FindMostProfitablePair - a RouteOrder alone against an idle unit (no fee, already ours), or a LeaseAircraftOrder alongside it otherwise (2 actions, real recurring fee already reflected in the profit this candidate already cleared).</summary>
+    /// <summary>Builds the real order for a winning candidate from FindMostProfitablePair - a RouteOrder alone against an idle unit (no fee, already ours), or a LeaseAircraftOrder alone otherwise (1 action; leasing is two-phase now, docs/AIRCRAFT_ACQUISITION_ROADMAP.md, so the RouteOrder itself waits for a later quarter's delivery).</summary>
     public static void TryProposeCandidate(
         StrategyContext context, (PairDemand Pair, AircraftType Aircraft, Money Profit, bool UsesIdleUnit)? best, IReadOnlySet<string> validOriginCityIds,
         List<QuarterOrder> orders, HashSet<int> reservedUnitIds, Dictionary<string, int> slotsReservedByCity, Dictionary<string, int> citySpendReservedByCity, ref int spent)
@@ -363,8 +363,7 @@ public static class AiToolkit
             return;
         }
 
-        var actionsNeeded = best.Value.UsesIdleUnit ? 1 : 2;
-        if (spent + actionsNeeded > context.ActionCap)
+        if (spent + 1 > context.ActionCap)
         {
             return;
         }
@@ -374,16 +373,22 @@ public static class AiToolkit
             var idleUnit = context.OwnFleet.Idle.Where(u => u.Type.Id == best.Value.Aircraft.Id && !reservedUnitIds.Contains(u.Id)).OrderBy(u => u.Id).First();
             orders.Add(new RouteOrder(origin, destination, best.Value.Aircraft));
             reservedUnitIds.Add(idleUnit.Id);
+            BaselineAi.ReserveSlots(origin, destination, slotsReservedByCity);
+            ReserveCityWideSlots(origin, destination, citySpendReservedByCity);
+            spent += 1;
         }
         else
         {
+            // Leasing resolves next quarter now (two-phase,
+            // docs/AIRCRAFT_ACQUISITION_ROADMAP.md) - submit it alone, 1
+            // action, no paired RouteOrder yet (and so no slot/city-room
+            // claim this quarter either - the pair isn't opening this
+            // quarter). Once delivered it shows up idle and a later
+            // quarter's own re-evaluation opens the pair via the
+            // UsesIdleUnit branch above.
             orders.Add(new LeaseAircraftOrder(best.Value.Aircraft, Quantity: 1));
-            orders.Add(new RouteOrder(origin, destination, best.Value.Aircraft));
+            spent += 1;
         }
-
-        BaselineAi.ReserveSlots(origin, destination, slotsReservedByCity);
-        ReserveCityWideSlots(origin, destination, citySpendReservedByCity);
-        spent += actionsNeeded;
     }
 
     /// <summary>
@@ -497,13 +502,14 @@ public static class AiToolkit
     /// slot anywhere, and AdjustRouteOrder itself needs no slot check at
     /// the engine level either (docs/ROUTE_AIRCRAFT_ADJUSTMENT_DESIGN.md:
     /// the route can only ever hold flat or free capacity versus its old
-    /// count, since a swap always resets to 1). The buy-outright path is
-    /// deliberately fire-and-forget: AircraftOrder uses the production
-    /// queue, not delivered this quarter, so no AdjustRouteOrder is
-    /// emitted yet - once the unit is delivered and shows up idle, a
-    /// later quarter's own re-evaluation naturally proposes the swap via
-    /// the idle-unit path, with no separate cross-quarter "intent"
-    /// tracking needed.
+    /// count, since a swap always resets to 1). Both the buy-outright and
+    /// lease paths are deliberately fire-and-forget: neither AircraftOrder
+    /// nor LeaseAircraftOrder delivers the same quarter it's submitted
+    /// (leasing is two-phase now too, docs/AIRCRAFT_ACQUISITION_ROADMAP.md),
+    /// so no AdjustRouteOrder is emitted yet in either case - once the
+    /// unit is delivered and shows up idle, a later quarter's own
+    /// re-evaluation naturally proposes the swap via the idle-unit path,
+    /// with no separate cross-quarter "intent" tracking needed.
     /// </summary>
     public static void TryProposeTypeSwap(
         StrategyContext context, RouteLoad load,
@@ -517,10 +523,11 @@ public static class AiToolkit
 
         // Each path's own real cost is checked against the budget
         // separately, not a shared "idle vs. everything else" figure -
-        // buying outright costs 1 action this quarter (just the
-        // AircraftOrder; the AdjustRouteOrder itself waits for a future
-        // quarter's delivery), distinct from leasing's 2 (both orders,
-        // same quarter).
+        // though all three cost exactly 1 action now: the idle-unit path
+        // (just AdjustRouteOrder) is the only one that touches the route
+        // this quarter, since both AircraftOrder and LeaseAircraftOrder
+        // deliver later, with the AdjustRouteOrder itself waiting for
+        // that future delivery either way.
         if (candidate.Value.UsesIdleUnit)
         {
             if (spent + 1 > context.ActionCap)
@@ -545,14 +552,19 @@ public static class AiToolkit
         }
         else
         {
-            if (spent + 2 > context.ActionCap)
+            if (spent + 1 > context.ActionCap)
             {
                 return;
             }
 
+            // Leasing resolves next quarter now (two-phase,
+            // docs/AIRCRAFT_ACQUISITION_ROADMAP.md) - submit it alone, 1
+            // action, no AdjustRouteOrder yet (mirroring the CanBuyOutright
+            // branch above). Once delivered it shows up idle and a later
+            // quarter's own re-evaluation proposes the swap via the
+            // UsesIdleUnit branch above.
             orders.Add(new LeaseAircraftOrder(candidate.Value.Type, Quantity: 1));
-            orders.Add(new AdjustRouteOrder(load.Route.Origin, load.Route.Destination, candidate.Value.Type));
-            spent += 2;
+            spent += 1; // no AdjustRouteOrder yet - nothing to assign until delivery
         }
     }
 

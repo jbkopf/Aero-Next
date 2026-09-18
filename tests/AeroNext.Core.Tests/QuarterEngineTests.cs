@@ -450,8 +450,17 @@ public class QuarterEngineTests
     }
 
     [Fact]
-    public void RunQuarter_LeaseOrderEarlierInBatch_MakesUnitAvailableToLaterRouteOrder()
+    public void RunQuarter_LeaseOrderEarlierInBatch_NoLongerMakesUnitAvailableToLaterRouteOrder()
     {
+        // Aircraft-acquisition-limits follow-up (docs/AIRCRAFT_ACQUISITION_ROADMAP.md):
+        // leasing is two-phase now, like purchasing - LeaseAircraftOrder
+        // itself is accepted (era + Quantity checks only) but no longer
+        // mutates the fleet inline, so a RouteOrder later in the *same*
+        // batch still has no idle unit to use and is rejected. This is
+        // the deliberate, confirmed behavior change from the prior
+        // version of this test (which asserted the old inline-delivery
+        // shape) - see LeaseAllocationResolver for where the unit
+        // actually gets delivered, one quarter later.
         var demandModel = new GravityDemandModel();
         var a = MakeCity("a", 0, 0, 50);
         var b = MakeCity("b", 1, 1, 50);
@@ -463,10 +472,12 @@ public class QuarterEngineTests
 
         var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), currentActionCap: 3, orders, new[] { a, b }, demandModel, AirlineFleet.Empty);
 
-        Assert.Equal(2, result.AppliedOrders.Count);
-        Assert.Empty(result.RejectedOrders);
-        Assert.Single(result.Routes);
-        Assert.Equal(FleetOwnershipMode.Leased, result.UpdatedFleet!.Units.Single().Mode);
+        Assert.Single(result.AppliedOrders);
+        Assert.IsType<LeaseAircraftOrder>(result.AppliedOrders.Single());
+        Assert.Single(result.RejectedOrders);
+        Assert.IsType<RouteOrder>(result.RejectedOrders.Single());
+        Assert.Empty(result.Routes);
+        Assert.Empty(result.UpdatedFleet!.Units); // the lease order itself no longer creates a fleet unit
     }
 
     [Fact]

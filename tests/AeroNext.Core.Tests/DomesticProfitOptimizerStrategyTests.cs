@@ -417,10 +417,12 @@ public class DomesticProfitOptimizerStrategyTests
 
         var orders = Strategy.DecideOrders(context);
 
+        // Leasing resolves next quarter now (two-phase,
+        // docs/AIRCRAFT_ACQUISITION_ROADMAP.md) - no RouteOrder yet.
         Assert.Empty(orders.OfType<AircraftOrder>());
         var lease = Assert.Single(orders.OfType<LeaseAircraftOrder>());
         Assert.Equal("t", lease.Type.Id);
-        Assert.Single(orders.OfType<RouteOrder>());
+        Assert.Empty(orders.OfType<RouteOrder>());
     }
 
     [Fact]
