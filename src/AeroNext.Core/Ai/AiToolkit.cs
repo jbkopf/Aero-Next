@@ -386,6 +386,165 @@ public static class AiToolkit
         spent += actionsNeeded;
     }
 
+    /// <summary>
+    /// AI-type-swap follow-up (docs/AI_AIRCRAFT_TYPE_SWAP_DESIGN.md,
+    /// proposed, tunable, not yet measured): a swap for an already-
+    /// unprofitable route needs only a real, non-trivial improvement to
+    /// be worth trying - the route already costs an action this quarter
+    /// regardless (a fare cut is free, but the swap itself competes for
+    /// the same budget check as everything else), so the bar stays low,
+    /// just enough to rule out swapping over rounding noise.
+    /// </summary>
+    public static readonly Money ReactiveSwapMinimumProfitImprovement = Money.FromDollars(10_000);
+
+    /// <summary>
+    /// AI-type-swap follow-up (proposed, tunable, not yet measured): a
+    /// swap for an already-*profitable* route needs a deliberately high
+    /// bar - disrupting a healthy route (reset to 1 aircraft, fare reset
+    /// to the computed default) has to be clearly worth it, not a
+    /// coin-flip-sized edge. Applied as a fraction of the route's own
+    /// current estimated profit, which is why this branch only ever runs
+    /// when that figure is positive - see EvaluateTypeSwapCandidate.
+    /// </summary>
+    public const double ProactiveSwapMinimumProfitImprovementFraction = 0.5;
+
+    /// <summary>
+    /// AI-type-swap follow-up: is there a meaningfully better-fitting
+    /// aircraft type for a route this airline already operates? Reuses
+    /// EstimatedRealProfit - the same real, lease-fee-aware,
+    /// competition-derated profit figure FindMostProfitablePair already
+    /// trusts for a structurally identical decision (best (pair,
+    /// aircraft) by real profit) - so this inherits that function's own
+    /// safety property (single-peaked in capacity *within one fixed
+    /// pair*, never compared across pairs) rather than introducing new
+    /// profit math. isReactive selects which threshold applies:
+    /// ReactiveSwapMinimumProfitImprovement (a route already flagged as
+    /// a problem needs only a real improvement) or
+    /// ProactiveSwapMinimumProfitImprovementFraction of the route's own
+    /// current profit (a healthy route needs a deliberately high bar to
+    /// justify disrupting it). Excludes the route's own current type
+    /// from candidates up front - AdjustRouteOrder would reject a
+    /// same-type request anyway (docs/ROUTE_AIRCRAFT_ADJUSTMENT_DESIGN.md),
+    /// so this never proposes a candidate the engine would refuse.
+    /// </summary>
+    public static (AircraftType Type, Money ProfitDelta, bool UsesIdleUnit, bool CanBuyOutright)? EvaluateTypeSwapCandidate(
+        StrategyContext context, RouteLoad load, IReadOnlySet<int> reservedUnitIds, bool isReactive)
+    {
+        var pair = context.DemandModel.ForPair(load.Route.Origin, load.Route.Destination);
+        var currentProfit = EstimatedRealProfit(context, pair, load.Route.Aircraft, requiresLease: false);
+        var idleTypeIds = context.OwnFleet.Idle
+            .Where(u => !reservedUnitIds.Contains(u.Id))
+            .Select(u => u.Type.Id)
+            .ToHashSet(StringComparer.Ordinal);
+
+        var candidates = context.EraAvailableTypes
+            .Where(type => type.Id != load.Route.Aircraft.Id && pair.DistanceKm <= type.RangeKm)
+            .Select(type =>
+            {
+                var usesIdleUnit = idleTypeIds.Contains(type.Id);
+                var profit = EstimatedRealProfit(context, pair, type, requiresLease: !usesIdleUnit);
+                return (Type: type, Profit: profit, UsesIdleUnit: usesIdleUnit);
+            })
+            .OrderByDescending(c => c.Profit.Cents)
+            .ThenBy(c => c.Type.Id, StringComparer.Ordinal)
+            .ToList();
+
+        if (candidates.Count == 0)
+        {
+            return null;
+        }
+
+        var best = candidates[0];
+        var delta = best.Profit - currentProfit;
+
+        // The proactive fraction only means something against a positive
+        // current profit, which the caller guarantees for that branch
+        // (see ApplyManagementToolkit) - the reactive floor is a flat
+        // dollar amount specifically because currentProfit can be zero
+        // or negative there, where a fraction of it wouldn't be
+        // meaningful.
+        var required = isReactive
+            ? ReactiveSwapMinimumProfitImprovement
+            : new Money((long)(currentProfit.Cents * ProactiveSwapMinimumProfitImprovementFraction));
+
+        if (delta < required)
+        {
+            return null;
+        }
+
+        var canBuyOutright = context.AvailableCash is not null
+            && FinancialState.CanAfford(context.AvailableCash.Value, BaselineAi.ComfortableOrderCost(best.Type));
+
+        return (best.Type, delta, best.UsesIdleUnit, canBuyOutright);
+    }
+
+    /// <summary>
+    /// AI-type-swap follow-up: builds the real order(s) for a winning
+    /// EvaluateTypeSwapCandidate result. Unlike TryProposeCandidate, no
+    /// gate-slot or city-wide-capacity reservation is needed at all - a
+    /// swap targets a pair this airline already serves, claiming no new
+    /// slot anywhere, and AdjustRouteOrder itself needs no slot check at
+    /// the engine level either (docs/ROUTE_AIRCRAFT_ADJUSTMENT_DESIGN.md:
+    /// the route can only ever hold flat or free capacity versus its old
+    /// count, since a swap always resets to 1). The buy-outright path is
+    /// deliberately fire-and-forget: AircraftOrder uses the production
+    /// queue, not delivered this quarter, so no AdjustRouteOrder is
+    /// emitted yet - once the unit is delivered and shows up idle, a
+    /// later quarter's own re-evaluation naturally proposes the swap via
+    /// the idle-unit path, with no separate cross-quarter "intent"
+    /// tracking needed.
+    /// </summary>
+    public static void TryProposeTypeSwap(
+        StrategyContext context, RouteLoad load,
+        (AircraftType Type, Money ProfitDelta, bool UsesIdleUnit, bool CanBuyOutright)? candidate,
+        List<QuarterOrder> orders, HashSet<int> reservedUnitIds, ref int spent)
+    {
+        if (candidate is null)
+        {
+            return;
+        }
+
+        // Each path's own real cost is checked against the budget
+        // separately, not a shared "idle vs. everything else" figure -
+        // buying outright costs 1 action this quarter (just the
+        // AircraftOrder; the AdjustRouteOrder itself waits for a future
+        // quarter's delivery), distinct from leasing's 2 (both orders,
+        // same quarter).
+        if (candidate.Value.UsesIdleUnit)
+        {
+            if (spent + 1 > context.ActionCap)
+            {
+                return;
+            }
+
+            var idleUnit = context.OwnFleet.Idle.Where(u => u.Type.Id == candidate.Value.Type.Id && !reservedUnitIds.Contains(u.Id)).OrderBy(u => u.Id).First();
+            reservedUnitIds.Add(idleUnit.Id);
+            orders.Add(new AdjustRouteOrder(load.Route.Origin, load.Route.Destination, candidate.Value.Type));
+            spent += 1;
+        }
+        else if (candidate.Value.CanBuyOutright)
+        {
+            if (spent + 1 > context.ActionCap)
+            {
+                return;
+            }
+
+            orders.Add(new AircraftOrder(candidate.Value.Type, Quantity: 1));
+            spent += 1; // no AdjustRouteOrder yet - nothing to assign until delivery
+        }
+        else
+        {
+            if (spent + 2 > context.ActionCap)
+            {
+                return;
+            }
+
+            orders.Add(new LeaseAircraftOrder(candidate.Value.Type, Quantity: 1));
+            orders.Add(new AdjustRouteOrder(load.Route.Origin, load.Route.Destination, candidate.Value.Type));
+            spent += 2;
+        }
+    }
+
     /// <summary>M55 (proposed, tunable) — a route shrunk within this many quarters of context.QuarterNumber is excluded from being picked as "best performing" to grow. See RecentlyShrunkPairKeys.</summary>
     public const int GrowthCooldownQuarters = 2;
 
@@ -433,6 +592,39 @@ public static class AiToolkit
 
         return context.RouteHistoryByPair
             .Where(kv => kv.Value.LastClosedQuarter is not null && context.QuarterNumber - kv.Value.LastClosedQuarter.Value < cooldownQuarters)
+            .Select(kv => kv.Key)
+            .ToHashSet();
+    }
+
+    /// <summary>
+    /// AI-type-swap follow-up (docs/AI_AIRCRAFT_TYPE_SWAP_DESIGN.md,
+    /// confirmed starting point) — double GrowthCooldownQuarters/
+    /// ReopenCooldownQuarters's own 2, since a type swap is a bigger
+    /// disruption than a same-type grow/shrink (resets AircraftCount to
+    /// 1 and resets FareOverride to the computed default), so it
+    /// warrants a longer stabilize-and-prove-itself window before being
+    /// reconsidered. See RecentlySwappedPairKeys.
+    /// </summary>
+    public const int TypeSwapCooldownQuarters = 4;
+
+    /// <summary>
+    /// AI-type-swap follow-up: every pair this airline swapped the type
+    /// of (AdjustRouteOrder) within cooldownQuarters of the current
+    /// quarter - excluded from further swap consideration, reactive or
+    /// proactive, until it's had real time to prove the new type out
+    /// with fresh data. Same permissive-default convention as
+    /// RecentlyShrunkPairKeys/RecentlyClosedPairKeys - a no-op (empty
+    /// set) when RouteHistoryByPair is null.
+    /// </summary>
+    public static IReadOnlySet<(string, string)> RecentlySwappedPairKeys(StrategyContext context, int cooldownQuarters)
+    {
+        if (context.RouteHistoryByPair is null)
+        {
+            return new HashSet<(string, string)>();
+        }
+
+        return context.RouteHistoryByPair
+            .Where(kv => kv.Value.LastTypeSwapQuarter is not null && context.QuarterNumber - kv.Value.LastTypeSwapQuarter.Value < cooldownQuarters)
             .Select(kv => kv.Key)
             .ToHashSet();
     }
@@ -1022,13 +1214,22 @@ public static class AiToolkit
     /// docs/BASELINE_AI_ROADMAP.md's own "Existing-route evaluation
     /// audit" section for the full numbers and the correction.
     /// </param>
-    public static void ApplyManagementToolkit(StrategyContext context, List<QuarterOrder> orders, HashSet<int> reservedUnitIds, int spentBeforeToolkit, bool enableSustainedSingleAircraftClosure = false)
+    public static void ApplyManagementToolkit(StrategyContext context, List<QuarterOrder> orders, HashSet<int> reservedUnitIds, int spentBeforeToolkit, bool enableSustainedSingleAircraftClosure = false, bool enableAircraftTypeSwap = false)
     {
         // Solvency first, before any other spending decision - see
         // MaintainCashRunway's own doc comment for the real evidence.
         MaintainCashRunway(context, orders);
 
         var routeLoads = RouteEvaluator.EvaluateNetwork(context.CurrentRoutes, context.DemandModel);
+
+        // AI-type-swap follow-up: the first real-cost (non-private)
+        // action this method has ever added - every other order here
+        // (fare cut/raise, shrink, close, retire, pay down debt, hire)
+        // is free, so this method never needed to track a budget before.
+        // Seeded from spentBeforeToolkit, not re-derived, matching how a
+        // strategy's own DecideOrders already tracks its running spend.
+        var spent = spentBeforeToolkit;
+        var recentlySwapped = enableAircraftTypeSwap ? RecentlySwappedPairKeys(context, TypeSwapCooldownQuarters) : new HashSet<(string, string)>();
 
         // Existing-route-evaluation audit follow-up: this loop used to read
         // load.LoadFactor directly - RouteEvaluator's own solo estimate,
@@ -1077,54 +1278,99 @@ public static class AiToolkit
 
             if (profit >= Money.Zero)
             {
+                // AI-type-swap follow-up: a healthy route isn't broken -
+                // only re-fleet it if a candidate type clears the real,
+                // deliberately high proactive bar (EvaluateTypeSwapCandidate),
+                // and only if this pair hasn't been swapped too recently.
+                if (enableAircraftTypeSwap && !recentlySwapped.Contains(QuarterEngine.NormalizedPairKey(load.Route.Origin, load.Route.Destination)))
+                {
+                    var proactiveCandidate = EvaluateTypeSwapCandidate(context, load, reservedUnitIds, isReactive: false);
+                    TryProposeTypeSwap(context, load, proactiveCandidate, orders, reservedUnitIds, ref spent);
+                }
+
                 continue;
             }
 
-            if (enableSustainedSingleAircraftClosure && load.Route.AircraftCount == 1)
+            var unprofitablePairKey = QuarterEngine.NormalizedPairKey(load.Route.Origin, load.Route.Destination);
+
+            // Hoisted out of the enableSustainedSingleAircraftClosure
+            // block below so the reactive swap check further down can
+            // reuse the identical "has this route been unprofitable for
+            // real, sustained time, not just this one quarter" read,
+            // independently of whether closure itself is enabled - the
+            // same reasoning ("don't bother trying to save what's
+            // probably a fundamentally weak pair, not a bad type")
+            // applies either way.
+            var rawSustainedQuartersForRoute = context.RouteHistoryByPair?.GetValueOrDefault(unprofitablePairKey)?.ConsecutiveUnprofitableQuarters ?? 0;
+            var quartersSinceMidGameStartForRoute = Math.Max(0, context.QuarterNumber - GameEras.MidGameStartQuarter + 1);
+            var sustainedQuartersForRoute = rawSustainedQuartersForRoute > quartersSinceMidGameStartForRoute ? 0 : rawSustainedQuartersForRoute;
+            var isUncontestedForRoute = (context.RivalCountByServedRoute?.GetValueOrDefault(unprofitablePairKey) ?? 0) == 0;
+            var closureEligible = load.Route.AircraftCount == 1 && sustainedQuartersForRoute >= SustainedSingleAircraftClosureThreshold && isUncontestedForRoute;
+
+            // Zero credit - not capped/partial credit - whenever the raw
+            // streak (rawSustainedQuartersForRoute, above) is older than
+            // MidGame itself. A real 100-game measurement found the raw,
+            // uncapped streak (which keeps accumulating under
+            // Starting-era strategies that never once check it)
+            // averaging 34 quarters the very first time this branch ever
+            // runs, at quarter GameEras.MidGameStartQuarter exactly, for
+            // every airline simultaneously - a synchronized "backlog
+            // dump" collapsing the real win rate 7.3%→4.0%. A first fix
+            // attempt (Math.Min-style capping to quarters-since-MidGame)
+            // measured *no better* - every route with a long enough
+            // backlog still hits the exact same capped value on the
+            // exact same calendar quarter (quartersSinceMidGameStartForRoute,
+            // identical for every route in the world that quarter), just
+            // delaying the identical synchronized dump from quarter 41 to
+            // quarter 48 (MidGameStartQuarter + SustainedSingleAircraftClosureThreshold
+            // - 1) instead of removing it. The real fix: a route whose
+            // raw streak *exceeds* how long MidGame has existed
+            // necessarily includes at least one pre-MidGame quarter - it
+            // gets zero credit, full stop, until it actually improves
+            // (streak resets to 0 on a real profitable quarter) and goes
+            // bad again for real, genuinely fresh, entirely within the
+            // MidGame/LateGame window - which happens at a different real
+            // quarter for each independent route, the real
+            // desynchronization a shared global cap can never provide.
+            if (enableSustainedSingleAircraftClosure && closureEligible)
             {
-                var pairKey = QuarterEngine.NormalizedPairKey(load.Route.Origin, load.Route.Destination);
-                var rawSustainedQuarters = context.RouteHistoryByPair?.GetValueOrDefault(pairKey)?.ConsecutiveUnprofitableQuarters ?? 0;
+                // Real, permanent closure - see SustainedSingleAircraftClosureThreshold's
+                // own doc comment for why this route, specifically, is
+                // never coming back regardless of how many more fare
+                // cuts it gets. A close instead of (not alongside) a
+                // cut - no point discounting a fare on a route about
+                // to disappear this same quarter.
+                orders.Add(new CloseRouteOrder(load.Route.Origin, load.Route.Destination));
+                continue;
+            }
 
-                // Zero credit - not capped/partial credit - whenever the
-                // raw streak is older than MidGame itself. A real 100-game
-                // measurement found the raw, uncapped streak (which keeps
-                // accumulating under Starting-era strategies that never
-                // once check it) averaging 34 quarters the very first time
-                // this branch ever runs, at quarter GameEras.MidGameStartQuarter
-                // exactly, for every airline simultaneously - a
-                // synchronized "backlog dump" collapsing the real win rate
-                // 7.3%→4.0%. A first fix attempt (Math.Min-style capping to
-                // quarters-since-MidGame) measured *no better* - every
-                // route with a long enough backlog still hits the exact
-                // same capped value on the exact same calendar quarter
-                // (quartersSinceMidGameStart, identical for every route in
-                // the world that quarter), just delaying the identical
-                // synchronized dump from quarter 41 to quarter 48
-                // (MidGameStartQuarter + SustainedSingleAircraftClosureThreshold
-                // - 1) instead of removing it. The real fix: a route whose
-                // raw streak *exceeds* how long MidGame has existed
-                // necessarily includes at least one pre-MidGame quarter -
-                // it gets zero credit, full stop, until it actually
-                // improves (streak resets to 0 on a real profitable
-                // quarter) and goes bad again for real, genuinely fresh,
-                // entirely within the MidGame/LateGame window - which
-                // happens at a different real quarter for each
-                // independent route, the real desynchronization a shared
-                // global cap can never provide.
-                var quartersSinceMidGameStart = Math.Max(0, context.QuarterNumber - GameEras.MidGameStartQuarter + 1);
-                var sustainedQuarters = rawSustainedQuarters > quartersSinceMidGameStart ? 0 : rawSustainedQuarters;
-                var isUncontested = (context.RivalCountByServedRoute?.GetValueOrDefault(pairKey) ?? 0) == 0;
+            // AI-type-swap follow-up: tried before falling back to
+            // cut-fare/shrink below, but only for a route not already
+            // judged unsalvageable by the closure check above (whether or
+            // not closure itself is enabled this round - closureEligible
+            // is computed unconditionally). A route that's only just
+            // turned unprofitable is a plausible type-fit problem worth
+            // testing; one that's been bad for a long time is far more
+            // likely a fundamentally weak pair, where a swap would burn
+            // an action and lock the cooldown while the route dies
+            // anyway regardless of type.
+            if (enableAircraftTypeSwap && !closureEligible && !recentlySwapped.Contains(unprofitablePairKey))
+            {
+                var reactiveCandidate = EvaluateTypeSwapCandidate(context, load, reservedUnitIds, isReactive: true);
 
-                if (sustainedQuarters >= SustainedSingleAircraftClosureThreshold && isUncontested)
+                if (reactiveCandidate is not null)
                 {
-                    // Real, permanent closure - see SustainedSingleAircraftClosureThreshold's
-                    // own doc comment for why this route, specifically, is
-                    // never coming back regardless of how many more fare
-                    // cuts it gets. A close instead of (not alongside) a
-                    // cut - no point discounting a fare on a route about
-                    // to disappear this same quarter.
-                    orders.Add(new CloseRouteOrder(load.Route.Origin, load.Route.Destination));
-                    continue;
+                    var spentBeforeSwap = spent;
+                    TryProposeTypeSwap(context, load, reactiveCandidate, orders, reservedUnitIds, ref spent);
+
+                    if (spent > spentBeforeSwap)
+                    {
+                        // Swap actually fired - let the new type play out
+                        // with real data next quarter rather than also
+                        // cutting fare/shrinking the type that's about to
+                        // change anyway.
+                        continue;
+                    }
                 }
             }
 

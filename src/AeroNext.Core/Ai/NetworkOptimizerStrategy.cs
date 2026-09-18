@@ -181,6 +181,18 @@ namespace AeroNext.Core.Ai;
 /// doc comment for why that last point specifically matters here (a
 /// near-identical signal, wired into Suitability instead, is the exact
 /// thing this class's own M58 history already found and reverted once).
+///
+/// AI-type-swap follow-up (docs/AI_AIRCRAFT_TYPE_SWAP_DESIGN.md): the
+/// first strategy given real awareness of AdjustRouteOrder, via
+/// AiToolkit.ApplyManagementToolkit's own new enableAircraftTypeSwap
+/// parameter - the chosen strategy specifically because it spends the
+/// majority of a 60-year campaign managing an already-built network
+/// rather than growing one, exactly the setting where "a newer,
+/// better-fitting aircraft type became available since this route
+/// opened" is a real, recurring situation rather than a one-off. Only
+/// this strategy passes true this round; RapidExpansionStrategy and
+/// DomesticProfitOptimizerStrategy keep the parameter at its default
+/// false, byte-identical to before this existed.
 /// </summary>
 public sealed class NetworkOptimizerStrategy : IAiStrategy
 {
@@ -300,7 +312,7 @@ public sealed class NetworkOptimizerStrategy : IAiStrategy
         // enableSustainedSingleAircraftClosure: true - see AiToolkit's own
         // SustainedSingleAircraftClosureThreshold doc comment for why, and
         // this class's own doc comment for the real evidence chain.
-        AiToolkit.ApplyManagementToolkit(context, orders, reservedUnitIds, spent, enableSustainedSingleAircraftClosure: true);
+        AiToolkit.ApplyManagementToolkit(context, orders, reservedUnitIds, spent, enableSustainedSingleAircraftClosure: true, enableAircraftTypeSwap: true);
 
         return orders;
     }

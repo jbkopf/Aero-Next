@@ -22,4 +22,18 @@ namespace AeroNext.Core.Ai;
 /// <param name="LastShrunkQuarter">The quarter this pair's own AircraftCount was last reduced by one (still &gt; 0 afterward) via CloseRouteOrder — null if never.</param>
 /// <param name="LastClosedQuarter">The quarter this pair was last closed entirely (AircraftCount reached 0) via CloseRouteOrder — null if never.</param>
 /// <param name="ConsecutiveUnprofitableQuarters">How many quarters in a row, ending with the most recent one this airline actually served the pair, FareCalculator.EstimatedProfit read negative — reset to 0 the moment it doesn't.</param>
-public sealed record AiRouteHistory(int? LastShrunkQuarter, int? LastClosedQuarter, int ConsecutiveUnprofitableQuarters);
+/// <param name="LastTypeSwapQuarter">
+/// AI-type-swap follow-up (docs/AI_AIRCRAFT_TYPE_SWAP_DESIGN.md): the
+/// quarter this pair's own Aircraft type was last changed via
+/// AdjustRouteOrder — null if never. Stamped from any applied
+/// AdjustRouteOrder, not just an AI-submitted one — same "built fresh
+/// from real applied state, never a value a strategy writes itself"
+/// principle LastShrunkQuarter/LastClosedQuarter already follow, so a
+/// player-submitted swap (once a real UI exists) protects a route from
+/// immediate AI reconsideration exactly the way an AI-submitted one does.
+/// Defaults null (never swapped) — trailing, with a default, specifically
+/// so every existing call site built before this field existed keeps
+/// compiling unchanged, the same "off is exactly old behavior" migration
+/// discipline every other optional field in this codebase already follows.
+/// </param>
+public sealed record AiRouteHistory(int? LastShrunkQuarter, int? LastClosedQuarter, int ConsecutiveUnprofitableQuarters, int? LastTypeSwapQuarter = null);

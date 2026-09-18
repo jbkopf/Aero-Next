@@ -535,4 +535,35 @@ public class NetworkOptimizerStrategyTests
         var closeOrder = Assert.Single(orders.OfType<CloseRouteOrder>());
         Assert.Equal(new HashSet<string> { "home", "b" }, new HashSet<string> { closeOrder.Origin.Id, closeOrder.Destination.Id });
     }
+
+    [Fact]
+    public void DecideOrders_GrosslyMismatchedRoute_SwapsAircraftType()
+    {
+        // AI-type-swap follow-up (docs/AI_AIRCRAFT_TYPE_SWAP_DESIGN.md):
+        // confirms enableAircraftTypeSwap: true actually reaches
+        // ApplyManagementToolkit through a real DecideOrders call, the
+        // same "not just a direct unit test in isolation" bar the
+        // sustained-closure test above already holds itself to.
+        // ConsecutiveUnprofitableQuarters: 1 (not 20) keeps this route
+        // well under SustainedSingleAircraftClosureThreshold, so closure
+        // never competes with the swap for this route.
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
+        var small = new AircraftType("t", "Test", Seats: 100, RangeKm: 10_000, CruiseSpeedKmh: 900, CostPerAvailableSeatKm: 0.1);
+        var route = new Route(home, b, BigAircraft, AircraftCount: 1);
+        var rivalCount = new System.Collections.Generic.Dictionary<(string, string), int> { [QuarterEngine.NormalizedPairKey(home, b)] = 0 };
+        var history = new System.Collections.Generic.Dictionary<(string, string), AiRouteHistory>
+        {
+            [QuarterEngine.NormalizedPairKey(home, b)] = Sustained(1),
+        };
+        var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, small, quantity: 1, FleetOwnershipMode.Owned);
+        var context = MakeContext(new[] { route }, new[] { home, b }, new[] { BigAircraft, small }, Region.NorthAmerica, fleet,
+            actionCap: 3, rivalCountByServedRoute: rivalCount, routeHistoryByPair: history, quarterNumber: 100);
+
+        var orders = Strategy.DecideOrders(context);
+
+        var adjust = Assert.Single(orders.OfType<AdjustRouteOrder>());
+        Assert.Equal(small, adjust.AircraftType);
+        Assert.Empty(orders.OfType<CloseRouteOrder>());
+    }
 }

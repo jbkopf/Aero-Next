@@ -25,8 +25,8 @@ public class AiToolkitTests
         System.Collections.Generic.IReadOnlyDictionary<(string OriginId, string DestinationId), long>? lastQuarterSeatsCarriedByRoute = null,
         int quarterNumber = 1,
         System.Collections.Generic.IReadOnlyDictionary<(string OriginId, string DestinationId), AiRouteHistory>? routeHistoryByPair = null,
-        AirlineFleet? fleet = null, Money? currentDebtBalance = null) =>
-        new(routes ?? Array.Empty<Route>(), actionCap, cities, DemandModel, new[] { Aircraft }, fleet ?? AirlineFleet.Empty, homeCity.Region, homeCity,
+        AirlineFleet? fleet = null, Money? currentDebtBalance = null, IReadOnlyList<AircraftType>? eraTypes = null) =>
+        new(routes ?? Array.Empty<Route>(), actionCap, cities, DemandModel, eraTypes ?? new[] { Aircraft }, fleet ?? AirlineFleet.Empty, homeCity.Region, homeCity,
             IdleContestableSlotsByCity: idleContestableSlotsByCity, AvailableCash: availableCash, CurrentDebtBalance: currentDebtBalance,
             RivalCountByServedRoute: rivalCountByServedRoute, LastQuarterSeatsCarriedByRoute: lastQuarterSeatsCarriedByRoute,
             QuarterNumber: quarterNumber, RouteHistoryByPair: routeHistoryByPair);
@@ -846,6 +846,394 @@ public class AiToolkitTests
         AiToolkit.ApplyManagementToolkit(context, orders, new System.Collections.Generic.HashSet<int>(), spentBeforeToolkit: 0);
 
         Assert.DoesNotContain(orders.OfType<SetFareOrder>(), o => o.FarePerPassenger < route.FarePerPassenger);
+    }
+
+    // --- AI-type-swap follow-up (docs/AI_AIRCRAFT_TYPE_SWAP_DESIGN.md): EvaluateTypeSwapCandidate / TryProposeTypeSwap / RecentlySwappedPairKeys ---
+
+    // These two, against the weight-50/weight-50 pair every fixture here
+    // shares (~758,269 pax/qtr demand at 157km): BigAircraft's 100,000
+    // seats is grossly oversized (profit ~-$1.17B, verified numerically
+    // via a real AeroNext.Core scratch run, not guessed), and
+    // MediumAircraft's 200 seats is genuinely, substantially more
+    // profitable than Aircraft's own 100 seats ($785,668 vs. $430,534 -
+    // an 82.5% improvement, comfortably clearing
+    // ProactiveSwapMinimumProfitImprovementFraction's 50% bar).
+    // BelowBarAircraft's 150 seats ($608,478, a 41.4% improvement) is
+    // deliberately just under that same bar.
+    private static readonly AircraftType MediumAircraft = new("med", "Medium", Seats: 200, RangeKm: 10_000, CruiseSpeedKmh: 900, CostPerAvailableSeatKm: 0.1);
+    private static readonly AircraftType BelowBarAircraft = new("below", "BelowBar", Seats: 150, RangeKm: 10_000, CruiseSpeedKmh: 900, CostPerAvailableSeatKm: 0.1);
+
+    [Fact]
+    public void RecentlySwappedPairKeys_NullRouteHistory_ReturnsEmpty()
+    {
+        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
+        var context = MakeContext(new[] { a, b }, a, quarterNumber: 10, routeHistoryByPair: null);
+
+        Assert.Empty(AiToolkit.RecentlySwappedPairKeys(context, AiToolkit.TypeSwapCooldownQuarters));
+    }
+
+    [Fact]
+    public void RecentlySwappedPairKeys_WithinCooldown_Excluded_JustOutside_Included()
+    {
+        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
+        var c = MakeCity("c", Region.NorthAmerica, 2, 2, 50);
+        var d = MakeCity("d", Region.NorthAmerica, 3, 3, 50);
+        var history = new System.Collections.Generic.Dictionary<(string, string), AiRouteHistory>
+        {
+            [QuarterEngine.NormalizedPairKey(a, b)] = new(null, null, 0, LastTypeSwapQuarter: 7), // quarter 10 - 7 = 3 < 4
+            [QuarterEngine.NormalizedPairKey(c, d)] = new(null, null, 0, LastTypeSwapQuarter: 6), // quarter 10 - 6 = 4, not < 4
+        };
+        var context = MakeContext(new[] { a, b, c, d }, a, quarterNumber: 10, routeHistoryByPair: history);
+
+        var result = AiToolkit.RecentlySwappedPairKeys(context, AiToolkit.TypeSwapCooldownQuarters);
+
+        Assert.Contains(QuarterEngine.NormalizedPairKey(a, b), result);
+        Assert.DoesNotContain(QuarterEngine.NormalizedPairKey(c, d), result);
+    }
+
+    [Fact]
+    public void EvaluateTypeSwapCandidate_Reactive_GrosslyOversizedIncumbent_PicksTheBetterIdleType()
+    {
+        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
+        var route = new Route(a, b, BigAircraft, AircraftCount: 1);
+        var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, Aircraft, quantity: 1, FleetOwnershipMode.Owned);
+        var context = MakeContext(new[] { a, b }, a, routes: new[] { route }, eraTypes: new[] { BigAircraft, Aircraft }, fleet: fleet);
+        var load = RouteEvaluator.EvaluateNetwork(context.CurrentRoutes, context.DemandModel).Single();
+
+        var candidate = AiToolkit.EvaluateTypeSwapCandidate(context, load, new System.Collections.Generic.HashSet<int>(), isReactive: true);
+
+        Assert.NotNull(candidate);
+        Assert.Equal(Aircraft, candidate!.Value.Type);
+        Assert.True(candidate.Value.UsesIdleUnit);
+    }
+
+    [Fact]
+    public void EvaluateTypeSwapCandidate_Reactive_NoAlternateTypeAtAll_ReturnsNull()
+    {
+        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
+        var route = new Route(a, b, BigAircraft, AircraftCount: 1);
+        var context = MakeContext(new[] { a, b }, a, routes: new[] { route }, eraTypes: new[] { BigAircraft }); // only its own current type is era-available
+        var load = RouteEvaluator.EvaluateNetwork(context.CurrentRoutes, context.DemandModel).Single();
+
+        var candidate = AiToolkit.EvaluateTypeSwapCandidate(context, load, new System.Collections.Generic.HashSet<int>(), isReactive: true);
+
+        Assert.Null(candidate);
+    }
+
+    [Fact]
+    public void EvaluateTypeSwapCandidate_Proactive_ClearsFiftyPercentBar_ReturnsCandidate()
+    {
+        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
+        var route = new Route(a, b, Aircraft, AircraftCount: 1);
+        var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, MediumAircraft, quantity: 1, FleetOwnershipMode.Owned);
+        var context = MakeContext(new[] { a, b }, a, routes: new[] { route }, eraTypes: new[] { Aircraft, MediumAircraft }, fleet: fleet);
+        var load = RouteEvaluator.EvaluateNetwork(context.CurrentRoutes, context.DemandModel).Single();
+
+        var candidate = AiToolkit.EvaluateTypeSwapCandidate(context, load, new System.Collections.Generic.HashSet<int>(), isReactive: false);
+
+        Assert.NotNull(candidate);
+        Assert.Equal(MediumAircraft, candidate!.Value.Type);
+    }
+
+    [Fact]
+    public void EvaluateTypeSwapCandidate_Proactive_BelowFiftyPercentBar_ReturnsNull()
+    {
+        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
+        var route = new Route(a, b, Aircraft, AircraftCount: 1);
+        var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, BelowBarAircraft, quantity: 1, FleetOwnershipMode.Owned);
+        var context = MakeContext(new[] { a, b }, a, routes: new[] { route }, eraTypes: new[] { Aircraft, BelowBarAircraft }, fleet: fleet);
+        var load = RouteEvaluator.EvaluateNetwork(context.CurrentRoutes, context.DemandModel).Single();
+
+        var candidate = AiToolkit.EvaluateTypeSwapCandidate(context, load, new System.Collections.Generic.HashSet<int>(), isReactive: false);
+
+        Assert.Null(candidate);
+    }
+
+    [Fact]
+    public void EvaluateTypeSwapCandidate_ExcludesTheRoutesOwnCurrentType()
+    {
+        // Even when the current type is technically "best" among what
+        // AllPairs would otherwise consider, it must never be offered
+        // back as its own swap candidate - AdjustRouteOrder would reject
+        // a same-type request anyway.
+        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
+        var route = new Route(a, b, MediumAircraft, AircraftCount: 1);
+        var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, Aircraft, quantity: 1, FleetOwnershipMode.Owned);
+        var context = MakeContext(new[] { a, b }, a, routes: new[] { route }, eraTypes: new[] { MediumAircraft, Aircraft }, fleet: fleet);
+        var load = RouteEvaluator.EvaluateNetwork(context.CurrentRoutes, context.DemandModel).Single();
+
+        var candidate = AiToolkit.EvaluateTypeSwapCandidate(context, load, new System.Collections.Generic.HashSet<int>(), isReactive: false);
+
+        // Aircraft (100 seats) is a worse fit than MediumAircraft (200
+        // seats) here, so nothing clears the proactive bar - but the key
+        // assertion is what it does NOT return, not just null overall.
+        Assert.True(candidate is null || candidate.Value.Type != MediumAircraft);
+    }
+
+    [Fact]
+    public void TryProposeTypeSwap_IdleUnit_EmitsAdjustRouteOrderOnly_CostsOneAction()
+    {
+        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
+        var route = new Route(a, b, BigAircraft, AircraftCount: 1);
+        var candidate = (Type: Aircraft, ProfitDelta: Money.FromDollars(1), UsesIdleUnit: true, CanBuyOutright: false);
+        var orders = new System.Collections.Generic.List<QuarterOrder>();
+        var reservedUnitIds = new System.Collections.Generic.HashSet<int>();
+        var spent = 0;
+        var load = new RouteLoad(route, DemandPassengers: 1, SeatsPerQuarter: 1, PassengersCarried: 1);
+        var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, Aircraft, quantity: 1, FleetOwnershipMode.Owned);
+        var context = MakeContext(new[] { a, b }, a, routes: new[] { route }, actionCap: 3, fleet: fleet);
+
+        AiToolkit.TryProposeTypeSwap(context, load, candidate, orders, reservedUnitIds, ref spent);
+
+        var order = Assert.Single(orders);
+        var adjust = Assert.IsType<AdjustRouteOrder>(order);
+        Assert.Equal(Aircraft, adjust.AircraftType);
+        Assert.Equal(1, spent);
+    }
+
+    [Fact]
+    public void TryProposeTypeSwap_RequiresLease_EmitsLeaseThenAdjust_CostsTwoActions()
+    {
+        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
+        var route = new Route(a, b, BigAircraft, AircraftCount: 1);
+        var candidate = (Type: Aircraft, ProfitDelta: Money.FromDollars(1), UsesIdleUnit: false, CanBuyOutright: false);
+        var orders = new System.Collections.Generic.List<QuarterOrder>();
+        var reservedUnitIds = new System.Collections.Generic.HashSet<int>();
+        var spent = 0;
+        var load = new RouteLoad(route, DemandPassengers: 1, SeatsPerQuarter: 1, PassengersCarried: 1);
+        var context = MakeContext(new[] { a, b }, a, routes: new[] { route }, actionCap: 3);
+
+        AiToolkit.TryProposeTypeSwap(context, load, candidate, orders, reservedUnitIds, ref spent);
+
+        Assert.Equal(2, orders.Count);
+        Assert.IsType<LeaseAircraftOrder>(orders[0]);
+        Assert.IsType<AdjustRouteOrder>(orders[1]);
+        Assert.Equal(2, spent);
+    }
+
+    [Fact]
+    public void TryProposeTypeSwap_CanBuyOutright_EmitsAircraftOrderOnly_NoAdjustYet_CostsOneAction()
+    {
+        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
+        var route = new Route(a, b, BigAircraft, AircraftCount: 1);
+        var candidate = (Type: Aircraft, ProfitDelta: Money.FromDollars(1), UsesIdleUnit: false, CanBuyOutright: true);
+        var orders = new System.Collections.Generic.List<QuarterOrder>();
+        var reservedUnitIds = new System.Collections.Generic.HashSet<int>();
+        var spent = 0;
+        var load = new RouteLoad(route, DemandPassengers: 1, SeatsPerQuarter: 1, PassengersCarried: 1);
+        var context = MakeContext(new[] { a, b }, a, routes: new[] { route }, actionCap: 3);
+
+        AiToolkit.TryProposeTypeSwap(context, load, candidate, orders, reservedUnitIds, ref spent);
+
+        var order = Assert.Single(orders);
+        Assert.IsType<AircraftOrder>(order);
+        Assert.Equal(1, spent);
+    }
+
+    [Fact]
+    public void TryProposeTypeSwap_NullCandidate_NoOp()
+    {
+        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
+        var route = new Route(a, b, BigAircraft, AircraftCount: 1);
+        var orders = new System.Collections.Generic.List<QuarterOrder>();
+        var reservedUnitIds = new System.Collections.Generic.HashSet<int>();
+        var spent = 0;
+        var load = new RouteLoad(route, DemandPassengers: 1, SeatsPerQuarter: 1, PassengersCarried: 1);
+        var context = MakeContext(new[] { a, b }, a, routes: new[] { route }, actionCap: 3);
+
+        AiToolkit.TryProposeTypeSwap(context, load, null, orders, reservedUnitIds, ref spent);
+
+        Assert.Empty(orders);
+        Assert.Equal(0, spent);
+    }
+
+    [Fact]
+    public void TryProposeTypeSwap_OverBudget_IdlePath_NoOp()
+    {
+        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
+        var route = new Route(a, b, BigAircraft, AircraftCount: 1);
+        var candidate = (Type: Aircraft, ProfitDelta: Money.FromDollars(1), UsesIdleUnit: true, CanBuyOutright: false);
+        var orders = new System.Collections.Generic.List<QuarterOrder>();
+        var reservedUnitIds = new System.Collections.Generic.HashSet<int>();
+        var spent = 3;
+        var load = new RouteLoad(route, DemandPassengers: 1, SeatsPerQuarter: 1, PassengersCarried: 1);
+        var context = MakeContext(new[] { a, b }, a, routes: new[] { route }, actionCap: 3);
+
+        AiToolkit.TryProposeTypeSwap(context, load, candidate, orders, reservedUnitIds, ref spent);
+
+        Assert.Empty(orders);
+        Assert.Equal(3, spent);
+    }
+
+    [Fact]
+    public void TryProposeTypeSwap_OverBudget_BuyOutrightPath_NoOp()
+    {
+        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
+        var route = new Route(a, b, BigAircraft, AircraftCount: 1);
+        var candidate = (Type: Aircraft, ProfitDelta: Money.FromDollars(1), UsesIdleUnit: false, CanBuyOutright: true);
+        var orders = new System.Collections.Generic.List<QuarterOrder>();
+        var reservedUnitIds = new System.Collections.Generic.HashSet<int>();
+        var spent = 3;
+        var load = new RouteLoad(route, DemandPassengers: 1, SeatsPerQuarter: 1, PassengersCarried: 1);
+        var context = MakeContext(new[] { a, b }, a, routes: new[] { route }, actionCap: 3);
+
+        AiToolkit.TryProposeTypeSwap(context, load, candidate, orders, reservedUnitIds, ref spent);
+
+        Assert.Empty(orders);
+        Assert.Equal(3, spent);
+    }
+
+    [Fact]
+    public void TryProposeTypeSwap_OverBudget_LeasePath_NoOp()
+    {
+        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
+        var route = new Route(a, b, BigAircraft, AircraftCount: 1);
+        var candidate = (Type: Aircraft, ProfitDelta: Money.FromDollars(1), UsesIdleUnit: false, CanBuyOutright: false);
+        var orders = new System.Collections.Generic.List<QuarterOrder>();
+        var reservedUnitIds = new System.Collections.Generic.HashSet<int>();
+        var spent = 2; // 2 + 2 (lease path's own cost) > actionCap 3
+        var load = new RouteLoad(route, DemandPassengers: 1, SeatsPerQuarter: 1, PassengersCarried: 1);
+        var context = MakeContext(new[] { a, b }, a, routes: new[] { route }, actionCap: 3);
+
+        AiToolkit.TryProposeTypeSwap(context, load, candidate, orders, reservedUnitIds, ref spent);
+
+        Assert.Empty(orders);
+        Assert.Equal(2, spent);
+    }
+
+    // --- ApplyManagementToolkit: enableAircraftTypeSwap integration ---
+
+    [Fact]
+    public void ApplyManagementToolkit_DisabledTypeSwap_ByteIdenticalToBeforeThisExisted()
+    {
+        // The ablation guarantee: with enableAircraftTypeSwap left at its
+        // default false, even a grossly oversized, unprofitable route
+        // with a real idle better-fit type sitting right there still
+        // only gets the pre-existing fare-cut response, exactly as
+        // before this feature existed.
+        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
+        var route = new Route(a, b, BigAircraft, AircraftCount: 1);
+        var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, Aircraft, quantity: 1, FleetOwnershipMode.Owned);
+        var context = MakeContext(new[] { a, b }, a, routes: new[] { route }, eraTypes: new[] { BigAircraft, Aircraft }, fleet: fleet);
+        var orders = new System.Collections.Generic.List<QuarterOrder>();
+
+        AiToolkit.ApplyManagementToolkit(context, orders, new System.Collections.Generic.HashSet<int>(), spentBeforeToolkit: 0);
+
+        Assert.Empty(orders.OfType<AdjustRouteOrder>());
+        Assert.Single(orders.OfType<SetFareOrder>());
+    }
+
+    [Fact]
+    public void ApplyManagementToolkit_EnabledTypeSwap_ReactiveFires_InsteadOfCutOrShrink()
+    {
+        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
+        var route = new Route(a, b, BigAircraft, AircraftCount: 3);
+        var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, Aircraft, quantity: 1, FleetOwnershipMode.Owned);
+        var context = MakeContext(new[] { a, b }, a, routes: new[] { route }, eraTypes: new[] { BigAircraft, Aircraft }, fleet: fleet);
+        var orders = new System.Collections.Generic.List<QuarterOrder>();
+
+        AiToolkit.ApplyManagementToolkit(context, orders, new System.Collections.Generic.HashSet<int>(), spentBeforeToolkit: 0, enableAircraftTypeSwap: true);
+
+        var adjust = Assert.Single(orders.OfType<AdjustRouteOrder>());
+        Assert.Equal(Aircraft, adjust.AircraftType);
+        Assert.Empty(orders.OfType<CloseRouteOrder>()); // the swap already collapses to 1 - shrink is redundant, skipped
+        Assert.Empty(orders.OfType<SetFareOrder>()); // let the new type play out with real data next quarter
+    }
+
+    [Fact]
+    public void ApplyManagementToolkit_EnabledTypeSwap_ClosureEligibleRoute_ClosesInstead_SwapNeverAttempted()
+    {
+        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
+        var route = new Route(a, b, BigAircraft, AircraftCount: 1);
+        var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, Aircraft, quantity: 1, FleetOwnershipMode.Owned);
+        var rivalCount = new System.Collections.Generic.Dictionary<(string, string), int> { [QuarterEngine.NormalizedPairKey(a, b)] = 0 };
+        var history = new System.Collections.Generic.Dictionary<(string, string), AiRouteHistory>
+        {
+            [QuarterEngine.NormalizedPairKey(a, b)] = new(null, null, ConsecutiveUnprofitableQuarters: 20),
+        };
+        // quarterNumber: 100, well past MidGameStartQuarter, so the raw
+        // 20-quarter streak isn't zeroed out by the "zero credit if the
+        // raw streak predates MidGame itself" rule - same convention the
+        // existing SustainedSingleAircraftClosureThreshold boundary test
+        // already uses.
+        var context = MakeContext(new[] { a, b }, a, routes: new[] { route }, eraTypes: new[] { BigAircraft, Aircraft }, fleet: fleet,
+            rivalCountByServedRoute: rivalCount, routeHistoryByPair: history, quarterNumber: 100);
+        var orders = new System.Collections.Generic.List<QuarterOrder>();
+
+        AiToolkit.ApplyManagementToolkit(context, orders, new System.Collections.Generic.HashSet<int>(), spentBeforeToolkit: 0,
+            enableSustainedSingleAircraftClosure: true, enableAircraftTypeSwap: true);
+
+        Assert.Single(orders.OfType<CloseRouteOrder>());
+        Assert.Empty(orders.OfType<AdjustRouteOrder>());
+    }
+
+    [Fact]
+    public void ApplyManagementToolkit_EnabledTypeSwap_RecentlySwapped_CooldownBlocksIt_FallsBackToCutFare()
+    {
+        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
+        var route = new Route(a, b, BigAircraft, AircraftCount: 1);
+        var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, Aircraft, quantity: 1, FleetOwnershipMode.Owned);
+        var history = new System.Collections.Generic.Dictionary<(string, string), AiRouteHistory>
+        {
+            [QuarterEngine.NormalizedPairKey(a, b)] = new(null, null, 0, LastTypeSwapQuarter: 8), // quarter 10 - 8 = 2 < TypeSwapCooldownQuarters (4)
+        };
+        var context = MakeContext(new[] { a, b }, a, routes: new[] { route }, eraTypes: new[] { BigAircraft, Aircraft }, fleet: fleet,
+            quarterNumber: 10, routeHistoryByPair: history);
+        var orders = new System.Collections.Generic.List<QuarterOrder>();
+
+        AiToolkit.ApplyManagementToolkit(context, orders, new System.Collections.Generic.HashSet<int>(), spentBeforeToolkit: 0, enableAircraftTypeSwap: true);
+
+        Assert.Empty(orders.OfType<AdjustRouteOrder>());
+        Assert.Single(orders.OfType<SetFareOrder>());
+    }
+
+    [Fact]
+    public void ApplyManagementToolkit_EnabledTypeSwap_ProactiveFires_OnAHealthyRoute()
+    {
+        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
+        var route = new Route(a, b, Aircraft, AircraftCount: 1);
+        var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, MediumAircraft, quantity: 1, FleetOwnershipMode.Owned);
+        var context = MakeContext(new[] { a, b }, a, routes: new[] { route }, eraTypes: new[] { Aircraft, MediumAircraft }, fleet: fleet);
+        var orders = new System.Collections.Generic.List<QuarterOrder>();
+
+        AiToolkit.ApplyManagementToolkit(context, orders, new System.Collections.Generic.HashSet<int>(), spentBeforeToolkit: 0, enableAircraftTypeSwap: true);
+
+        var adjust = Assert.Single(orders.OfType<AdjustRouteOrder>());
+        Assert.Equal(MediumAircraft, adjust.AircraftType);
+    }
+
+    [Fact]
+    public void ApplyManagementToolkit_EnabledTypeSwap_HealthyRouteNoBigImprovement_DoesNothing()
+    {
+        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
+        var route = new Route(a, b, Aircraft, AircraftCount: 1);
+        var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, BelowBarAircraft, quantity: 1, FleetOwnershipMode.Owned);
+        var context = MakeContext(new[] { a, b }, a, routes: new[] { route }, eraTypes: new[] { Aircraft, BelowBarAircraft }, fleet: fleet);
+        var orders = new System.Collections.Generic.List<QuarterOrder>();
+
+        AiToolkit.ApplyManagementToolkit(context, orders, new System.Collections.Generic.HashSet<int>(), spentBeforeToolkit: 0, enableAircraftTypeSwap: true);
+
+        Assert.Empty(orders.OfType<AdjustRouteOrder>());
     }
 
     // --- ApplyMarketingCampaign (M52, retargeted at load factor by M53, then real profit by M54) ---

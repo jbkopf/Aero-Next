@@ -2964,5 +2964,89 @@ toward dominance, a separate change).
   quarter or later, at its existing unchanged price — no new growth
   logic needed. Fare resets to the computed default (a real, deliberate
   consequence of aircraft cost, not preserved). Full design and every
-  rule's reasoning: `docs/ROUTE_AIRCRAFT_ADJUSTMENT_DESIGN.md`.
-  Player-only this round — no AI strategy submits this order yet.
+  rule's reasoning: `docs/ROUTE_AIRCRAFT_ADJUSTMENT_DESIGN.md`. Shipped
+  player-only at first — `NetworkOptimizerStrategy` was taught to use it
+  in a direct follow-up round; see this document's own "AI
+  aircraft-type-swap awareness" section below.
+
+---
+
+## M66 — AI aircraft-type-swap awareness: NetworkOptimizerStrategy learns AdjustRouteOrder ✅ (shipped, real regional redistribution, honestly reported)
+
+Direct user follow-up to the player-facing `AdjustRouteOrder` feature
+above: "now we need to teach the AI to use it." Full design at
+`docs/AI_AIRCRAFT_TYPE_SWAP_DESIGN.md` — this section is the summary.
+
+**One strategy first, the same opt-in-flag shape
+`enableSustainedSingleAircraftClosure` already uses.**
+`AiToolkit.ApplyManagementToolkit` gained `enableAircraftTypeSwap` (default
+`false`); only `NetworkOptimizerStrategy` passes `true` — chosen because it
+spends the majority of a 60-year campaign managing an already-built
+network rather than growing one, exactly the setting where "a newer,
+better-fitting aircraft type became available since this route opened" is
+a real, recurring situation. `RapidExpansionStrategy`/
+`DomesticProfitOptimizerStrategy` are untouched, byte-identical to before
+this existed.
+
+**Reuses `AiToolkit.EstimatedRealProfit` rather than inventing new profit
+math** — the same real, lease-fee-aware, competition-derated profit figure
+`NetworkOptimizerStrategy`'s own step 3 (`FindMostProfitablePair`) already
+trusts for a structurally identical decision, so the new mechanism
+inherits that function's own proven-safe shape (single-peaked in capacity
+*within one fixed pair*, never compared across pairs — the property M56's
+own four reverted attempts violated) rather than being a new kind of risk.
+
+**Two triggers, both requested directly, at different bars.** Reactive
+(a route already read as unprofitable) needs only a real improvement past
+a small dollar dead-band (`ReactiveSwapMinimumProfitImprovement`, $10,000)
+— tried before falling back to the existing cut-fare/shrink remedies, and
+skipped entirely for a route already judged unsalvageable by the
+sustained-closure check (so closure still wins there, unchanged).
+Proactive (a healthy route) needs a deliberately high bar
+(`ProactiveSwapMinimumProfitImprovementFraction`, 0.5 — a 50%+ improvement)
+before disrupting something that isn't broken. Both real cost paths are
+supported per direct instruction — an already-idle unit, a deliberate
+lease (same-quarter atomic), or a deliberate purchase (fire-and-forget;
+the production-queue delay means the swap itself waits for a later
+quarter's own re-evaluation to find the unit idle, with no new
+cross-quarter "intent" tracking needed to make that work).
+
+**Thrash prevention built in from the start, per direct instruction, not
+deferred.** New `AiRouteHistory.LastTypeSwapQuarter` +
+`TypeSwapCooldownQuarters` (4 — double `GrowthCooldownQuarters`/
+`ReopenCooldownQuarters`'s own 2, since a swap is a bigger disruption:
+capacity reset to 1, fare reset to default). Stamped from every applied
+`AdjustRouteOrder` regardless of source, matching
+`LastShrunkQuarter`/`LastClosedQuarter`'s own "built fresh from real
+applied state" principle exactly.
+
+**Measured: a real 300-game ablation (seed 1, 244 quarters, current
+production defaults), ✅ on correctness, an honest regional redistribution
+worth knowing about.** 300/300 clean both ways, 0 crashes, 0 violations,
+bankruptcy flat (19/300 → 18/300). Regional win share: Europe
+94→**112** (31.3%→37.3%), AustralAsia 60→**45** (20.0%→15.0%), the other
+four regions unchanged. Not root-caused further this round — plausibly
+Europe's own denser network (most cities, highest total demand weight of
+any region) simply gives this strategy more real routes to find a
+worthwhile swap on than AustralAsia's sparser one, consistent with this
+roadmap's own recurring "imbalance amplifies existing structure" finding,
+but this is a plausible read, not a traced one.
+
+**Swap activity clusters at two calendar years — the specific risk the
+design doc named before measuring — but doesn't move correctness.** 1,279
+swaps across 300 games, 39% of them landing in just two years: 1965
+(`GameEras.MidGameStartQuarter`'s own first year — every eligible
+incumbent's network gets assessed for the first time, all at once) and
+1970 (a real aircraft's own `AvailableFromYear` unlocking a genuine
+proactive re-fleet wave). Same risk shape as M58-follow-up-1's "backlog
+dump," but unlike that case, bankruptcy stayed flat across both runs and
+neither year shows an elevated crash or violation count — read as a real,
+understood first-pass catch-up burst, not a recurring thrash pattern.
+
+**Shipped with both thresholds at their original first-principles
+values** — the measurement didn't surface a reason to distrust them, so
+they weren't retuned blind. Deliberately left for a follow-up round: an
+isolation sweep to attribute the Europe/AustralAsia redistribution to the
+reactive or proactive branch specifically, and a decision on whether to
+extend `enableAircraftTypeSwap` to additional strategies. Full reasoning
+and every number: `docs/AI_AIRCRAFT_TYPE_SWAP_DESIGN.md`.

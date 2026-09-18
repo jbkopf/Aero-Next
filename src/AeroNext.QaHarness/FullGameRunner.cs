@@ -388,6 +388,20 @@ public static class FullGameRunner
                         : existingHistory with { LastShrunkQuarter = q };
                 }
 
+                // AI-type-swap follow-up (docs/AI_AIRCRAFT_TYPE_SWAP_DESIGN.md):
+                // stamp LastTypeSwapQuarter the same way, from every
+                // applied AdjustRouteOrder - regardless of source (AI or,
+                // once a real UI exists, a player), matching
+                // LastShrunkQuarter/LastClosedQuarter's own "built fresh
+                // from real applied state" principle above.
+                foreach (var swapOrder in result.AppliedOrders.OfType<AdjustRouteOrder>())
+                {
+                    var pairKey = QuarterEngine.NormalizedPairKey(swapOrder.Origin, swapOrder.Destination);
+                    var existingHistory = routeHistoryByAirlineName[name].GetValueOrDefault(pairKey) ?? new AiRouteHistory(null, null, 0);
+
+                    routeHistoryByAirlineName[name][pairKey] = existingHistory with { LastTypeSwapQuarter = q };
+                }
+
                 routes[name] = result.Routes;
                 caps[name] = result.ActionCap;
                 fleets[name] = result.UpdatedFleet!;
