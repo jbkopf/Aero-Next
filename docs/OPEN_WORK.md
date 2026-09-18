@@ -18,18 +18,21 @@ Compiled 2026-08-31, cross-referencing every `docs/*_ROADMAP.md`'s own
 writing: M0–M14 (`SIM_CORE_ROADMAP.md`),
 M15–M19 (`GAME_SETUP_ROADMAP.md`), M20–M22 (`HISTORICAL_DYNAMICS_ROADMAP.md`),
 M23–M24 (`WIN_CONDITIONS_ROADMAP.md`), M25–M30/M34
-(`FINANCIAL_MODEL_ROADMAP.md`, M31 retired), M31/M35–M44/M49–M58/M66
+(`FINANCIAL_MODEL_ROADMAP.md`, M31 retired), M31/M35–M44/M49–M58/M66–M67
 (`BASELINE_AI_ROADMAP.md`; M66 is AI aircraft-type-swap awareness —
-`NetworkOptimizerStrategy` learns `AdjustRouteOrder`, see that document's
-own M66 section and `docs/AI_AIRCRAFT_TYPE_SWAP_DESIGN.md` for the full
-design and measured results), M32–M33/M45–M46/M59 (`ROUTE_CAPACITY_ROADMAP.md`),
+`NetworkOptimizerStrategy` learns `AdjustRouteOrder` — and M67 extends it
+to `BalancedGrowthStrategy`/`DistressStrategy`, reactive-only for both
+after a real regression traced to `BalancedGrowthStrategy`'s own
+proactive branch; see that document's own M66/M67 sections and
+`docs/AI_AIRCRAFT_TYPE_SWAP_DESIGN.md` for the full design and measured
+results), M32–M33/M45–M46/M59 (`ROUTE_CAPACITY_ROADMAP.md`),
 M47–M48 (`MARKETING_ROADMAP.md`), M61-M65 (`HUB_DEMAND_ROADMAP.md`; M65 is
 a regional-balance change, not hub-and-spoke, logged there only because it
 touches `GravityDemandModel` — see `docs/AUSTRALASIA_TUNING_EXPERIMENTS.md`
 for the real write-up, and its sibling
 `docs/SOUTHAMERICA_TUNING_EXPERIMENTS.md` for a second, separately-landed
 regional-balance fix — `data/cities.json`'s Belo Horizonte entry — that
-never got its own M-number since it shipped as a plain data change). M66
+never got its own M-number since it shipped as a plain data change). M67
 is the current highest *shipped* number (M60 was attempted, measured, and
 fully reverted — see below, not a shipped number). M56 shipped no code
 change (four route-opening-quality designs tried and reverted); M57

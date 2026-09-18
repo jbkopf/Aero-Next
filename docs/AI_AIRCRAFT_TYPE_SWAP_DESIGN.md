@@ -1,13 +1,14 @@
 # Teaching the AI to Use AdjustRouteOrder: Design
 
-**Status: implemented and measured (M66, `docs/BASELINE_AI_ROADMAP.md`).**
-Written per the user's own direct request, as the follow-up to
-`docs/ROUTE_AIRCRAFT_ADJUSTMENT_DESIGN.md` (the player-facing feature,
-already shipped, commit `5b8eb01`), whose own "Known gaps" section
-flagged AI usage as explicitly deferred. Everything below reflects the
-real, shipped mechanism; see "Measured" at the bottom for the real
-300-game results, replacing the original "Measurement plan" section this
-draft started with.
+**Status: implemented and measured (M66, `docs/BASELINE_AI_ROADMAP.md`),
+extended to every non-Starting strategy in a direct follow-up round (M67,
+same document).** Written per the user's own direct request, as the
+follow-up to `docs/ROUTE_AIRCRAFT_ADJUSTMENT_DESIGN.md` (the player-facing
+feature, already shipped, commit `5b8eb01`), whose own "Known gaps"
+section flagged AI usage as explicitly deferred. Everything below
+reflects the real, shipped mechanism; see "Measured" for M66's own real
+300-game results and "M67 — extending to the rest of the non-Starting
+strategies" below for the follow-up round's own design and results.
 
 ## Decided scope
 
@@ -571,7 +572,128 @@ more once isolated.
   repeating oscillation), so the single `LastTypeSwapQuarter` cooldown
   already shipped appears sufficient on its own.
 - **Wire additional strategies** — `RapidExpansionStrategy`/
-  `DomesticProfitOptimizerStrategy` still default `enableAircraftTypeSwap`
-  to `false`; a second round could extend this once
-  `NetworkOptimizerStrategy`'s own results are judged acceptable, or
-  revisited if the isolation work above changes that judgment.
+  `DomesticProfitOptimizerStrategy` (both Starting-era only) still default
+  `enableReactiveTypeSwap`/`enableProactiveTypeSwap` to `false`; out of
+  scope by the user's own "non-Starting" framing (see M67 below, which
+  extended to every *other* strategy instead).
+
+---
+
+## M67 — extending to the rest of the non-Starting strategies
+
+Direct user follow-up: "add aircraft swap ability to the rest of the
+non starting strategies." `RapidExpansionStrategy`/
+`DomesticProfitOptimizerStrategy` are both `{ Starting }`-only
+(`ApplicableEras`), out of scope by that framing — leaving
+`BalancedGrowthStrategy` (`{ MidGame, LateGame }`) unambiguously in scope
+and `DistressStrategy` (`{ Starting, MidGame, LateGame }`) genuinely
+ambiguous, since it isn't confined to Starting the way the two excluded
+strategies are, but M66's own "Interaction with existing mechanisms"
+section had explicitly left it out pending its own decision. Asked
+directly; the user chose to include it.
+
+### The API needed splitting, not just two more callers
+
+`enableAircraftTypeSwap` (M66's single flag) couldn't express what
+`DistressStrategy` needed: reactive without proactive, and no lease/buy.
+Split into three independent parameters on `ApplyManagementToolkit`:
+
+```csharp
+public static void ApplyManagementToolkit(
+    StrategyContext context, List<QuarterOrder> orders, HashSet<int> reservedUnitIds, int spentBeforeToolkit,
+    bool enableSustainedSingleAircraftClosure = false,
+    bool enableReactiveTypeSwap = false, bool enableProactiveTypeSwap = false, bool allowTypeSwapLeaseOrBuy = true)
+```
+
+`EvaluateTypeSwapCandidate` gained a matching `allowLeaseOrBuy = true`
+parameter — `false` restricts every candidate (reactive or proactive) to
+types already sitting idle, filtered out up front rather than returned
+and expected to be filtered by the caller. Safe to rename/restructure
+freely — this API was one commit old (M66) with a single caller, not a
+stable surface accumulating migration debt.
+
+**Shipped:**
+- `NetworkOptimizerStrategy` — unchanged from M66 (`enableReactiveTypeSwap:
+  true, enableProactiveTypeSwap: true`, `allowTypeSwapLeaseOrBuy` default
+  `true`).
+- `BalancedGrowthStrategy` — `enableReactiveTypeSwap: true,
+  enableProactiveTypeSwap: false` (see the real regression below),
+  `allowTypeSwapLeaseOrBuy` default `true`.
+- `DistressStrategy` — `enableReactiveTypeSwap: true,
+  enableProactiveTypeSwap: false, allowTypeSwapLeaseOrBuy: false`. A
+  distressed airline can fix a genuinely mismatched route using what it
+  already has idle, but never commits fresh capital (a lease's recurring
+  fee, or a purchase) specifically to enable a swap while already in
+  financial trouble — a real cash-risk question, not a default inclusion.
+
+### Measured: a real regression found, isolated, and shipped around
+
+Real 300-game ablation (seed 1, 244 quarters), same methodology as M66 —
+temporarily reverting each strategy's own flags, rebuilding, diffing
+against the identical-seed run with the real config restored.
+
+**Full rollout (both strategies at full capability - reactive + proactive
+for BalancedGrowthStrategy, reactive for DistressStrategy) measured a
+real problem, not just a redistribution:**
+
+| | M66 baseline (NetworkOptimizer only) | Full rollout |
+|---|---|---|
+| Total bankruptcy | 18/300 | **25/300** |
+| SouthAmerica bankruptcy | 4 | **12** |
+| SouthAmerica avg bankruptcy quarter | 30.8 | **98.4** |
+| Avg cash, every region | ~$1-2B | ~$2-5B |
+
+SouthAmerica's bankruptcy count tripled, shifted from a mid-campaign
+pattern to a late-campaign one, and every region's own average cash
+inflated far beyond what a single-strategy rollout (M66) ever showed —
+a real, substantial regression, not the kind of honest-redistribution
+finding M66's own Europe/AustralAsia result was.
+
+**Isolated by three further ablation sweeps, same seed:**
+
+| Configuration | Total bankruptcy | SouthAmerica bankruptcy |
+|---|---|---|
+| Full rollout | 25 | 12 |
+| `DistressStrategy` swap disabled | 26 | 12 |
+| `BalancedGrowthStrategy` swap disabled entirely | 16 | 4 |
+| `BalancedGrowthStrategy` reactive-only (proactive disabled) | 16 | 4 |
+
+`DistressStrategy` is cleared — disabling it barely moves the total
+(26 vs 25, noise) and SouthAmerica stays at 12 regardless, confirming it
+isn't the driver; a separate region (AustralAsia, 7→5 bankrupt) actually
+improves with it enabled, consistent with its own intended purpose.
+`BalancedGrowthStrategy`'s **proactive** branch specifically is the
+driver — reactive-only reproduces the fully-disabled numbers exactly
+(16 total, SouthAmerica back to 4), while its reactive branch alone
+contributes nothing harmful.
+
+**Why proactive specifically, and why here:** `BalancedGrowthStrategy` is
+the primary MidGame/LateGame workhorse — unlike `NetworkOptimizerStrategy`
+(only takes over under real financial trouble,
+`AiToolkit.NetworkTroubleRatio`-gated) or `DistressStrategy` (only runs
+during a real emergency), it's active for most of a healthy airline's
+own MidGame/LateGame quarters. Its own proactive branch re-evaluates
+*every* held route each such quarter, so the same 50%-improvement bar
+that kept M66's own NetworkOptimizerStrategy-only proactive activity
+modest reaches a far larger surface here — enough swap volume,
+concentrated on SouthAmerica's own thinner, less redundant network
+(fewer routes to absorb a temporary capacity/fare reset), to
+meaningfully destabilize it over the second half of a 60-year campaign.
+Not root-caused to a single mechanism beyond that — a real, plausible,
+volume-driven explanation, not a traced single bug.
+
+**Shipped, by the user's own explicit decision, with the regression
+scoped around rather than accepted:** `BalancedGrowthStrategy` ships
+reactive-only (`enableProactiveTypeSwap: false`), confirmed clean by the
+isolation table above. `DistressStrategy` ships as designed (reactive
+only, no lease/buy), confirmed clean and mildly beneficial by the same
+ablation. **`BalancedGrowthStrategy`'s own proactive branch is explicitly
+deferred, not abandoned** — flagged for a real follow-up once the user's
+own next area of work (aircraft ordering/leasing, especially around
+newly available models) is further along, since that work is likely to
+touch the same territory (how aggressively an AI strategy should react
+to a newer aircraft type becoming available).
+
+1052 tests passing (up from 1042), every changed file fully covered
+(the same two small pre-existing, unrelated gaps from M66 left
+untouched).

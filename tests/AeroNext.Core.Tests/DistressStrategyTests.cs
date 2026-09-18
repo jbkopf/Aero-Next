@@ -124,6 +124,77 @@ public class DistressStrategyTests
     }
 
     [Fact]
+    public void DecideOrders_GrosslyMismatchedRoute_IdleBetterType_SwapsAircraftType()
+    {
+        // Follow-up to M66 (NetworkOptimizerStrategy): confirms
+        // DistressStrategy's own enableReactiveTypeSwap: true wiring
+        // actually reaches ApplyManagementToolkit through a real
+        // DecideOrders call - same bar NetworkOptimizerStrategyTests's
+        // own equivalent test holds itself to. ConsecutiveUnprofitableQuarters
+        // omitted (defaults null -> 0 via RouteHistoryByPair), so the
+        // sustained-closure branch never competes with the swap here.
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
+        var bigAircraft = new AircraftType("big", "Big", Seats: 100_000, RangeKm: 10_000, CruiseSpeedKmh: 900, CostPerAvailableSeatKm: 0.1);
+        var smallAircraft = new AircraftType("small", "Small", Seats: 100, RangeKm: 10_000, CruiseSpeedKmh: 900, CostPerAvailableSeatKm: 0.1);
+        var route = new Route(home, b, bigAircraft, AircraftCount: 1);
+        var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, smallAircraft, quantity: 1, FleetOwnershipMode.Owned);
+        var context = new StrategyContext(new[] { route }, ActionCap: 3, new[] { home, b }, DemandModel, new[] { bigAircraft, smallAircraft }, fleet,
+            home.Region, home);
+
+        var orders = DistressStrategy.Instance.DecideOrders(context);
+
+        var adjust = Assert.Single(orders.OfType<AdjustRouteOrder>());
+        Assert.Equal(smallAircraft, adjust.AircraftType);
+    }
+
+    [Fact]
+    public void DecideOrders_GrosslyMismatchedRoute_OnlyLeaseRequiringBetterType_DoesNotSwap_FallsBackToCutFare()
+    {
+        // The specific risk this strategy's own allowTypeSwapLeaseOrBuy:
+        // false was built for: a distressed airline must never commit
+        // fresh capital (a lease's recurring fee) specifically to enable
+        // a swap, even when the alternate type would otherwise clear the
+        // reactive bar easily - no idle unit means no swap, period, for
+        // this strategy specifically (NetworkOptimizerStrategy/
+        // BalancedGrowthStrategy would lease here instead).
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
+        var bigAircraft = new AircraftType("big", "Big", Seats: 100_000, RangeKm: 10_000, CruiseSpeedKmh: 900, CostPerAvailableSeatKm: 0.1);
+        var smallAircraft = new AircraftType("small", "Small", Seats: 100, RangeKm: 10_000, CruiseSpeedKmh: 900, CostPerAvailableSeatKm: 0.1);
+        var route = new Route(home, b, bigAircraft, AircraftCount: 1);
+        // smallAircraft is era-available but NOT idle - no fleet passed.
+        var context = new StrategyContext(new[] { route }, ActionCap: 3, new[] { home, b }, DemandModel, new[] { bigAircraft, smallAircraft }, AirlineFleet.Empty,
+            home.Region, home);
+
+        var orders = DistressStrategy.Instance.DecideOrders(context);
+
+        Assert.Empty(orders.OfType<AdjustRouteOrder>());
+        Assert.Empty(orders.OfType<LeaseAircraftOrder>());
+        Assert.Single(orders.OfType<SetFareOrder>());
+    }
+
+    [Fact]
+    public void DecideOrders_HealthyRoute_NeverProactivelySwaps()
+    {
+        // DistressStrategy passes enableProactiveTypeSwap: false - a
+        // healthy route must never be disrupted even with a much
+        // better-fitting idle type sitting right there.
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
+        var smallAircraft = new AircraftType("small", "Small", Seats: 100, RangeKm: 10_000, CruiseSpeedKmh: 900, CostPerAvailableSeatKm: 0.1);
+        var mediumAircraft = new AircraftType("med", "Medium", Seats: 200, RangeKm: 10_000, CruiseSpeedKmh: 900, CostPerAvailableSeatKm: 0.1);
+        var route = new Route(home, b, smallAircraft, AircraftCount: 1); // profitable
+        var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, mediumAircraft, quantity: 1, FleetOwnershipMode.Owned);
+        var context = new StrategyContext(new[] { route }, ActionCap: 3, new[] { home, b }, DemandModel, new[] { smallAircraft, mediumAircraft }, fleet,
+            home.Region, home);
+
+        var orders = DistressStrategy.Instance.DecideOrders(context);
+
+        Assert.Empty(orders.OfType<AdjustRouteOrder>());
+    }
+
+    [Fact]
     public void DecideOrders_StillAppliesSharedToolkit_RaisesFareOnSaturatedRoute()
     {
         // Confirms AiToolkit.ApplyManagementToolkit is genuinely reused,

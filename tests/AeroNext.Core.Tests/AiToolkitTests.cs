@@ -978,6 +978,42 @@ public class AiToolkitTests
     }
 
     [Fact]
+    public void EvaluateTypeSwapCandidate_AllowLeaseOrBuyFalse_ExcludesNonIdleTypes_EvenIfBetter()
+    {
+        // DistressStrategy follow-up: a strictly better type with no idle
+        // unit must be excluded entirely when allowLeaseOrBuy is false -
+        // not returned with UsesIdleUnit: false expecting the caller to
+        // filter it out itself.
+        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
+        var route = new Route(a, b, BigAircraft, AircraftCount: 1);
+        // Aircraft is era-available (a genuinely better fit than BigAircraft) but NOT idle - no fleet passed.
+        var context = MakeContext(new[] { a, b }, a, routes: new[] { route }, eraTypes: new[] { BigAircraft, Aircraft });
+        var load = RouteEvaluator.EvaluateNetwork(context.CurrentRoutes, context.DemandModel).Single();
+
+        var candidate = AiToolkit.EvaluateTypeSwapCandidate(context, load, new System.Collections.Generic.HashSet<int>(), isReactive: true, allowLeaseOrBuy: false);
+
+        Assert.Null(candidate);
+    }
+
+    [Fact]
+    public void EvaluateTypeSwapCandidate_AllowLeaseOrBuyFalse_StillReturnsAGenuinelyIdleCandidate()
+    {
+        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
+        var route = new Route(a, b, BigAircraft, AircraftCount: 1);
+        var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, Aircraft, quantity: 1, FleetOwnershipMode.Owned);
+        var context = MakeContext(new[] { a, b }, a, routes: new[] { route }, eraTypes: new[] { BigAircraft, Aircraft }, fleet: fleet);
+        var load = RouteEvaluator.EvaluateNetwork(context.CurrentRoutes, context.DemandModel).Single();
+
+        var candidate = AiToolkit.EvaluateTypeSwapCandidate(context, load, new System.Collections.Generic.HashSet<int>(), isReactive: true, allowLeaseOrBuy: false);
+
+        Assert.NotNull(candidate);
+        Assert.Equal(Aircraft, candidate!.Value.Type);
+        Assert.True(candidate.Value.UsesIdleUnit);
+    }
+
+    [Fact]
     public void TryProposeTypeSwap_IdleUnit_EmitsAdjustRouteOrderOnly_CostsOneAction()
     {
         var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
@@ -1115,16 +1151,17 @@ public class AiToolkitTests
         Assert.Equal(2, spent);
     }
 
-    // --- ApplyManagementToolkit: enableAircraftTypeSwap integration ---
+    // --- ApplyManagementToolkit: enableReactiveTypeSwap / enableProactiveTypeSwap / allowTypeSwapLeaseOrBuy integration ---
 
     [Fact]
     public void ApplyManagementToolkit_DisabledTypeSwap_ByteIdenticalToBeforeThisExisted()
     {
-        // The ablation guarantee: with enableAircraftTypeSwap left at its
-        // default false, even a grossly oversized, unprofitable route
-        // with a real idle better-fit type sitting right there still
-        // only gets the pre-existing fare-cut response, exactly as
-        // before this feature existed.
+        // The ablation guarantee: with enableReactiveTypeSwap/
+        // enableProactiveTypeSwap both left at their default false, even
+        // a grossly oversized, unprofitable route with a real idle
+        // better-fit type sitting right there still only gets the
+        // pre-existing fare-cut response, exactly as before this
+        // feature existed.
         var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
         var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
         var route = new Route(a, b, BigAircraft, AircraftCount: 1);
@@ -1148,7 +1185,7 @@ public class AiToolkitTests
         var context = MakeContext(new[] { a, b }, a, routes: new[] { route }, eraTypes: new[] { BigAircraft, Aircraft }, fleet: fleet);
         var orders = new System.Collections.Generic.List<QuarterOrder>();
 
-        AiToolkit.ApplyManagementToolkit(context, orders, new System.Collections.Generic.HashSet<int>(), spentBeforeToolkit: 0, enableAircraftTypeSwap: true);
+        AiToolkit.ApplyManagementToolkit(context, orders, new System.Collections.Generic.HashSet<int>(), spentBeforeToolkit: 0, enableReactiveTypeSwap: true);
 
         var adjust = Assert.Single(orders.OfType<AdjustRouteOrder>());
         Assert.Equal(Aircraft, adjust.AircraftType);
@@ -1178,7 +1215,7 @@ public class AiToolkitTests
         var orders = new System.Collections.Generic.List<QuarterOrder>();
 
         AiToolkit.ApplyManagementToolkit(context, orders, new System.Collections.Generic.HashSet<int>(), spentBeforeToolkit: 0,
-            enableSustainedSingleAircraftClosure: true, enableAircraftTypeSwap: true);
+            enableSustainedSingleAircraftClosure: true, enableReactiveTypeSwap: true);
 
         Assert.Single(orders.OfType<CloseRouteOrder>());
         Assert.Empty(orders.OfType<AdjustRouteOrder>());
@@ -1199,7 +1236,7 @@ public class AiToolkitTests
             quarterNumber: 10, routeHistoryByPair: history);
         var orders = new System.Collections.Generic.List<QuarterOrder>();
 
-        AiToolkit.ApplyManagementToolkit(context, orders, new System.Collections.Generic.HashSet<int>(), spentBeforeToolkit: 0, enableAircraftTypeSwap: true);
+        AiToolkit.ApplyManagementToolkit(context, orders, new System.Collections.Generic.HashSet<int>(), spentBeforeToolkit: 0, enableReactiveTypeSwap: true);
 
         Assert.Empty(orders.OfType<AdjustRouteOrder>());
         Assert.Single(orders.OfType<SetFareOrder>());
@@ -1215,7 +1252,7 @@ public class AiToolkitTests
         var context = MakeContext(new[] { a, b }, a, routes: new[] { route }, eraTypes: new[] { Aircraft, MediumAircraft }, fleet: fleet);
         var orders = new System.Collections.Generic.List<QuarterOrder>();
 
-        AiToolkit.ApplyManagementToolkit(context, orders, new System.Collections.Generic.HashSet<int>(), spentBeforeToolkit: 0, enableAircraftTypeSwap: true);
+        AiToolkit.ApplyManagementToolkit(context, orders, new System.Collections.Generic.HashSet<int>(), spentBeforeToolkit: 0, enableProactiveTypeSwap: true);
 
         var adjust = Assert.Single(orders.OfType<AdjustRouteOrder>());
         Assert.Equal(MediumAircraft, adjust.AircraftType);
@@ -1231,9 +1268,82 @@ public class AiToolkitTests
         var context = MakeContext(new[] { a, b }, a, routes: new[] { route }, eraTypes: new[] { Aircraft, BelowBarAircraft }, fleet: fleet);
         var orders = new System.Collections.Generic.List<QuarterOrder>();
 
-        AiToolkit.ApplyManagementToolkit(context, orders, new System.Collections.Generic.HashSet<int>(), spentBeforeToolkit: 0, enableAircraftTypeSwap: true);
+        AiToolkit.ApplyManagementToolkit(context, orders, new System.Collections.Generic.HashSet<int>(), spentBeforeToolkit: 0, enableProactiveTypeSwap: true);
 
         Assert.Empty(orders.OfType<AdjustRouteOrder>());
+    }
+
+    [Fact]
+    public void ApplyManagementToolkit_ReactiveOnly_DoesNotProactivelySwapAHealthyRoute()
+    {
+        // The split from a single flag (M66) to independent
+        // reactive/proactive toggles must actually be independent - a
+        // caller passing only enableReactiveTypeSwap must never also get
+        // proactive behavior for free.
+        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
+        var route = new Route(a, b, Aircraft, AircraftCount: 1); // profitable
+        var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, MediumAircraft, quantity: 1, FleetOwnershipMode.Owned); // a clearly better idle type
+        var context = MakeContext(new[] { a, b }, a, routes: new[] { route }, eraTypes: new[] { Aircraft, MediumAircraft }, fleet: fleet);
+        var orders = new System.Collections.Generic.List<QuarterOrder>();
+
+        AiToolkit.ApplyManagementToolkit(context, orders, new System.Collections.Generic.HashSet<int>(), spentBeforeToolkit: 0, enableReactiveTypeSwap: true);
+
+        Assert.Empty(orders.OfType<AdjustRouteOrder>());
+    }
+
+    [Fact]
+    public void ApplyManagementToolkit_ProactiveOnly_DoesNotReactivelySwapAnUnprofitableRoute()
+    {
+        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
+        var route = new Route(a, b, BigAircraft, AircraftCount: 1); // grossly unprofitable
+        var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, Aircraft, quantity: 1, FleetOwnershipMode.Owned);
+        var context = MakeContext(new[] { a, b }, a, routes: new[] { route }, eraTypes: new[] { BigAircraft, Aircraft }, fleet: fleet);
+        var orders = new System.Collections.Generic.List<QuarterOrder>();
+
+        AiToolkit.ApplyManagementToolkit(context, orders, new System.Collections.Generic.HashSet<int>(), spentBeforeToolkit: 0, enableProactiveTypeSwap: true);
+
+        Assert.Empty(orders.OfType<AdjustRouteOrder>());
+        Assert.Single(orders.OfType<SetFareOrder>()); // falls back to the ordinary cut, unaffected
+    }
+
+    [Fact]
+    public void ApplyManagementToolkit_LeaseOrBuyDisallowed_SkipsALeaseRequiringCandidate_FallsBackToCutFare()
+    {
+        // DistressStrategy follow-up: allowTypeSwapLeaseOrBuy: false must
+        // reject a candidate that would need a fresh lease/purchase, even
+        // though it would otherwise clear the reactive bar easily -
+        // falls back to the ordinary fare cut instead of swapping.
+        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
+        var route = new Route(a, b, BigAircraft, AircraftCount: 1);
+        var context = MakeContext(new[] { a, b }, a, routes: new[] { route }, eraTypes: new[] { BigAircraft, Aircraft }); // Aircraft is era-available but NOT idle (no fleet passed)
+        var orders = new System.Collections.Generic.List<QuarterOrder>();
+
+        AiToolkit.ApplyManagementToolkit(context, orders, new System.Collections.Generic.HashSet<int>(), spentBeforeToolkit: 0,
+            enableReactiveTypeSwap: true, allowTypeSwapLeaseOrBuy: false);
+
+        Assert.Empty(orders.OfType<AdjustRouteOrder>());
+        Assert.Empty(orders.OfType<LeaseAircraftOrder>());
+        Assert.Single(orders.OfType<SetFareOrder>());
+    }
+
+    [Fact]
+    public void ApplyManagementToolkit_LeaseOrBuyDisallowed_StillSwapsWhenAnIdleCandidateExists()
+    {
+        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
+        var route = new Route(a, b, BigAircraft, AircraftCount: 1);
+        var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, Aircraft, quantity: 1, FleetOwnershipMode.Owned);
+        var context = MakeContext(new[] { a, b }, a, routes: new[] { route }, eraTypes: new[] { BigAircraft, Aircraft }, fleet: fleet);
+        var orders = new System.Collections.Generic.List<QuarterOrder>();
+
+        AiToolkit.ApplyManagementToolkit(context, orders, new System.Collections.Generic.HashSet<int>(), spentBeforeToolkit: 0,
+            enableReactiveTypeSwap: true, allowTypeSwapLeaseOrBuy: false);
+
+        var adjust = Assert.Single(orders.OfType<AdjustRouteOrder>());
+        Assert.Equal(Aircraft, adjust.AircraftType);
     }
 
     // --- ApplyMarketingCampaign (M52, retargeted at load factor by M53, then real profit by M54) ---

@@ -426,9 +426,19 @@ public static class AiToolkit
     /// from candidates up front - AdjustRouteOrder would reject a
     /// same-type request anyway (docs/ROUTE_AIRCRAFT_ADJUSTMENT_DESIGN.md),
     /// so this never proposes a candidate the engine would refuse.
+    ///
+    /// allowLeaseOrBuy (DistressStrategy follow-up): true (default)
+    /// considers every era-available type, requiring a lease/purchase
+    /// when nothing's idle - the NetworkOptimizerStrategy/
+    /// BalancedGrowthStrategy shape. false restricts candidates to types
+    /// already sitting idle only - a distressed airline shouldn't be
+    /// committing fresh capital (a lease's own recurring fee, or a
+    /// purchase's upfront cost) specifically to enable a swap while
+    /// already in financial trouble; reusing what's already on hand is a
+    /// different, much safer risk profile than that decision.
     /// </summary>
     public static (AircraftType Type, Money ProfitDelta, bool UsesIdleUnit, bool CanBuyOutright)? EvaluateTypeSwapCandidate(
-        StrategyContext context, RouteLoad load, IReadOnlySet<int> reservedUnitIds, bool isReactive)
+        StrategyContext context, RouteLoad load, IReadOnlySet<int> reservedUnitIds, bool isReactive, bool allowLeaseOrBuy = true)
     {
         var pair = context.DemandModel.ForPair(load.Route.Origin, load.Route.Destination);
         var currentProfit = EstimatedRealProfit(context, pair, load.Route.Aircraft, requiresLease: false);
@@ -439,6 +449,7 @@ public static class AiToolkit
 
         var candidates = context.EraAvailableTypes
             .Where(type => type.Id != load.Route.Aircraft.Id && pair.DistanceKm <= type.RangeKm)
+            .Where(type => allowLeaseOrBuy || idleTypeIds.Contains(type.Id))
             .Select(type =>
             {
                 var usesIdleUnit = idleTypeIds.Contains(type.Id);
@@ -1214,7 +1225,30 @@ public static class AiToolkit
     /// docs/BASELINE_AI_ROADMAP.md's own "Existing-route evaluation
     /// audit" section for the full numbers and the correction.
     /// </param>
-    public static void ApplyManagementToolkit(StrategyContext context, List<QuarterOrder> orders, HashSet<int> reservedUnitIds, int spentBeforeToolkit, bool enableSustainedSingleAircraftClosure = false, bool enableAircraftTypeSwap = false)
+    /// <param name="enableReactiveTypeSwap">
+    /// DistressStrategy follow-up: split from a single enableAircraftTypeSwap
+    /// flag (M66's own original shape) into independent reactive/proactive
+    /// toggles, since DistressStrategy needs the former without the
+    /// latter - a genuinely mismatched route is worth fixing even under
+    /// distress, but re-fleeting an already-healthy one to chase a
+    /// marginal efficiency gain is not. NetworkOptimizerStrategy/
+    /// BalancedGrowthStrategy pass both true, unchanged behavior from M66.
+    /// </param>
+    /// <param name="enableProactiveTypeSwap">See enableReactiveTypeSwap.</param>
+    /// <param name="allowTypeSwapLeaseOrBuy">
+    /// DistressStrategy follow-up: true (default) considers every
+    /// era-available type for a swap, requiring a lease/purchase when
+    /// nothing's idle - NetworkOptimizerStrategy/BalancedGrowthStrategy's
+    /// own shape. false restricts every swap candidate (reactive or
+    /// proactive) to types already sitting idle - see
+    /// EvaluateTypeSwapCandidate's own doc comment for why a distressed
+    /// airline shouldn't be committing fresh capital specifically to
+    /// enable a swap.
+    /// </param>
+    public static void ApplyManagementToolkit(
+        StrategyContext context, List<QuarterOrder> orders, HashSet<int> reservedUnitIds, int spentBeforeToolkit,
+        bool enableSustainedSingleAircraftClosure = false,
+        bool enableReactiveTypeSwap = false, bool enableProactiveTypeSwap = false, bool allowTypeSwapLeaseOrBuy = true)
     {
         // Solvency first, before any other spending decision - see
         // MaintainCashRunway's own doc comment for the real evidence.
@@ -1229,7 +1263,9 @@ public static class AiToolkit
         // Seeded from spentBeforeToolkit, not re-derived, matching how a
         // strategy's own DecideOrders already tracks its running spend.
         var spent = spentBeforeToolkit;
-        var recentlySwapped = enableAircraftTypeSwap ? RecentlySwappedPairKeys(context, TypeSwapCooldownQuarters) : new HashSet<(string, string)>();
+        var recentlySwapped = enableReactiveTypeSwap || enableProactiveTypeSwap
+            ? RecentlySwappedPairKeys(context, TypeSwapCooldownQuarters)
+            : new HashSet<(string, string)>();
 
         // Existing-route-evaluation audit follow-up: this loop used to read
         // load.LoadFactor directly - RouteEvaluator's own solo estimate,
@@ -1282,9 +1318,9 @@ public static class AiToolkit
                 // only re-fleet it if a candidate type clears the real,
                 // deliberately high proactive bar (EvaluateTypeSwapCandidate),
                 // and only if this pair hasn't been swapped too recently.
-                if (enableAircraftTypeSwap && !recentlySwapped.Contains(QuarterEngine.NormalizedPairKey(load.Route.Origin, load.Route.Destination)))
+                if (enableProactiveTypeSwap && !recentlySwapped.Contains(QuarterEngine.NormalizedPairKey(load.Route.Origin, load.Route.Destination)))
                 {
-                    var proactiveCandidate = EvaluateTypeSwapCandidate(context, load, reservedUnitIds, isReactive: false);
+                    var proactiveCandidate = EvaluateTypeSwapCandidate(context, load, reservedUnitIds, isReactive: false, allowTypeSwapLeaseOrBuy);
                     TryProposeTypeSwap(context, load, proactiveCandidate, orders, reservedUnitIds, ref spent);
                 }
 
@@ -1354,9 +1390,9 @@ public static class AiToolkit
             // likely a fundamentally weak pair, where a swap would burn
             // an action and lock the cooldown while the route dies
             // anyway regardless of type.
-            if (enableAircraftTypeSwap && !closureEligible && !recentlySwapped.Contains(unprofitablePairKey))
+            if (enableReactiveTypeSwap && !closureEligible && !recentlySwapped.Contains(unprofitablePairKey))
             {
-                var reactiveCandidate = EvaluateTypeSwapCandidate(context, load, reservedUnitIds, isReactive: true);
+                var reactiveCandidate = EvaluateTypeSwapCandidate(context, load, reservedUnitIds, isReactive: true, allowTypeSwapLeaseOrBuy);
 
                 if (reactiveCandidate is not null)
                 {

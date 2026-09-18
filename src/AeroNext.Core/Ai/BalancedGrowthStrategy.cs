@@ -116,6 +116,22 @@ namespace AeroNext.Core.Ai;
 /// distinction matters (a near-identical signal wired into Suitability
 /// instead is the exact thing this codebase's own M58 history already
 /// found and reverted once).
+///
+/// M67 (docs/AI_AIRCRAFT_TYPE_SWAP_DESIGN.md): extends M66's
+/// AdjustRouteOrder awareness here, per the user's own direct follow-up
+/// request. Reactive only - enableProactiveTypeSwap stays false,
+/// deliberately, unlike NetworkOptimizerStrategy's own full reactive+
+/// proactive wiring. A real 300-game ablation traced proactive swapping
+/// specifically to a real regression (SouthAmerica bankruptcy
+/// 4→12, total bankruptcy 16→25) once enabled here: this class is the
+/// primary MidGame/LateGame workhorse, active far more broadly than
+/// NetworkOptimizerStrategy (which only takes over under real financial
+/// trouble), so its own proactive branch was re-evaluating many more
+/// healthy routes, far more often - enough volume to destabilize
+/// SouthAmerica's thinner network specifically. Shipped reactive-only by
+/// the user's own explicit call, with proactive revisited as a real
+/// follow-up once aircraft-ordering/leasing work (the user's own stated
+/// next area) is further along.
 /// </summary>
 public sealed class BalancedGrowthStrategy : IAiStrategy
 {
@@ -240,7 +256,7 @@ public sealed class BalancedGrowthStrategy : IAiStrategy
         // (that's NetworkOptimizerStrategy's own job).
         AiToolkit.ApplyMarketingCampaign(context, orders, ref spent);
 
-        AiToolkit.ApplyManagementToolkit(context, orders, reservedUnitIds, spent, enableSustainedSingleAircraftClosure: true);
+        AiToolkit.ApplyManagementToolkit(context, orders, reservedUnitIds, spent, enableSustainedSingleAircraftClosure: true, enableReactiveTypeSwap: true, enableProactiveTypeSwap: false); // proactive deliberately off - real regression traced to it, see docs/AI_AIRCRAFT_TYPE_SWAP_DESIGN.md's M67 section
 
         return orders;
     }

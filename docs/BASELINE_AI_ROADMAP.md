@@ -3048,5 +3048,72 @@ values** — the measurement didn't surface a reason to distrust them, so
 they weren't retuned blind. Deliberately left for a follow-up round: an
 isolation sweep to attribute the Europe/AustralAsia redistribution to the
 reactive or proactive branch specifically, and a decision on whether to
-extend `enableAircraftTypeSwap` to additional strategies. Full reasoning
+extend this capability to additional strategies. Full reasoning
 and every number: `docs/AI_AIRCRAFT_TYPE_SWAP_DESIGN.md`.
+
+---
+
+## M67 — extending aircraft-type-swap awareness to the rest of the non-Starting strategies ✅ (shipped, real regression found and scoped around)
+
+Direct user follow-up to M66: "add aircraft swap ability to the rest of
+the non starting strategies." Full design and every number:
+`docs/AI_AIRCRAFT_TYPE_SWAP_DESIGN.md`'s own M67 section — this is the
+summary.
+
+**`RapidExpansionStrategy`/`DomesticProfitOptimizerStrategy` stay out of
+scope** (both `{ Starting }`-only `ApplicableEras`). `BalancedGrowthStrategy`
+(`{ MidGame, LateGame }`) is unambiguously in scope;
+`DistressStrategy` (`{ Starting, MidGame, LateGame }`) was genuinely
+ambiguous — asked directly, the user chose to include it.
+
+**The single `enableAircraftTypeSwap` flag from M66 couldn't express what
+`DistressStrategy` needed, so it split into three independent
+parameters** on `AiToolkit.ApplyManagementToolkit`:
+`enableReactiveTypeSwap`, `enableProactiveTypeSwap`, and
+`allowTypeSwapLeaseOrBuy` (the last also threaded into
+`EvaluateTypeSwapCandidate`, restricting candidates to idle-only when
+`false`). Safe to restructure freely — one commit old, one caller.
+`NetworkOptimizerStrategy` keeps its exact M66 behavior (both triggers,
+lease/buy allowed). `DistressStrategy` ships reactive-only with no
+lease/buy — a distressed airline can fix a genuinely mismatched route
+with what it already has idle, but never commits fresh capital
+specifically to enable a swap while already in financial trouble.
+
+**A real 300-game ablation found a genuine regression, not just another
+honest redistribution like M66's own Europe/AustralAsia finding.** Full
+rollout (both strategies at full capability) moved total bankruptcy
+18→**25** and SouthAmerica's own bankruptcy 4→**12**, with its average
+bankruptcy quarter shifting late-campaign (30.8→98.4) — every region's
+own average cash also inflated well past anything M66's single-strategy
+rollout showed. Isolated by three further ablation sweeps:
+`DistressStrategy` cleared (disabling it barely moves the total, 26 vs
+25, and SouthAmerica stays at 12 regardless — it's not the driver, and a
+separate region, AustralAsia, actually improves with it enabled).
+`BalancedGrowthStrategy`'s own **proactive** branch specifically is the
+driver — reactive-only reproduces the fully-disabled numbers exactly (16
+total bankrupt, SouthAmerica back to 4).
+
+**Why proactive specifically:** `BalancedGrowthStrategy` is the primary
+MidGame/LateGame workhorse, active for most of a healthy airline's own
+quarters in that span — unlike `NetworkOptimizerStrategy` (only takes
+over under real financial trouble) or `DistressStrategy` (only runs
+during an emergency). Its proactive branch re-evaluating every held
+route each such quarter reaches a far larger surface than M66's own
+NetworkOptimizerStrategy-only proactive activity ever did — enough swap
+volume, concentrated on SouthAmerica's thinner network, to meaningfully
+destabilize it over the second half of a 60-year campaign. A real,
+plausible, volume-driven explanation, not traced to one single bug.
+
+**Shipped with the regression scoped around, by the user's own explicit
+decision, not accepted as a tradeoff the way M63 once was.**
+`BalancedGrowthStrategy` ships reactive-only
+(`enableProactiveTypeSwap: false`) — confirmed clean by the isolation
+table. `DistressStrategy` ships as designed, confirmed clean and mildly
+beneficial (AustralAsia bankruptcy 7→5 with it enabled).
+**`BalancedGrowthStrategy`'s own proactive branch is explicitly deferred,
+not abandoned** — flagged for a real follow-up once the user's own next
+area of work (aircraft ordering/leasing, especially around newly
+available models) is further along, since that work is likely to touch
+the same territory.
+
+1052 tests passing (up from 1042), every changed file fully covered.

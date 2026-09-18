@@ -312,7 +312,7 @@ public sealed class NetworkOptimizerStrategy : IAiStrategy
         // enableSustainedSingleAircraftClosure: true - see AiToolkit's own
         // SustainedSingleAircraftClosureThreshold doc comment for why, and
         // this class's own doc comment for the real evidence chain.
-        AiToolkit.ApplyManagementToolkit(context, orders, reservedUnitIds, spent, enableSustainedSingleAircraftClosure: true, enableAircraftTypeSwap: true);
+        AiToolkit.ApplyManagementToolkit(context, orders, reservedUnitIds, spent, enableSustainedSingleAircraftClosure: true, enableReactiveTypeSwap: true, enableProactiveTypeSwap: true);
 
         return orders;
     }

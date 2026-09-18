@@ -71,6 +71,18 @@ namespace AeroNext.Core.Ai;
 /// worth opening needs it either) - the same call every real strategy
 /// already makes at the end of its own DecideOrders, just with that one
 /// flag corrected.
+///
+/// M67 (docs/AI_AIRCRAFT_TYPE_SWAP_DESIGN.md): extends M66's
+/// AdjustRouteOrder awareness here too, per the user's own direct
+/// follow-up request, at a deliberately narrower shape than
+/// NetworkOptimizerStrategy/BalancedGrowthStrategy: enableReactiveTypeSwap
+/// only (never proactive - a distressed airline shouldn't be disrupting
+/// an already-healthy route to chase a marginal efficiency gain), and
+/// allowTypeSwapLeaseOrBuy: false (never a fresh lease/purchase
+/// specifically to enable a swap - real fresh capital while already in
+/// financial trouble is its own decision, not a default). A real
+/// 300-game ablation confirmed this shape is clean and mildly beneficial
+/// (AustralAsia bankruptcy 7→5 with it enabled, no other region worse).
 /// </summary>
 public sealed class DistressStrategy : IAiStrategy
 {
@@ -102,7 +114,8 @@ public sealed class DistressStrategy : IAiStrategy
         // NetworkOptimizerStrategy's own choice (see the doc comment's
         // real evidence for why every other strategy's own false is wrong
         // to inherit here).
-        AiToolkit.ApplyManagementToolkit(context, orders, reservedUnitIds, spentBeforeToolkit: 0, enableSustainedSingleAircraftClosure: true);
+        AiToolkit.ApplyManagementToolkit(context, orders, reservedUnitIds, spentBeforeToolkit: 0, enableSustainedSingleAircraftClosure: true,
+            enableReactiveTypeSwap: true, enableProactiveTypeSwap: false, allowTypeSwapLeaseOrBuy: false);
 
         return orders;
     }

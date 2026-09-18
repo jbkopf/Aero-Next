@@ -552,4 +552,27 @@ public class BalancedGrowthStrategyTests
 
         Assert.Contains(orders.OfType<RouteOrder>(), o => new[] { o.Origin.Id, o.Destination.Id }.Contains("newregion"));
     }
+
+    [Fact]
+    public void DecideOrders_GrosslyMismatchedRoute_SwapsAircraftType()
+    {
+        // Follow-up to M66 (NetworkOptimizerStrategy): confirms
+        // BalancedGrowthStrategy's own enableReactiveTypeSwap/
+        // enableProactiveTypeSwap: true wiring actually reaches
+        // ApplyManagementToolkit through a real DecideOrders call, not
+        // just a direct AiToolkit unit test in isolation - same bar
+        // NetworkOptimizerStrategyTests's own equivalent test holds
+        // itself to.
+        var huge = new AircraftType("huge", "Huge", Seats: 100_000, RangeKm: 20_000, CruiseSpeedKmh: 900, CostPerAvailableSeatKm: 0.1);
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
+        var route = new Route(home, b, huge, AircraftCount: 1);
+        var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, Small, quantity: 1, FleetOwnershipMode.Owned);
+        var context = MakeContext(new[] { home, b }, home, routes: new[] { route }, fleet: fleet, eraTypes: new[] { huge, Small }, actionCap: 3);
+
+        var orders = Strategy.DecideOrders(context);
+
+        var adjust = Assert.Single(orders.OfType<AdjustRouteOrder>());
+        Assert.Equal(Small, adjust.AircraftType);
+    }
 }
