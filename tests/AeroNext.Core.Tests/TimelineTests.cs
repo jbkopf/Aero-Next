@@ -29,6 +29,59 @@ public class TimelineTests
         Assert.True(Timeline.IsAvailable(aircraft, 2000));
     }
 
+    // --- Aircraft-acquisition-limits follow-up: IsAvailableForPurchase / IsAvailableForLease ---
+
+    [Fact]
+    public void IsAvailableForPurchase_NoEndOfManufactureYear_MatchesPlainIsAvailable()
+    {
+        var aircraft = new AircraftType("t", "Test", Seats: 100, AvailableFromYear: 1970);
+
+        Assert.False(Timeline.IsAvailableForPurchase(aircraft, 1969));
+        Assert.True(Timeline.IsAvailableForPurchase(aircraft, 1970));
+        Assert.True(Timeline.IsAvailableForPurchase(aircraft, 2015));
+    }
+
+    [Fact]
+    public void IsAvailableForPurchase_WithEndOfManufactureYear_FalseAfterIt()
+    {
+        var aircraft = new AircraftType("t", "Test", Seats: 100, AvailableFromYear: 1970, EndOfManufactureYear: 1985);
+
+        Assert.True(Timeline.IsAvailableForPurchase(aircraft, 1985));
+        Assert.False(Timeline.IsAvailableForPurchase(aircraft, 1986));
+    }
+
+    [Fact]
+    public void IsAvailableForLease_NoEndOfManufactureYear_StartsTwoYearsAfterAvailableFromYear()
+    {
+        var aircraft = new AircraftType("t", "Test", Seats: 100, AvailableFromYear: 1970);
+
+        Assert.False(Timeline.IsAvailableForLease(aircraft, 1970)); // purchasable, not yet leasable
+        Assert.False(Timeline.IsAvailableForLease(aircraft, 1971));
+        Assert.True(Timeline.IsAvailableForLease(aircraft, 1972));
+        Assert.True(Timeline.IsAvailableForLease(aircraft, 2015)); // never stops, EndOfManufactureYear null
+    }
+
+    [Fact]
+    public void IsAvailableForLease_WithEndOfManufactureYear_ExtendsFiveYearsPastIt()
+    {
+        var aircraft = new AircraftType("t", "Test", Seats: 100, AvailableFromYear: 1970, EndOfManufactureYear: 1985);
+
+        Assert.True(Timeline.IsAvailableForLease(aircraft, 1990)); // 1985 + 5
+        Assert.False(Timeline.IsAvailableForLease(aircraft, 1991));
+    }
+
+    [Fact]
+    public void IsAvailableForLease_TwoYearDelayConstant_MatchesLeaseEligibilityDelayYears()
+    {
+        Assert.Equal(2, Timeline.LeaseEligibilityDelayYears);
+    }
+
+    [Fact]
+    public void IsAvailableForLease_FiveYearExtensionConstant_MatchesLeaseAvailabilityExtensionYears()
+    {
+        Assert.Equal(5, Timeline.LeaseAvailabilityExtensionYears);
+    }
+
     [Fact]
     public void AvailableAircraft_FiltersOutFutureAircraft()
     {

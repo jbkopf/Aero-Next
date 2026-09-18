@@ -26,6 +26,18 @@ namespace AeroNext.Core.Airlines;
 /// (see <see cref="FlightPerformance"/>) shouldn't have to think about
 /// performance data. Only the real catalog's named aircraft state their
 /// own historically-reasonable speed.
+///
+/// Aircraft-acquisition-limits follow-up (docs/AIRCRAFT_ACQUISITION_ROADMAP.md):
+/// EndOfManufactureYear defaults null — "never stops being manufactured,"
+/// the same permissive-default convention every other optional field here
+/// already follows, so every existing synthetic test aircraft and any
+/// real catalog entry that hasn't been researched yet keeps behaving
+/// exactly as before this field existed. Only
+/// <see cref="World.Timeline.IsAvailableForPurchase"/>/
+/// <see cref="World.Timeline.IsAvailableForLease"/> read it —
+/// <see cref="World.Timeline.IsAvailable"/> itself (used by RouteOrder/
+/// AdjustRouteOrder, which fly an aircraft rather than acquire one) is
+/// deliberately untouched by this field.
 /// </summary>
 public sealed record AircraftType(
     string Id,
@@ -38,4 +50,5 @@ public sealed record AircraftType(
     string Manufacturer = "",
     Region? ManufacturerRegion = null,
     double CostPerAvailableSeatKm = 0.09,
-    double CruiseSpeedKmh = 900.0);
+    double CruiseSpeedKmh = 900.0,
+    int? EndOfManufactureYear = null);

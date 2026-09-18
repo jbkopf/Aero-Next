@@ -14,10 +14,59 @@ public static class Timeline
 
     public static int YearForQuarter(int quarterNumber) => StartYear + (quarterNumber - 1) / 4;
 
+    /// <summary>
+    /// Whether an aircraft can be *flown* this year — a floor only
+    /// (AvailableFromYear), never a ceiling. Used by RouteOrder/AdjustRouteOrder,
+    /// which assign an aircraft to a route rather than acquire a new one:
+    /// an airline that already owns or leases a type well past its own
+    /// end-of-manufacture date can keep flying it, the same way a real
+    /// airline isn't forced to ground an aircraft just because the
+    /// manufacturer stopped building new ones. See
+    /// <see cref="IsAvailableForPurchase"/>/<see cref="IsAvailableForLease"/>
+    /// for the two acquisition-time windows this deliberately doesn't
+    /// touch (docs/AIRCRAFT_ACQUISITION_ROADMAP.md).
+    /// </summary>
     public static bool IsAvailable(AircraftType aircraft, int year) => aircraft.AvailableFromYear <= year;
 
     public static IReadOnlyList<AircraftType> AvailableAircraft(IReadOnlyList<AircraftType> fleet, int year) =>
         fleet.Where(a => IsAvailable(a, year)).ToList();
+
+    /// <summary>
+    /// Aircraft-acquisition-limits follow-up: how many years after an
+    /// aircraft's own AvailableFromYear a lease first becomes possible -
+    /// new aircraft aren't leasable right away, only purchasable.
+    /// </summary>
+    public const int LeaseEligibilityDelayYears = 2;
+
+    /// <summary>
+    /// Aircraft-acquisition-limits follow-up: how many years past an
+    /// aircraft's own EndOfManufactureYear leasing remains possible after
+    /// purchasing has already stopped - leased units already in service
+    /// (and the secondhand/used-lease market they imply) don't vanish the
+    /// instant the last one rolls off the line.
+    /// </summary>
+    public const int LeaseAvailabilityExtensionYears = 5;
+
+    /// <summary>
+    /// Whether an aircraft can be newly *purchased* this year - a real
+    /// window, not just a floor: AvailableFromYear (unchanged) through
+    /// EndOfManufactureYear (null = still in production, never stops).
+    /// </summary>
+    public static bool IsAvailableForPurchase(AircraftType aircraft, int year) =>
+        aircraft.AvailableFromYear <= year
+        && (aircraft.EndOfManufactureYear is null || year <= aircraft.EndOfManufactureYear);
+
+    /// <summary>
+    /// Whether an aircraft can be newly *leased* this year - a real
+    /// window, shifted later on both ends relative to purchasing: starts
+    /// LeaseEligibilityDelayYears after AvailableFromYear (a brand-new
+    /// type isn't leasable yet, only purchasable), extends
+    /// LeaseAvailabilityExtensionYears past EndOfManufactureYear (null =
+    /// still in production, never stops).
+    /// </summary>
+    public static bool IsAvailableForLease(AircraftType aircraft, int year) =>
+        aircraft.AvailableFromYear + LeaseEligibilityDelayYears <= year
+        && (aircraft.EndOfManufactureYear is null || year <= aircraft.EndOfManufactureYear + LeaseAvailabilityExtensionYears);
 
     /// <summary>
     /// The global-scoped *Trend* portion of the schedule only (M20: a

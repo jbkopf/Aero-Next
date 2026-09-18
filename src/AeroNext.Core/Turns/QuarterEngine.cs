@@ -228,6 +228,24 @@ public static class QuarterEngine
 
         foreach (var order in orders)
         {
+            // Aircraft-acquisition-limits follow-up: a non-positive
+            // Quantity was never checked anywhere before this - neither
+            // order type's own cost scales with Quantity in a way that
+            // would organically reject it (a flat 1 action either way),
+            // and a zero/negative purchaseCost would trivially "fit"
+            // any cash check. Checked first, before any other gate.
+            if (order is AircraftOrder invalidAircraftOrder && invalidAircraftOrder.Quantity <= 0)
+            {
+                rejected.Add(order);
+                continue;
+            }
+
+            if (order is LeaseAircraftOrder invalidLeaseOrder && invalidLeaseOrder.Quantity <= 0)
+            {
+                rejected.Add(order);
+                continue;
+            }
+
             if (order is RouteOrder ro && !ro.IsWithinRange)
             {
                 rejected.Add(order);
@@ -805,12 +823,19 @@ public static class QuarterEngine
     public static (string, string) NormalizedPairKey(City a, City b) =>
         string.CompareOrdinal(a.Id, b.Id) <= 0 ? (a.Id, b.Id) : (b.Id, a.Id);
 
+    /// <summary>
+    /// Aircraft-acquisition-limits follow-up (docs/AIRCRAFT_ACQUISITION_ROADMAP.md):
+    /// AircraftOrder/LeaseAircraftOrder route to their own acquisition-specific
+    /// windows now, not the plain floor-only IsAvailable RouteOrder/
+    /// AdjustRouteOrder still use - flying an already-acquired aircraft
+    /// never needed an upper bound, only *acquiring* a new one does.
+    /// </summary>
     private static bool IsAircraftAvailable(QuarterOrder order, int year) => order switch
     {
         RouteOrder ro => Timeline.IsAvailable(ro.Aircraft, year),
         AdjustRouteOrder aro => Timeline.IsAvailable(aro.AircraftType, year),
-        AircraftOrder ao => Timeline.IsAvailable(ao.Type, year),
-        LeaseAircraftOrder lo => Timeline.IsAvailable(lo.Type, year),
+        AircraftOrder ao => Timeline.IsAvailableForPurchase(ao.Type, year),
+        LeaseAircraftOrder lo => Timeline.IsAvailableForLease(lo.Type, year),
         _ => true, // orders with no aircraft (negotiations, alliances, private actions) are never era-gated
     };
 }

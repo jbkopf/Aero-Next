@@ -632,6 +632,176 @@ public class QuarterEngineTests
         Assert.Single(result.RejectedOrders);
     }
 
+    // --- Aircraft-acquisition-limits follow-up: purchase/lease windows and Quantity validation ---
+
+    [Fact]
+    public void RunQuarter_AircraftOrder_ZeroQuantity_Rejected()
+    {
+        var demandModel = new GravityDemandModel();
+        var order = new AircraftOrder(Aircraft, Quantity: 0);
+
+        var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, Array.Empty<City>(), demandModel);
+
+        Assert.Empty(result.AppliedOrders);
+        Assert.Single(result.RejectedOrders);
+    }
+
+    [Fact]
+    public void RunQuarter_AircraftOrder_NegativeQuantity_Rejected()
+    {
+        var demandModel = new GravityDemandModel();
+        var order = new AircraftOrder(Aircraft, Quantity: -1);
+
+        var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, Array.Empty<City>(), demandModel);
+
+        Assert.Empty(result.AppliedOrders);
+        Assert.Single(result.RejectedOrders);
+    }
+
+    [Fact]
+    public void RunQuarter_LeaseAircraftOrder_ZeroQuantity_Rejected()
+    {
+        var demandModel = new GravityDemandModel();
+        var order = new LeaseAircraftOrder(Aircraft, Quantity: 0);
+
+        var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, Array.Empty<City>(), demandModel);
+
+        Assert.Empty(result.AppliedOrders);
+        Assert.Single(result.RejectedOrders);
+    }
+
+    [Fact]
+    public void RunQuarter_LeaseAircraftOrder_NegativeQuantity_Rejected()
+    {
+        var demandModel = new GravityDemandModel();
+        var order = new LeaseAircraftOrder(Aircraft, Quantity: -5);
+
+        var result = QuarterEngine.RunQuarter(1, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, Array.Empty<City>(), demandModel);
+
+        Assert.Empty(result.AppliedOrders);
+        Assert.Single(result.RejectedOrders);
+    }
+
+    [Fact]
+    public void RunQuarter_AircraftOrder_PastEndOfManufactureYear_Rejected()
+    {
+        var demandModel = new GravityDemandModel();
+        var retiredType = new AircraftType("retired", "Retired", Seats: 100, AvailableFromYear: 1970, EndOfManufactureYear: 1985);
+        var order = new AircraftOrder(retiredType, Quantity: 1);
+
+        // Quarter 125 -> year 1955 + (125-1)/4 = 1986, one year past EndOfManufactureYear.
+        var result = QuarterEngine.RunQuarter(125, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, Array.Empty<City>(), demandModel);
+
+        Assert.Empty(result.AppliedOrders);
+        Assert.Single(result.RejectedOrders);
+    }
+
+    [Fact]
+    public void RunQuarter_AircraftOrder_AtEndOfManufactureYear_StillAccepted()
+    {
+        var demandModel = new GravityDemandModel();
+        var retiredType = new AircraftType("retired", "Retired", Seats: 100, AvailableFromYear: 1970, EndOfManufactureYear: 1985);
+        var order = new AircraftOrder(retiredType, Quantity: 1);
+
+        // Quarter 121 -> year 1985, the last purchasable year.
+        var result = QuarterEngine.RunQuarter(121, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, Array.Empty<City>(), demandModel);
+
+        Assert.Single(result.AppliedOrders);
+        Assert.Empty(result.RejectedOrders);
+    }
+
+    [Fact]
+    public void RunQuarter_LeaseAircraftOrder_WithinTwoYearDelayAfterRelease_Rejected()
+    {
+        var demandModel = new GravityDemandModel();
+        var newType = new AircraftType("new", "New", Seats: 100, AvailableFromYear: 1970);
+        var order = new LeaseAircraftOrder(newType, Quantity: 1);
+
+        // Quarter 61 -> year 1970, purchasable but not yet leasable.
+        var result = QuarterEngine.RunQuarter(61, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, Array.Empty<City>(), demandModel);
+
+        Assert.Empty(result.AppliedOrders);
+        Assert.Single(result.RejectedOrders);
+    }
+
+    [Fact]
+    public void RunQuarter_LeaseAircraftOrder_AfterTwoYearDelay_Accepted()
+    {
+        var demandModel = new GravityDemandModel();
+        var newType = new AircraftType("new", "New", Seats: 100, AvailableFromYear: 1970);
+        var order = new LeaseAircraftOrder(newType, Quantity: 1);
+
+        // Quarter 69 -> year 1972 (1970 + 2), the first leasable year.
+        var result = QuarterEngine.RunQuarter(69, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, Array.Empty<City>(), demandModel);
+
+        Assert.Single(result.AppliedOrders);
+        Assert.Empty(result.RejectedOrders);
+    }
+
+    [Fact]
+    public void RunQuarter_LeaseAircraftOrder_PastFiveYearExtensionAfterManufactureEnds_Rejected()
+    {
+        var demandModel = new GravityDemandModel();
+        var retiredType = new AircraftType("retired", "Retired", Seats: 100, AvailableFromYear: 1970, EndOfManufactureYear: 1985);
+        var order = new LeaseAircraftOrder(retiredType, Quantity: 1);
+
+        // Quarter 145 -> year 1991, one year past the 1985 + 5 lease window.
+        var result = QuarterEngine.RunQuarter(145, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, Array.Empty<City>(), demandModel);
+
+        Assert.Empty(result.AppliedOrders);
+        Assert.Single(result.RejectedOrders);
+    }
+
+    [Fact]
+    public void RunQuarter_LeaseAircraftOrder_AtFiveYearExtensionAfterManufactureEnds_StillAccepted()
+    {
+        var demandModel = new GravityDemandModel();
+        var retiredType = new AircraftType("retired", "Retired", Seats: 100, AvailableFromYear: 1970, EndOfManufactureYear: 1985);
+        var order = new LeaseAircraftOrder(retiredType, Quantity: 1);
+
+        // Quarter 141 -> year 1990 (1985 + 5), the last leasable year.
+        var result = QuarterEngine.RunQuarter(141, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, Array.Empty<City>(), demandModel);
+
+        Assert.Single(result.AppliedOrders);
+        Assert.Empty(result.RejectedOrders);
+    }
+
+    [Fact]
+    public void RunQuarter_RouteOrder_UnaffectedByEndOfManufactureYear_StillUsesPlainIsAvailable()
+    {
+        // RouteOrder assigns an aircraft to fly, it doesn't acquire one -
+        // deliberately still gated by Timeline.IsAvailable's own floor-only
+        // check, never the new acquisition-specific windows.
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 50);
+        var b = MakeCity("b", 1, 1, 50);
+        var retiredType = new AircraftType("retired", "Retired", Seats: 100, AvailableFromYear: 1970, EndOfManufactureYear: 1985);
+        var order = new RouteOrder(a, b, retiredType);
+
+        // Quarter 145 -> year 1991, well past both new acquisition windows,
+        // but RouteOrder only ever cared about AvailableFromYear.
+        var result = QuarterEngine.RunQuarter(145, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, new[] { a, b }, demandModel);
+
+        Assert.Single(result.AppliedOrders);
+        Assert.Empty(result.RejectedOrders);
+    }
+
+    [Fact]
+    public void RunQuarter_AdjustRouteOrder_UnaffectedByEndOfManufactureYear_StillUsesPlainIsAvailable()
+    {
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 50);
+        var b = MakeCity("b", 1, 1, 50);
+        var retiredType = new AircraftType("retired", "Retired", Seats: 100, AvailableFromYear: 1970, EndOfManufactureYear: 1985);
+        var existing = new[] { new Route(a, b, Aircraft, AircraftCount: 1) };
+        var order = new AdjustRouteOrder(a, b, retiredType);
+
+        var result = QuarterEngine.RunQuarter(145, existing, QuarterEngine.BaseActionCap, new[] { order }, new[] { a, b }, demandModel);
+
+        Assert.Single(result.AppliedOrders);
+        Assert.Empty(result.RejectedOrders);
+    }
+
     [Fact]
     public void RunQuarter_RetireAircraftOrder_NoFleetTracked_Rejected()
     {
