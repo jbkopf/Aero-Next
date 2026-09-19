@@ -59,11 +59,21 @@ public static class FullGameRunner
     /// (see DifficultySettings.RegionCounts) - defaults to
     /// GameDifficulty.Normal, byte-identical to every pre-existing caller.
     /// </param>
+    /// <param name="tradeRestrictions">
+    /// Geopolitical-aircraft-restrictions follow-up
+    /// (docs/GEOPOLITICAL_AIRCRAFT_RESTRICTIONS_ROADMAP.md): null (the
+    /// default) means no restriction ever applies, byte-identical to
+    /// before this parameter existed. A real list feeds both
+    /// QuarterEngine.RunQuarter's own enforcement gate and each seat's own
+    /// StrategyContext.PurchasableTypes/LeasableTypes, so the AI never
+    /// proposes what the engine would reject anyway.
+    /// </param>
     public static FullGameResult Run(
         int gameIndex, int configSeed, int campaignSeed, int quarters,
         IReadOnlyList<AirlineSeat> seats,
         IReadOnlyList<City> cities, IReadOnlyList<AircraftType> fleetCatalog, IReadOnlyList<DemandGrowthPoint> growthSchedule,
-        ExperimentTuning? tuning = null, GameDifficulty difficulty = GameDifficulty.Normal)
+        ExperimentTuning? tuning = null, GameDifficulty difficulty = GameDifficulty.Normal,
+        IReadOnlyList<TradeRestriction>? tradeRestrictions = null)
     {
         tuning ??= ExperimentTuning.Baseline;
         var regionCounts = DifficultySettings.RegionCounts(difficulty);
@@ -329,6 +339,16 @@ public static class FullGameRunner
                         kv => kv.Key,
                         kv => kv.Value.Count - (kv.Value.Contains(name) ? 1 : 0));
 
+                    // Geopolitical-aircraft-restrictions follow-up: the
+                    // exact same query a UI layer would use to show this
+                    // airline's own home city only real options, computed
+                    // once here and threaded both into the AI's own
+                    // StrategyContext below and into QuarterEngine's own
+                    // enforcement gate - neither can ever drift from the
+                    // other, since both read the same TradeRestriction data.
+                    var purchasableTypes = Timeline.AvailableForPurchase(availableFleet, seatByName[name].StartingCity, year, tradeRestrictions);
+                    var leasableTypes = Timeline.AvailableForLease(availableFleet, seatByName[name].StartingCity, year, tradeRestrictions);
+
                     var strategyContext = new StrategyContext(
                         routes[name], caps[name], cities, yearDemandModel, availableFleet, fleets[name], homeRegionByName[name],
                         HomeCity: seatByName[name].StartingCity,
@@ -355,7 +375,9 @@ public static class FullGameRunner
                         // one-quarter lag every other real-competitive field
                         // here already has.
                         RegionsLedLastQuarter: DominanceTrackedRegions.All.Where(r => dominanceState.StreakFor(name, r) >= 1).ToHashSet(),
-                        TargetRegionCountOverride: regionCounts.TargetRegionCount);
+                        TargetRegionCountOverride: regionCounts.TargetRegionCount,
+                        PurchasableTypes: purchasableTypes,
+                        LeasableTypes: leasableTypes);
 
                     // Bankruptcy-conditions follow-up: SelectStrategy's own
                     // year-boundary rotation keeps advancing regardless of
@@ -387,7 +409,8 @@ public static class FullGameRunner
                     currentDebtBalance: finances[name].DebtBalance,
                     homeCity: q == 1 ? null : seatByName[name].StartingCity,
                     cityWideSlotsRemaining: q == 1 ? null : cityWideSlotsRemaining,
-                    pendingNegotiationCityIds: q == 1 ? null : pendingNegotiationCityIds);
+                    pendingNegotiationCityIds: q == 1 ? null : pendingNegotiationCityIds,
+                    tradeRestrictions: q == 1 ? null : tradeRestrictions);
 
                 if (q == 1 && result.RejectedOrders.Count > 0)
                 {

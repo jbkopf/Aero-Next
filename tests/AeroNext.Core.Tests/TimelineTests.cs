@@ -443,4 +443,68 @@ public class TimelineTests
 
         Assert.Equal(new[] { 1960, 2000 }, schedule.Select(p => p.Year));
     }
+
+    // --- Geopolitical-aircraft-restrictions follow-up: AvailableForPurchase / AvailableForLease ---
+
+    private static City MakeCity(string id) => new(id, id.ToUpperInvariant(), Region.EastAsia, 0, 0, 50, false, null);
+
+    [Fact]
+    public void AvailableForPurchase_NoHomeCity_NoRestrictions_MatchesPlainEraWindow()
+    {
+        var american = new AircraftType("707", "707", Seats: 140, AvailableFromYear: 1958, EndOfManufactureYear: 1979, Bloc: PoliticalBloc.American);
+        var notYetAvailable = new AircraftType("a350", "A350", Seats: 300, AvailableFromYear: 2015);
+        var fleet = new[] { american, notYetAvailable };
+
+        var purchasable = Timeline.AvailableForPurchase(fleet, homeCity: null, year: 1965);
+
+        Assert.Equal(new[] { american }, purchasable);
+    }
+
+    [Fact]
+    public void AvailableForPurchase_RestrictedBlocForHomeCity_Excluded()
+    {
+        var beijing = MakeCity("pek");
+        var american = new AircraftType("707", "707", Seats: 140, AvailableFromYear: 1958, EndOfManufactureYear: 1979, Bloc: PoliticalBloc.American);
+        var european = new AircraftType("caravelle", "Caravelle", Seats: 80, AvailableFromYear: 1959, EndOfManufactureYear: 1972, Bloc: PoliticalBloc.European);
+        var restrictions = new[] { new TradeRestriction("pek", PoliticalBloc.American, 1949, 1972) };
+
+        var purchasable = Timeline.AvailableForPurchase(new[] { american, european }, beijing, year: 1965, restrictions);
+
+        Assert.DoesNotContain(american, purchasable);
+        Assert.Contains(european, purchasable);
+    }
+
+    [Fact]
+    public void AvailableForPurchase_NullTradeRestrictions_PermissiveDefault()
+    {
+        var beijing = MakeCity("pek");
+        var american = new AircraftType("707", "707", Seats: 140, AvailableFromYear: 1958, EndOfManufactureYear: 1979, Bloc: PoliticalBloc.American);
+
+        var purchasable = Timeline.AvailableForPurchase(new[] { american }, beijing, year: 1965, tradeRestrictions: null);
+
+        Assert.Contains(american, purchasable);
+    }
+
+    [Fact]
+    public void AvailableForLease_UsesTheLeaseWindow_NotThePurchaseWindow()
+    {
+        // AvailableFromYear + LeaseEligibilityDelayYears (2) - not yet
+        // leasable at year 1, purchasable and leasable at year 2.
+        var type = new AircraftType("t", "Test", Seats: 100, AvailableFromYear: 1970);
+
+        Assert.Empty(Timeline.AvailableForLease(new[] { type }, homeCity: null, year: 1971));
+        Assert.Single(Timeline.AvailableForLease(new[] { type }, homeCity: null, year: 1972));
+    }
+
+    [Fact]
+    public void AvailableForLease_RestrictedBlocForHomeCity_Excluded()
+    {
+        var beijing = MakeCity("pek");
+        var soviet = new AircraftType("il62", "Il-62", Seats: 186, AvailableFromYear: 1967, Bloc: PoliticalBloc.Soviet);
+        var restrictions = new[] { new TradeRestriction("pek", PoliticalBloc.Soviet, 1960, 1989) };
+
+        var leasable = Timeline.AvailableForLease(new[] { soviet }, beijing, year: 1975, restrictions);
+
+        Assert.Empty(leasable);
+    }
 }

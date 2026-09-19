@@ -25,11 +25,13 @@ public class AiToolkitTests
         System.Collections.Generic.IReadOnlyDictionary<(string OriginId, string DestinationId), long>? lastQuarterSeatsCarriedByRoute = null,
         int quarterNumber = 1,
         System.Collections.Generic.IReadOnlyDictionary<(string OriginId, string DestinationId), AiRouteHistory>? routeHistoryByPair = null,
-        AirlineFleet? fleet = null, Money? currentDebtBalance = null, IReadOnlyList<AircraftType>? eraTypes = null) =>
+        AirlineFleet? fleet = null, Money? currentDebtBalance = null, IReadOnlyList<AircraftType>? eraTypes = null,
+        IReadOnlyList<AircraftType>? purchasableTypes = null, IReadOnlyList<AircraftType>? leasableTypes = null) =>
         new(routes ?? Array.Empty<Route>(), actionCap, cities, DemandModel, eraTypes ?? new[] { Aircraft }, fleet ?? AirlineFleet.Empty, homeCity.Region, homeCity,
             IdleContestableSlotsByCity: idleContestableSlotsByCity, AvailableCash: availableCash, CurrentDebtBalance: currentDebtBalance,
             RivalCountByServedRoute: rivalCountByServedRoute, LastQuarterSeatsCarriedByRoute: lastQuarterSeatsCarriedByRoute,
-            QuarterNumber: quarterNumber, RouteHistoryByPair: routeHistoryByPair);
+            QuarterNumber: quarterNumber, RouteHistoryByPair: routeHistoryByPair,
+            PurchasableTypes: purchasableTypes, LeasableTypes: leasableTypes);
 
     // --- ComputeCityWideSlotsRemaining ---
 
@@ -848,6 +850,42 @@ public class AiToolkitTests
         Assert.DoesNotContain(orders.OfType<SetFareOrder>(), o => o.FarePerPassenger < route.FarePerPassenger);
     }
 
+    // --- Geopolitical-aircraft-restrictions follow-up (docs/GEOPOLITICAL_AIRCRAFT_RESTRICTIONS_ROADMAP.md): FindMostProfitablePair's own idle-vs-acquire split ---
+
+    [Fact]
+    public void FindMostProfitablePair_NonIdleCandidate_ExcludedWhenNotInLeasableTypes_ReturnsNull()
+    {
+        // Nothing idle, and the only era-available type isn't in
+        // LeasableTypes (an embargoed bloc) - the whole candidate pool is
+        // empty, so the search finds nothing rather than proposing an
+        // order QuarterEngine would reject.
+        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
+        var context = MakeContext(new[] { a, b }, a, eraTypes: new[] { Aircraft }, leasableTypes: Array.Empty<AircraftType>());
+
+        var best = AiToolkit.FindMostProfitablePair(context, new System.Collections.Generic.HashSet<int>(), new System.Collections.Generic.HashSet<string> { "a" }, _ => true);
+
+        Assert.Null(best);
+    }
+
+    [Fact]
+    public void FindMostProfitablePair_IdleOwnedCandidate_StillConsideredEvenWhenNotInLeasableTypes()
+    {
+        // An idle unit of that exact type means no fresh lease is needed
+        // at all - the embargo (LeasableTypes empty) never applies to
+        // reusing an aircraft this airline already owns.
+        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
+        var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, Aircraft, quantity: 1, FleetOwnershipMode.Owned);
+        var context = MakeContext(new[] { a, b }, a, eraTypes: new[] { Aircraft }, fleet: fleet, leasableTypes: Array.Empty<AircraftType>());
+
+        var best = AiToolkit.FindMostProfitablePair(context, new System.Collections.Generic.HashSet<int>(), new System.Collections.Generic.HashSet<string> { "a" }, _ => true);
+
+        Assert.NotNull(best);
+        Assert.Equal(Aircraft, best!.Value.Aircraft);
+        Assert.True(best.Value.UsesIdleUnit);
+    }
+
     // --- AI-type-swap follow-up (docs/AI_AIRCRAFT_TYPE_SWAP_DESIGN.md): EvaluateTypeSwapCandidate / TryProposeTypeSwap / RecentlySwappedPairKeys ---
 
     // These two, against the weight-50/weight-50 pair every fixture here
@@ -1007,6 +1045,46 @@ public class AiToolkitTests
         var load = RouteEvaluator.EvaluateNetwork(context.CurrentRoutes, context.DemandModel).Single();
 
         var candidate = AiToolkit.EvaluateTypeSwapCandidate(context, load, new System.Collections.Generic.HashSet<int>(), isReactive: true, allowLeaseOrBuy: false);
+
+        Assert.NotNull(candidate);
+        Assert.Equal(Aircraft, candidate!.Value.Type);
+        Assert.True(candidate.Value.UsesIdleUnit);
+    }
+
+    [Fact]
+    public void EvaluateTypeSwapCandidate_NonIdleType_ExcludedWhenNotInPurchasableOrLeasableTypes()
+    {
+        // Geopolitical-aircraft-restrictions follow-up: a non-idle
+        // candidate must be legal to at least buy or lease - here it's
+        // legal for neither (both narrowed lists are empty, e.g. an
+        // embargoed bloc), so it's excluded even though it's a genuinely
+        // better fit and era-available.
+        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
+        var route = new Route(a, b, BigAircraft, AircraftCount: 1);
+        var context = MakeContext(new[] { a, b }, a, routes: new[] { route }, eraTypes: new[] { BigAircraft, Aircraft },
+            purchasableTypes: Array.Empty<AircraftType>(), leasableTypes: Array.Empty<AircraftType>());
+        var load = RouteEvaluator.EvaluateNetwork(context.CurrentRoutes, context.DemandModel).Single();
+
+        var candidate = AiToolkit.EvaluateTypeSwapCandidate(context, load, new System.Collections.Generic.HashSet<int>(), isReactive: true);
+
+        Assert.Null(candidate);
+    }
+
+    [Fact]
+    public void EvaluateTypeSwapCandidate_IdleType_StillConsideredEvenWhenNotInPurchasableOrLeasableTypes()
+    {
+        // An already-owned aircraft can always keep flying regardless of
+        // embargo - only *acquiring a new one* is ever restricted.
+        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
+        var route = new Route(a, b, BigAircraft, AircraftCount: 1);
+        var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, Aircraft, quantity: 1, FleetOwnershipMode.Owned);
+        var context = MakeContext(new[] { a, b }, a, routes: new[] { route }, eraTypes: new[] { BigAircraft, Aircraft }, fleet: fleet,
+            purchasableTypes: Array.Empty<AircraftType>(), leasableTypes: Array.Empty<AircraftType>());
+        var load = RouteEvaluator.EvaluateNetwork(context.CurrentRoutes, context.DemandModel).Single();
+
+        var candidate = AiToolkit.EvaluateTypeSwapCandidate(context, load, new System.Collections.Generic.HashSet<int>(), isReactive: true);
 
         Assert.NotNull(candidate);
         Assert.Equal(Aircraft, candidate!.Value.Type);

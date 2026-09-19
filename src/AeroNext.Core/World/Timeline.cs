@@ -7,6 +7,14 @@ namespace AeroNext.Core.World;
 /// against it: which aircraft a manufacturer has actually built yet, and
 /// how much bigger the world's total demand has grown. Quarter 1 is 1955
 /// Q1; four quarters per year thereafter.
+///
+/// <see cref="AvailableForPurchase"/>/<see cref="AvailableForLease"/> are
+/// this class's own shared query surface for "what can this city
+/// actually acquire right now" (era window + TradeRestriction combined) -
+/// the same query a UI layer would call to show a human player only real
+/// options, and what StrategyContext.PurchasableTypes/LeasableTypes feed
+/// the AI from, so neither ever drifts from what QuarterEngine itself
+/// would actually accept.
 /// </summary>
 public static class Timeline
 {
@@ -67,6 +75,42 @@ public static class Timeline
     public static bool IsAvailableForLease(AircraftType aircraft, int year) =>
         aircraft.AvailableFromYear + LeaseEligibilityDelayYears <= year
         && (aircraft.EndOfManufactureYear is null || year <= aircraft.EndOfManufactureYear + LeaseAvailabilityExtensionYears);
+
+    /// <summary>
+    /// Geopolitical-aircraft-restrictions follow-up
+    /// (docs/GEOPOLITICAL_AIRCRAFT_RESTRICTIONS_ROADMAP.md): the single
+    /// query surface for "what can this city's airline actually buy right
+    /// now" - combines the purchase era window with
+    /// <see cref="TradeRestriction.IsRestricted"/>, so neither a UI layer
+    /// nor an AI strategy has to know both rules exist and remember to
+    /// apply them together. <paramref name="homeCity"/>: null (no
+    /// visibility) and <paramref name="tradeRestrictions"/>: null (not
+    /// modeled) both mean "nothing is restricted" - the same permissive
+    /// default every optional identity field here already gets, so this
+    /// degrades to a plain era-window filter for any caller that doesn't
+    /// have a real home city or restriction list to pass.
+    /// </summary>
+    public static IReadOnlyList<AircraftType> AvailableForPurchase(
+        IReadOnlyList<AircraftType> fleet, City? homeCity, int year, IReadOnlyList<TradeRestriction>? tradeRestrictions = null)
+    {
+        var restrictions = tradeRestrictions ?? Array.Empty<TradeRestriction>();
+        return fleet.Where(a => IsAvailableForPurchase(a, year) && !TradeRestriction.IsRestricted(a, homeCity, year, restrictions)).ToList();
+    }
+
+    /// <summary>
+    /// Same query surface as <see cref="AvailableForPurchase"/>, against
+    /// the lease era window instead - the exact same
+    /// <see cref="TradeRestriction.IsRestricted"/> check applies to both,
+    /// since a real embargo blocks acquiring a bloc's aircraft either way;
+    /// only the underlying era window differs (lease starts later, extends
+    /// later - see <see cref="IsAvailableForLease"/>).
+    /// </summary>
+    public static IReadOnlyList<AircraftType> AvailableForLease(
+        IReadOnlyList<AircraftType> fleet, City? homeCity, int year, IReadOnlyList<TradeRestriction>? tradeRestrictions = null)
+    {
+        var restrictions = tradeRestrictions ?? Array.Empty<TradeRestriction>();
+        return fleet.Where(a => IsAvailableForLease(a, year) && !TradeRestriction.IsRestricted(a, homeCity, year, restrictions)).ToList();
+    }
 
     /// <summary>
     /// The global-scoped *Trend* portion of the schedule only (M20: a

@@ -153,6 +153,22 @@ namespace AeroNext.Core.Ai;
 /// WinConditionChecker.RequiredRegionCount's own doc comment for why
 /// that pairing matters (raising one without the other was measured and
 /// found to very nearly break the win condition outright).
+///
+/// Geopolitical-aircraft-restrictions follow-up
+/// (docs/GEOPOLITICAL_AIRCRAFT_RESTRICTIONS_ROADMAP.md): PurchasableTypes/
+/// LeasableTypes, both null by default. EraAvailableTypes stays exactly
+/// what it's always been - the floor-only, restriction-blind set used for
+/// idle-fleet-reuse decisions (an already-owned aircraft can always keep
+/// flying, regardless of era ceiling or embargo) - deliberately
+/// untouched, the same "flying vs. acquiring" split QuarterEngine itself
+/// enforces. These two new fields are the *acquiring* counterpart: the
+/// exact output of Timeline.AvailableForPurchase/AvailableForLease for
+/// this airline's own HomeCity, so a strategy searching for a *new* type
+/// to buy or lease never has to separately know a TradeRestriction list
+/// even exists. Null (every caller before this field existed, and any
+/// caller that never computed a real restriction list) falls back to
+/// EraAvailableTypes at each read site - byte-identical to before this
+/// field existed, not a silent "nothing is purchasable" reading.
 /// </summary>
 public sealed record StrategyContext(
     IReadOnlyList<Route> CurrentRoutes,
@@ -177,4 +193,13 @@ public sealed record StrategyContext(
     IReadOnlyDictionary<(string OriginId, string DestinationId), int>? RivalPresenceByPairKey = null,
     IReadOnlyDictionary<Region, int>? RivalPresenceByRegion = null,
     IReadOnlySet<Region>? RegionsLedLastQuarter = null,
-    int? TargetRegionCountOverride = null);
+    int? TargetRegionCountOverride = null,
+    IReadOnlyList<AircraftType>? PurchasableTypes = null,
+    IReadOnlyList<AircraftType>? LeasableTypes = null)
+{
+    /// <summary>Aircraft types this airline could newly purchase right now - PurchasableTypes when a real restricted list was computed, EraAvailableTypes otherwise.</summary>
+    public IReadOnlyList<AircraftType> PurchasableOrEraTypes => PurchasableTypes ?? EraAvailableTypes;
+
+    /// <summary>Aircraft types this airline could newly lease right now - LeasableTypes when a real restricted list was computed, EraAvailableTypes otherwise.</summary>
+    public IReadOnlyList<AircraftType> LeasableOrEraTypes => LeasableTypes ?? EraAvailableTypes;
+}

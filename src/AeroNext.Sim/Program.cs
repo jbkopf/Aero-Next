@@ -548,6 +548,8 @@ Console.WriteLine("--- M13: full campaign, 1955-2015, 4 AI-driven airlines ---")
 
 var fleetCatalog = AircraftCatalog.LoadFile(Path.Combine(AppContext.BaseDirectory, "data", "aircraft.json"));
 var growthSchedule = DemandGrowthCatalog.LoadCampaignSchedule(Path.Combine(AppContext.BaseDirectory, "data")); // M21: baseline curve + authored historical_events.json, merged
+var campaignKnownCityIds = cities.Select(c => c.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+var campaignTradeRestrictions = TradeRestrictionCatalog.LoadFile(Path.Combine(AppContext.BaseDirectory, "data", "trade-restrictions.json"), campaignKnownCityIds); // geopolitical-aircraft-restrictions follow-up
 
 const int campaignQuarters = 244; // 1955 Q1 through 2015 Q4
 var campaignAirlineNames = new[] { "Atlas Air", "Meridian", "Skyward", "Continental Wings" };
@@ -773,16 +775,25 @@ for (var q = 1; q <= campaignQuarters; q++)
         // same boat, though — this loop already tracks real per-airline
         // cash, so BaselineAi's negotiation step becomes genuinely
         // cash-aware here too.
+        // Geopolitical-aircraft-restrictions follow-up: the same query a
+        // UI layer would use, computed once and threaded into both the
+        // AI's own StrategyContext and QuarterEngine's own enforcement
+        // gate below, so neither can drift from the other.
+        var campaignPurchasableTypes = Timeline.AvailableForPurchase(availableFleet, campaignSeats[name].StartingCity, year, campaignTradeRestrictions);
+        var campaignLeasableTypes = Timeline.AvailableForLease(availableFleet, campaignSeats[name].StartingCity, year, campaignTradeRestrictions);
+
         var campaignStrategyContext = new StrategyContext(
             campaignRoutes[name], campaignCaps[name], cities, yearDemandModel, availableFleet, campaignFleets[name], campaignHomeRegionByName[name],
             HomeCity: campaignSeats[name].StartingCity,
             AvailableSlotsByCity: null, AvailableCash: campaignFinances[name].CashBalance, CurrentDebtBalance: campaignFinances[name].DebtBalance,
             RegionsLedLastQuarter: DominanceTrackedRegions.All.Where(r => campaignDominance.StreakFor(name, r) >= 1).ToHashSet(),
-            TargetRegionCountOverride: campaignRegionCounts.TargetRegionCount);
+            TargetRegionCountOverride: campaignRegionCounts.TargetRegionCount,
+            PurchasableTypes: campaignPurchasableTypes,
+            LeasableTypes: campaignLeasableTypes);
         var campaignStrategy = BaselineAi.SelectStrategy(campaignCurrentStrategyByName[name], q, campaignStrategyContext);
         campaignCurrentStrategyByName[name] = campaignStrategy;
         var orders = campaignStrategy.DecideOrders(campaignStrategyContext);
-        var result = QuarterEngine.RunQuarter(q, campaignRoutes[name], campaignCaps[name], orders, cities, yearDemandModel, campaignFleets[name], availableCash: campaignFinances[name].CashBalance, currentDebtBalance: campaignFinances[name].DebtBalance, homeCity: campaignSeats[name].StartingCity);
+        var result = QuarterEngine.RunQuarter(q, campaignRoutes[name], campaignCaps[name], orders, cities, yearDemandModel, campaignFleets[name], availableCash: campaignFinances[name].CashBalance, currentDebtBalance: campaignFinances[name].DebtBalance, homeCity: campaignSeats[name].StartingCity, tradeRestrictions: campaignTradeRestrictions);
         campaignRoutes[name] = result.Routes;
         campaignCaps[name] = result.ActionCap;
         campaignFleets[name] = result.UpdatedFleet!;

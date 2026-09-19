@@ -24,10 +24,12 @@ public class RapidExpansionStrategyTests
         AirlineFleet? fleet = null, int actionCap = 3, Money? cash = null, City? homeCity = null,
         int quarterNumber = 1, System.Collections.Generic.IReadOnlyDictionary<(string OriginId, string DestinationId), AiRouteHistory>? routeHistoryByPair = null,
         System.Collections.Generic.IReadOnlyDictionary<(string OriginId, string DestinationId), long>? lastQuarterSeatsCarriedByRoute = null,
-        System.Collections.Generic.IReadOnlyDictionary<(string OriginId, string DestinationId), int>? rivalCountByServedRoute = null) =>
+        System.Collections.Generic.IReadOnlyDictionary<(string OriginId, string DestinationId), int>? rivalCountByServedRoute = null,
+        IReadOnlyList<AircraftType>? purchasableTypes = null, IReadOnlyList<AircraftType>? leasableTypes = null) =>
         new(routes, actionCap, cities, DemandModel, eraTypes, fleet ?? AirlineFleet.Empty, homeRegion, HomeCity: homeCity ?? cities[0], AvailableCash: cash,
             QuarterNumber: quarterNumber, RouteHistoryByPair: routeHistoryByPair, LastQuarterSeatsCarriedByRoute: lastQuarterSeatsCarriedByRoute,
-            RivalCountByServedRoute: rivalCountByServedRoute);
+            RivalCountByServedRoute: rivalCountByServedRoute,
+            PurchasableTypes: purchasableTypes, LeasableTypes: leasableTypes);
 
     [Fact]
     public void DecideOrders_TightBudget_PrefersOpeningANewPair_OverGrowingAnExistingRoute()
@@ -401,6 +403,29 @@ public class RapidExpansionStrategyTests
         Assert.Empty(orders.OfType<AircraftOrder>());
         var lease = Assert.Single(orders.OfType<LeaseAircraftOrder>());
         Assert.Equal("t", lease.Type.Id);
+        Assert.Empty(orders.OfType<RouteOrder>());
+    }
+
+    [Fact]
+    public void DecideOrders_NewPair_NothingIdle_TypeExcludedWhenNotInPurchasableOrLeasableTypes_ProposesNoAcquisition()
+    {
+        // Geopolitical-aircraft-restrictions follow-up: nothing idle, and
+        // the only era-available type is legal for neither purchase nor
+        // lease (an embargoed bloc) - no AircraftOrder/LeaseAircraftOrder
+        // for it should be proposed at all, rather than one QuarterEngine
+        // would just reject.
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
+        var near = MakeCity("near", Region.NorthAmerica, 1, 1, 90);
+        var cities = new[] { home, near };
+        var aircraft = new AircraftType("t", "Test", Seats: 10, Cost: Money.FromDollars(1_000_000));
+
+        var context = MakeContext(Array.Empty<Route>(), cities, new[] { aircraft }, Region.NorthAmerica,
+            purchasableTypes: Array.Empty<AircraftType>(), leasableTypes: Array.Empty<AircraftType>());
+
+        var orders = Strategy.DecideOrders(context);
+
+        Assert.Empty(orders.OfType<AircraftOrder>());
+        Assert.Empty(orders.OfType<LeaseAircraftOrder>());
         Assert.Empty(orders.OfType<RouteOrder>());
     }
 

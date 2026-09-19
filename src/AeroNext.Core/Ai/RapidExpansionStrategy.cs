@@ -140,7 +140,10 @@ public sealed class RapidExpansionStrategy : IAiStrategy
             }
             else if (idleBest is null && spent + 1 <= context.ActionCap)
             {
-                var bestAircraft = context.EraAvailableTypes
+                // Geopolitical-aircraft-restrictions follow-up: nothing
+                // idle, so this candidate will end up bought or leased -
+                // the union of both stays legal for either branch below.
+                var bestAircraft = context.PurchasableOrEraTypes.Union(context.LeasableOrEraTypes)
                     .OrderByDescending(a => a.RangeKm)
                     .ThenBy(a => a.Id, StringComparer.Ordinal)
                     .FirstOrDefault();

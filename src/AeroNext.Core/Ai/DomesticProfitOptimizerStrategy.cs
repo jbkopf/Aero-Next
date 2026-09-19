@@ -193,7 +193,12 @@ public sealed class DomesticProfitOptimizerStrategy : IAiStrategy
                 // profitability ranking itself picks the type, since a
                 // bigger/faster aircraft isn't automatically the most
                 // profitable one on a short intra-region hop.
-                var bestOrdered = FindMostProfitableDomesticPairAcrossTypes(context, context.EraAvailableTypes, validOriginCityIds);
+                // Geopolitical-aircraft-restrictions follow-up: nothing
+                // idle, so the winning candidate will end up bought or
+                // leased - the union of both stays legal for either
+                // branch below.
+                var acquirableTypes = context.PurchasableOrEraTypes.Union(context.LeasableOrEraTypes).ToList();
+                var bestOrdered = FindMostProfitableDomesticPairAcrossTypes(context, acquirableTypes, validOriginCityIds);
                 if (bestOrdered is not null && !MeetsCatastropheFloor(bestOrdered.Value.Pair, bestOrdered.Value.Aircraft))
                 {
                     bestOrdered = null; // catastrophic mismatch - skip opening anything this quarter rather than commit

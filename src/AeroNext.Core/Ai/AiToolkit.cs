@@ -321,12 +321,23 @@ public static class AiToolkit
             .Select(u => u.Type.Id)
             .ToHashSet(StringComparer.Ordinal);
 
+        // Geopolitical-aircraft-restrictions follow-up: idle-owned types
+        // are drawn from the full EraAvailableTypes (an already-owned
+        // aircraft can always keep flying, regardless of embargo) - only
+        // the "would need a fresh lease" candidates are narrowed to
+        // LeasableOrEraTypes, so a restricted bloc never gets proposed as
+        // a *new* lease while still allowing an airline to keep using one
+        // it already owns.
+        var idleTypeCandidates = context.EraAvailableTypes.Where(type => idleTypeIds.Contains(type.Id));
+        var leaseTypeCandidates = context.LeasableOrEraTypes.Where(type => !idleTypeIds.Contains(type.Id));
+        var typeCandidates = idleTypeCandidates.Concat(leaseTypeCandidates);
+
         var candidates = context.DemandModel.AllPairs(context.AllCities)
             .Where(p => !served.Contains((p.Origin.Id, p.Destination.Id)))
             .Where(p => !recentlyClosed.Contains(QuarterEngine.NormalizedPairKey(p.Origin, p.Destination)))
             .Where(p => validOriginCityIds.Contains(p.Origin.Id) || validOriginCityIds.Contains(p.Destination.Id))
             .Where(regionFilter)
-            .SelectMany(p => context.EraAvailableTypes
+            .SelectMany(p => typeCandidates
                 .Where(type => p.DistanceKm <= type.RangeKm)
                 .Select(type =>
                 {
@@ -452,7 +463,15 @@ public static class AiToolkit
             .Select(u => u.Type.Id)
             .ToHashSet(StringComparer.Ordinal);
 
-        var candidates = context.EraAvailableTypes
+        // Geopolitical-aircraft-restrictions follow-up: same idle-vs-acquire
+        // split as FindMostProfitablePair - a non-idle candidate here could
+        // end up bought outright or leased (TryProposeTypeSwap decides
+        // which), so it needs to be legal for at least one of the two.
+        var idleTypeCandidatePool = context.EraAvailableTypes.Where(type => idleTypeIds.Contains(type.Id));
+        var acquireTypeCandidatePool = context.PurchasableOrEraTypes.Union(context.LeasableOrEraTypes).Where(type => !idleTypeIds.Contains(type.Id));
+        var typeCandidatePool = idleTypeCandidatePool.Concat(acquireTypeCandidatePool);
+
+        var candidates = typeCandidatePool
             .Where(type => type.Id != load.Route.Aircraft.Id && pair.DistanceKm <= type.RangeKm)
             .Where(type => allowLeaseOrBuy || idleTypeIds.Contains(type.Id))
             .Select(type =>
