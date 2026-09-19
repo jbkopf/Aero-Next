@@ -28,6 +28,12 @@ namespace AeroNext.Core.Airlines;
 /// manufactured before manufacturing starts) since, unlike the other
 /// optional fields here, a backwards value would silently and permanently
 /// disable purchase/lease for a real catalog aircraft.
+///
+/// Geopolitical-aircraft-restrictions follow-up
+/// (docs/GEOPOLITICAL_AIRCRAFT_RESTRICTIONS_ROADMAP.md): Bloc is likewise
+/// optional and defaults null ("not modeled") - no cross-field validation
+/// needed, since unlike EndOfManufactureYear there's no invariant
+/// relating it to any other field on this same entry.
 /// </summary>
 public static class AircraftCatalog
 {
@@ -40,7 +46,7 @@ public static class AircraftCatalog
     private sealed record Entry(
         string Id, string Name, int Seats, int RangeKm, long CostDollars, int ProductionRatePerQuarter, int AvailableFromYear,
         string Manufacturer = "", Region? ManufacturerRegion = null, double CostPerAvailableSeatKm = 0.09, double CruiseSpeedKmh = 900.0,
-        int? EndOfManufactureYear = null);
+        int? EndOfManufactureYear = null, PoliticalBloc? Bloc = null);
 
     public static IReadOnlyList<AircraftType> Load(string json)
     {
@@ -52,7 +58,7 @@ public static class AircraftCatalog
         return entries
             .Select(e => new AircraftType(
                 e.Id, e.Name, e.Seats, e.RangeKm, Money.FromDollars(e.CostDollars), e.ProductionRatePerQuarter, e.AvailableFromYear,
-                e.Manufacturer, e.ManufacturerRegion, e.CostPerAvailableSeatKm, e.CruiseSpeedKmh, e.EndOfManufactureYear))
+                e.Manufacturer, e.ManufacturerRegion, e.CostPerAvailableSeatKm, e.CruiseSpeedKmh, e.EndOfManufactureYear, e.Bloc))
             .OrderBy(a => a.Id, StringComparer.Ordinal)
             .ToList();
     }

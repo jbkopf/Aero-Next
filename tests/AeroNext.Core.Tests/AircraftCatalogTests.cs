@@ -365,6 +365,71 @@ public class AircraftCatalogTests
     }
 
     [Fact]
+    public void Load_ParsesBloc_WhenPresent()
+    {
+        const string json = """
+        [{ "id": "t", "name": "Test", "seats": 100, "rangeKm": 1000, "costDollars": 1, "productionRatePerQuarter": 4, "availableFromYear": 1960, "bloc": "Soviet" }]
+        """;
+
+        var fleet = AircraftCatalog.Load(json);
+
+        Assert.Equal(PoliticalBloc.Soviet, fleet.Single().Bloc);
+    }
+
+    [Fact]
+    public void Load_Bloc_DefaultsToNull_WhenAbsent()
+    {
+        const string json = """
+        [{ "id": "t", "name": "Test", "seats": 100, "rangeKm": 1000, "costDollars": 1, "productionRatePerQuarter": 4, "availableFromYear": 1960 }]
+        """;
+
+        var fleet = AircraftCatalog.Load(json);
+
+        Assert.Null(fleet.Single().Bloc);
+    }
+
+    [Fact]
+    public void LoadFile_Trident_IsTaggedEuropeanBloc_NotAmerican()
+    {
+        // The whole reason this field exists: a European aircraft must
+        // never read as American, or the geopolitical-restrictions
+        // mechanic couldn't tell Boeing from Hawker Siddeley.
+        var fleet = AircraftCatalog.LoadFile(DataPath);
+        var trident = fleet.Single(a => a.Id == "trident");
+
+        Assert.Equal(PoliticalBloc.European, trident.Bloc);
+    }
+
+    [Fact]
+    public void LoadFile_SovietAircraft_AreTaggedSovietBloc_DespiteNoManufacturerRegion()
+    {
+        // Bloc and ManufacturerRegion are deliberately independent axes -
+        // Ilyushin/Tupolev/Sukhoi have no ManufacturerRegion on purpose
+        // (docs/GAME_SETUP_ROADMAP.md) but still need a real Bloc tag.
+        var fleet = AircraftCatalog.LoadFile(DataPath);
+
+        foreach (var id in new[] { "il14", "tu104", "il18", "il62", "tu154", "il86", "ssj100" })
+        {
+            var aircraft = fleet.Single(a => a.Id == id);
+            Assert.Null(aircraft.ManufacturerRegion);
+            Assert.Equal(PoliticalBloc.Soviet, aircraft.Bloc);
+        }
+    }
+
+    [Fact]
+    public void LoadFile_UnmodeledAircraft_HaveNullBloc()
+    {
+        // Embraer (South America) and COMAC (modern China) sit outside
+        // every embargo this mechanic models.
+        var fleet = AircraftCatalog.LoadFile(DataPath);
+
+        foreach (var id in new[] { "emb120", "e190", "arj21" })
+        {
+            Assert.Null(fleet.Single(a => a.Id == id).Bloc);
+        }
+    }
+
+    [Fact]
     public void Load_ThrowsWhenEndOfManufactureYearIsBeforeAvailableFromYear()
     {
         const string json = """

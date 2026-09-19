@@ -38,6 +38,19 @@ namespace AeroNext.Core.Airlines;
 /// <see cref="World.Timeline.IsAvailable"/> itself (used by RouteOrder/
 /// AdjustRouteOrder, which fly an aircraft rather than acquire one) is
 /// deliberately untouched by this field.
+///
+/// Geopolitical-aircraft-restrictions follow-up
+/// (docs/GEOPOLITICAL_AIRCRAFT_RESTRICTIONS_ROADMAP.md): Bloc defaults
+/// null - "not modeled, no restriction ever applies" - same permissive
+/// convention, so every synthetic test aircraft and every real catalog
+/// entry outside the modeled embargoes (Embraer, COMAC) is unaffected.
+/// Deliberately independent of ManufacturerRegion rather than derived
+/// from it: the two questions differ ("whose industry gets a
+/// home-region starting pick" vs. "whose political bloc built it"), and
+/// Ilyushin/Tupolev/Sukhoi already prove it - no ManufacturerRegion at
+/// all, but very much need a Bloc tag for this field to say anything
+/// about them. Only <see cref="World.TradeRestriction.IsRestricted"/>
+/// reads it.
 /// </summary>
 public sealed record AircraftType(
     string Id,
@@ -51,4 +64,5 @@ public sealed record AircraftType(
     Region? ManufacturerRegion = null,
     double CostPerAvailableSeatKm = 0.09,
     double CruiseSpeedKmh = 900.0,
-    int? EndOfManufactureYear = null);
+    int? EndOfManufactureYear = null,
+    PoliticalBloc? Bloc = null);

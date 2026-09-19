@@ -2322,5 +2322,157 @@ public class QuarterEngineTests
         Assert.Equal(1, route.AircraftCount); // the growth order never landed
     }
 
+    // --- Geopolitical-aircraft-restrictions follow-up (docs/GEOPOLITICAL_AIRCRAFT_RESTRICTIONS_ROADMAP.md) ---
+
+    [Fact]
+    public void RunQuarter_TradeRestriction_AircraftOrder_RestrictedBlocForHomeCity_Rejected()
+    {
+        var demandModel = new GravityDemandModel();
+        var beijing = MakeCity("pek", 0, 0, 50);
+        var americanType = new AircraftType("707", "Boeing 707", Seats: 140, AvailableFromYear: 1958, Bloc: PoliticalBloc.American);
+        var order = new AircraftOrder(americanType, Quantity: 1);
+        var restrictions = new[] { new TradeRestriction("pek", PoliticalBloc.American, 1949, 1972) };
+
+        // Quarter 41 -> year 1965, inside the embargo window.
+        var result = QuarterEngine.RunQuarter(41, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, Array.Empty<City>(), demandModel,
+            homeCity: beijing, tradeRestrictions: restrictions);
+
+        Assert.Empty(result.AppliedOrders);
+        Assert.Single(result.RejectedOrders);
+    }
+
+    [Fact]
+    public void RunQuarter_TradeRestriction_AircraftOrder_AfterRestrictionLifted_Accepted()
+    {
+        var demandModel = new GravityDemandModel();
+        var beijing = MakeCity("pek", 0, 0, 50);
+        var americanType = new AircraftType("707", "Boeing 707", Seats: 140, AvailableFromYear: 1958, Bloc: PoliticalBloc.American);
+        var order = new AircraftOrder(americanType, Quantity: 1);
+        var restrictions = new[] { new TradeRestriction("pek", PoliticalBloc.American, 1949, 1972) };
+
+        // Quarter 73 -> year 1973, right after the embargo lifts (1972 inclusive).
+        var result = QuarterEngine.RunQuarter(73, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, Array.Empty<City>(), demandModel,
+            homeCity: beijing, tradeRestrictions: restrictions);
+
+        Assert.Single(result.AppliedOrders);
+        Assert.Empty(result.RejectedOrders);
+    }
+
+    [Fact]
+    public void RunQuarter_TradeRestriction_LeaseAircraftOrder_RestrictedBlocForHomeCity_Rejected()
+    {
+        var demandModel = new GravityDemandModel();
+        var beijing = MakeCity("pek", 0, 0, 50);
+        var americanType = new AircraftType("707", "Boeing 707", Seats: 140, AvailableFromYear: 1958, Bloc: PoliticalBloc.American);
+        var order = new LeaseAircraftOrder(americanType, Quantity: 1);
+        var restrictions = new[] { new TradeRestriction("pek", PoliticalBloc.American, 1949, 1972) };
+
+        // Quarter 41 -> year 1965: lease-eligible (well past AvailableFromYear + 2) but embargoed.
+        var result = QuarterEngine.RunQuarter(41, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, Array.Empty<City>(), demandModel,
+            homeCity: beijing, tradeRestrictions: restrictions);
+
+        Assert.Empty(result.AppliedOrders);
+        Assert.Single(result.RejectedOrders);
+    }
+
+    [Fact]
+    public void RunQuarter_TradeRestriction_EuropeanAircraft_NeverRestrictedForBeijing_AcceptedThroughoutEmbargo()
+    {
+        // The whole point of the corrected, bloc-split design: Britain
+        // was never bound by the US-China embargo, so a European type
+        // stays purchasable for Beijing the entire 1949-1972 window.
+        var demandModel = new GravityDemandModel();
+        var beijing = MakeCity("pek", 0, 0, 50);
+        var europeanType = new AircraftType("caravelle", "Caravelle", Seats: 80, AvailableFromYear: 1959, Bloc: PoliticalBloc.European);
+        var order = new AircraftOrder(europeanType, Quantity: 1);
+        var restrictions = new[]
+        {
+            new TradeRestriction("pek", PoliticalBloc.American, 1949, 1972),
+            new TradeRestriction("pek", PoliticalBloc.Soviet, 1960, 1989),
+        };
+
+        // Quarter 41 -> year 1965, deep inside both embargoes.
+        var result = QuarterEngine.RunQuarter(41, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, Array.Empty<City>(), demandModel,
+            homeCity: beijing, tradeRestrictions: restrictions);
+
+        Assert.Single(result.AppliedOrders);
+        Assert.Empty(result.RejectedOrders);
+    }
+
+    [Fact]
+    public void RunQuarter_TradeRestriction_SovietAircraft_AcceptedBeforeSinoSovietSplit_RejectedAfter()
+    {
+        var demandModel = new GravityDemandModel();
+        var beijing = MakeCity("pek", 0, 0, 50);
+        var sovietType = new AircraftType("il14", "Il-14", Seats: 28, AvailableFromYear: 1954, Bloc: PoliticalBloc.Soviet);
+        var restrictions = new[] { new TradeRestriction("pek", PoliticalBloc.Soviet, 1960, 1989) };
+
+        // Quarter 13 -> year 1958, before the split.
+        var before = QuarterEngine.RunQuarter(13, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { new AircraftOrder(sovietType, 1) }, Array.Empty<City>(), demandModel,
+            homeCity: beijing, tradeRestrictions: restrictions);
+        // Quarter 41 -> year 1965, after the split.
+        var after = QuarterEngine.RunQuarter(41, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { new AircraftOrder(sovietType, 1) }, Array.Empty<City>(), demandModel,
+            homeCity: beijing, tradeRestrictions: restrictions);
+
+        Assert.Single(before.AppliedOrders);
+        Assert.Single(after.RejectedOrders);
+    }
+
+    [Fact]
+    public void RunQuarter_TradeRestriction_RouteOrderForEmbargoedBlocAircraft_StillAccepted()
+    {
+        // Flying an already-owned aircraft is never restricted, only
+        // acquiring a new one - the same "flying vs. acquiring" split the
+        // era window already uses.
+        var demandModel = new GravityDemandModel();
+        var beijing = MakeCity("pek", 0, 0, 50);
+        var farCity = MakeCity("far", 20, 20, 50);
+        var americanType = new AircraftType("707", "Boeing 707", Seats: 140, AvailableFromYear: 1958, Bloc: PoliticalBloc.American);
+        var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, americanType, quantity: 1, FleetOwnershipMode.Owned);
+        var order = new RouteOrder(beijing, farCity, americanType);
+        var restrictions = new[] { new TradeRestriction("pek", PoliticalBloc.American, 1949, 1972) };
+
+        var result = QuarterEngine.RunQuarter(41, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, new[] { beijing, farCity }, demandModel,
+            fleet, homeCity: beijing, tradeRestrictions: restrictions);
+
+        Assert.Single(result.AppliedOrders);
+        Assert.Empty(result.RejectedOrders);
+    }
+
+    [Fact]
+    public void RunQuarter_TradeRestriction_NoRestrictionsPassed_PermissiveDefault_Accepted()
+    {
+        // tradeRestrictions omitted entirely - byte-identical to before
+        // this mechanic existed, even for a home city that would
+        // otherwise be embargoed.
+        var demandModel = new GravityDemandModel();
+        var beijing = MakeCity("pek", 0, 0, 50);
+        var americanType = new AircraftType("707", "Boeing 707", Seats: 140, AvailableFromYear: 1958, Bloc: PoliticalBloc.American);
+        var order = new AircraftOrder(americanType, Quantity: 1);
+
+        var result = QuarterEngine.RunQuarter(41, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, Array.Empty<City>(), demandModel,
+            homeCity: beijing);
+
+        Assert.Single(result.AppliedOrders);
+        Assert.Empty(result.RejectedOrders);
+    }
+
+    [Fact]
+    public void RunQuarter_TradeRestriction_HomeCityNull_PermissiveDefault_Accepted()
+    {
+        // homeCity omitted (null) - "no visibility" reads as "no
+        // restriction ever applies," even with a real restrictions list.
+        var demandModel = new GravityDemandModel();
+        var americanType = new AircraftType("707", "Boeing 707", Seats: 140, AvailableFromYear: 1958, Bloc: PoliticalBloc.American);
+        var order = new AircraftOrder(americanType, Quantity: 1);
+        var restrictions = new[] { new TradeRestriction("pek", PoliticalBloc.American, 1949, 1972) };
+
+        var result = QuarterEngine.RunQuarter(41, Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { order }, Array.Empty<City>(), demandModel,
+            tradeRestrictions: restrictions);
+
+        Assert.Single(result.AppliedOrders);
+        Assert.Empty(result.RejectedOrders);
+    }
+
     private static string RouteKeyStringForTests(City origin, City destination) => $"{origin.Id}-{destination.Id}";
 }

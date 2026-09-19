@@ -177,6 +177,16 @@ public static class QuarterEngine
     /// step below ever runs, rather than wasting a real bid's worth of
     /// cash on a silently-dropped duplicate.
     /// </param>
+    /// <param name="tradeRestrictions">
+    /// Geopolitical-aircraft-restrictions follow-up
+    /// (docs/GEOPOLITICAL_AIRCRAFT_RESTRICTIONS_ROADMAP.md): null (the
+    /// default) means no restriction ever applies, exactly as before this
+    /// parameter existed. Passing a real list gates AircraftOrder/
+    /// LeaseAircraftOrder on <see cref="TradeRestriction.IsRestricted"/>
+    /// against <paramref name="homeCity"/>, alongside the existing era
+    /// window - RouteOrder/AdjustRouteOrder stay untouched, same
+    /// "flying vs. acquiring" split the era window already uses.
+    /// </param>
     public static QuarterResult RunQuarter(
         int quarterNumber,
         IReadOnlyList<Route> currentRoutes,
@@ -190,7 +200,8 @@ public static class QuarterEngine
         Money? currentDebtBalance = null,
         City? homeCity = null,
         IReadOnlyDictionary<string, int>? cityWideSlotsRemaining = null,
-        IReadOnlySet<string>? pendingNegotiationCityIds = null)
+        IReadOnlySet<string>? pendingNegotiationCityIds = null,
+        IReadOnlyList<TradeRestriction>? tradeRestrictions = null)
     {
         var validOriginCityIds = homeCity is null
             ? null
@@ -258,7 +269,7 @@ public static class QuarterEngine
                 continue;
             }
 
-            if (!IsAircraftAvailable(order, year))
+            if (!IsAircraftAvailable(order, year, homeCity, tradeRestrictions ?? Array.Empty<TradeRestriction>()))
             {
                 rejected.Add(order);
                 continue;
@@ -836,13 +847,19 @@ public static class QuarterEngine
     /// windows now, not the plain floor-only IsAvailable RouteOrder/
     /// AdjustRouteOrder still use - flying an already-acquired aircraft
     /// never needed an upper bound, only *acquiring* a new one does.
+    ///
+    /// Geopolitical-aircraft-restrictions follow-up
+    /// (docs/GEOPOLITICAL_AIRCRAFT_RESTRICTIONS_ROADMAP.md): the same two
+    /// acquisition arms also check TradeRestriction.IsRestricted now - a
+    /// third gate alongside the era window, still only for *acquiring*, not
+    /// flying.
     /// </summary>
-    private static bool IsAircraftAvailable(QuarterOrder order, int year) => order switch
+    private static bool IsAircraftAvailable(QuarterOrder order, int year, City? homeCity, IReadOnlyList<TradeRestriction> tradeRestrictions) => order switch
     {
         RouteOrder ro => Timeline.IsAvailable(ro.Aircraft, year),
         AdjustRouteOrder aro => Timeline.IsAvailable(aro.AircraftType, year),
-        AircraftOrder ao => Timeline.IsAvailableForPurchase(ao.Type, year),
-        LeaseAircraftOrder lo => Timeline.IsAvailableForLease(lo.Type, year),
+        AircraftOrder ao => Timeline.IsAvailableForPurchase(ao.Type, year) && !TradeRestriction.IsRestricted(ao.Type, homeCity, year, tradeRestrictions),
+        LeaseAircraftOrder lo => Timeline.IsAvailableForLease(lo.Type, year) && !TradeRestriction.IsRestricted(lo.Type, homeCity, year, tradeRestrictions),
         _ => true, // orders with no aircraft (negotiations, alliances, private actions) are never era-gated
     };
 }
