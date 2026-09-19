@@ -174,12 +174,30 @@ public class AircraftCatalogTests
         var ids = fleet.Select(a => a.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         Assert.Contains("727", ids);   // Boeing 727 (1963) - best-selling airliner of its era
+        Assert.Contains("trident", ids); // Hawker Siddeley Trident (1964)
         Assert.Contains("dc9", ids);   // McDonnell Douglas DC-9 (1965)
         Assert.Contains("bac111", ids); // BAC One-Eleven (1965)
         Assert.Contains("dc10", ids);  // McDonnell Douglas DC-10 (1971)
         Assert.Contains("l1011", ids); // Lockheed L-1011 TriStar (1972)
         Assert.Contains("tu154", ids); // Tupolev Tu-154 (1972) - most-produced Soviet jet airliner
         Assert.Contains("concorde", ids); // Concorde (1976)
+    }
+
+    [Fact]
+    public void LoadFile_Trident_IsAEuropeanAircraft_ChinasRealColdWarEraWorkaround()
+    {
+        // Real history, not flavor: Britain recognized the PRC
+        // diplomatically in 1950 (the US didn't until 1979), so British
+        // manufacturers were never bound by the US-China trade embargo.
+        // CAAC bought Tridents directly from Hawker Siddeley in August
+        // 1971 - a full year before Boeing's own first China sale. Locked
+        // in here as a real catalog fact (manufacturer region), not tied
+        // to any embargo mechanic, which doesn't exist yet.
+        var fleet = AircraftCatalog.LoadFile(DataPath);
+        var trident = fleet.Single(a => a.Id == "trident");
+
+        Assert.Equal("Hawker Siddeley", trident.Manufacturer);
+        Assert.Equal(Region.Europe, trident.ManufacturerRegion);
     }
 
     [Fact]
