@@ -470,6 +470,57 @@ public class RapidExpansionStrategyTests
     }
 
     [Fact]
+    public void DecideOrders_GrowExisting_NothingIdle_TypeExcludedFromLeasableTypes_ProposesNoAcquisition()
+    {
+        // AI-acquisition-awareness-gaps follow-up
+        // (docs/AI_ACQUISITION_AWARENESS_GAPS_ROADMAP.md): the route's own
+        // type is no longer legally leasable for this home city (an
+        // embargoed bloc, or past its lease-extension window) - growth
+        // must propose nothing rather than an order QuarterEngine would
+        // reject.
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
+        var near = MakeCity("near", Region.NorthAmerica, 1, 1, 90);
+        var cities = new[] { home, near };
+        var aircraft = new AircraftType("t", "Test", Seats: 10, Cost: Money.FromDollars(1_000_000));
+        var existing = new[] { new Route(home, near, aircraft, AircraftCount: 1) };
+
+        var context = MakeContext(existing, cities, new[] { aircraft }, Region.NorthAmerica,
+            leasableTypes: Array.Empty<AircraftType>());
+
+        var orders = Strategy.DecideOrders(context);
+
+        Assert.Empty(orders.OfType<AircraftOrder>());
+        Assert.Empty(orders.OfType<LeaseAircraftOrder>());
+        Assert.Empty(orders.OfType<RouteOrder>());
+    }
+
+    [Fact]
+    public void DecideOrders_GrowExisting_NothingIdle_TypeExcludedFromPurchasableTypes_LeasesInsteadOfBuying()
+    {
+        // Same fixture as the cash-comfortable "orders instead of leasing"
+        // test above, but the route's own type is no longer legally
+        // purchasable (e.g. past its own EndOfManufactureYear) even though
+        // cash would otherwise cover buying outright - falls through to
+        // leasing rather than skipping growth entirely, since leasing is
+        // still legal here (LeasableTypes left null/permissive).
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
+        var near = MakeCity("near", Region.NorthAmerica, 1, 1, 90);
+        var cities = new[] { home, near };
+        var aircraft = new AircraftType("t", "Test", Seats: 10, Cost: Money.FromDollars(1_000_000));
+        var existing = new[] { new Route(home, near, aircraft, AircraftCount: 1) };
+
+        var context = MakeContext(existing, cities, new[] { aircraft }, Region.NorthAmerica, cash: Money.FromDollars(2_000_000),
+            purchasableTypes: Array.Empty<AircraftType>());
+
+        var orders = Strategy.DecideOrders(context);
+
+        Assert.Empty(orders.OfType<AircraftOrder>());
+        var lease = Assert.Single(orders.OfType<LeaseAircraftOrder>());
+        Assert.Equal("t", lease.Type.Id);
+        Assert.Empty(orders.OfType<RouteOrder>());
+    }
+
+    [Fact]
     public void DecideOrders_GrowExisting_IdleUnitAvailable_UsesItDirectly()
     {
         // Step 2's own success path (idleUnit is not null) was never

@@ -31,11 +31,13 @@ public class BalancedGrowthStrategyTests
         IReadOnlyDictionary<(string, string), int>? rivalPresenceByPairKey = null,
         IReadOnlyDictionary<Region, int>? rivalPresenceByRegion = null,
         IReadOnlySet<Region>? regionsLed = null,
-        int actionCap = 3, int? targetRegionCountOverride = null) =>
+        int actionCap = 3, int? targetRegionCountOverride = null,
+        IReadOnlyList<AircraftType>? purchasableTypes = null, IReadOnlyList<AircraftType>? leasableTypes = null) =>
         new(routes ?? Array.Empty<Route>(), actionCap, cities, DemandModel, eraTypes ?? new[] { Wide, Small }, fleet ?? AirlineFleet.Empty,
             homeCity.Region, homeCity, AvailableCash: availableCash,
             RivalPresenceByPairKey: rivalPresenceByPairKey, RivalPresenceByRegion: rivalPresenceByRegion,
-            RegionsLedLastQuarter: regionsLed, TargetRegionCountOverride: targetRegionCountOverride);
+            RegionsLedLastQuarter: regionsLed, TargetRegionCountOverride: targetRegionCountOverride,
+            PurchasableTypes: purchasableTypes, LeasableTypes: leasableTypes);
 
     [Fact]
     public void ApplicableEras_CoversMidGameAndLateGame_NeverStarting()
@@ -476,6 +478,49 @@ public class BalancedGrowthStrategyTests
 
         // Leasing resolves next quarter now (two-phase,
         // docs/AIRCRAFT_ACQUISITION_ROADMAP.md) - no RouteOrder yet.
+        Assert.Empty(orders.OfType<AircraftOrder>().Where(o => o.Type.Id == "wide"));
+        var lease = Assert.Single(orders.OfType<LeaseAircraftOrder>().Where(o => o.Type.Id == "wide"));
+        Assert.NotNull(lease);
+        Assert.Empty(orders.OfType<RouteOrder>());
+    }
+
+    [Fact]
+    public void DecideOrders_GrowExisting_NothingIdle_TypeExcludedFromLeasableTypes_ProposesNoAcquisition()
+    {
+        // AI-acquisition-awareness-gaps follow-up
+        // (docs/AI_ACQUISITION_AWARENESS_GAPS_ROADMAP.md): the route's own
+        // type is no longer legally leasable for this home city - growth
+        // must propose nothing rather than an order QuarterEngine would
+        // reject.
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
+        var away = MakeCity("away", Region.NorthAmerica, 1, 1, 100);
+        var route = new Route(home, away, Wide, AircraftCount: 1);
+        var context = MakeContext(new[] { home, away }, home, routes: new[] { route },
+            leasableTypes: Array.Empty<AircraftType>());
+
+        var orders = Strategy.DecideOrders(context);
+
+        Assert.Empty(orders.OfType<AircraftOrder>().Where(o => o.Type.Id == "wide"));
+        Assert.Empty(orders.OfType<LeaseAircraftOrder>().Where(o => o.Type.Id == "wide"));
+        Assert.Empty(orders.OfType<RouteOrder>());
+    }
+
+    [Fact]
+    public void DecideOrders_GrowExisting_NothingIdle_TypeExcludedFromPurchasableTypes_LeasesInsteadOfBuying()
+    {
+        // The route's own type is no longer legally purchasable (e.g.
+        // past its own EndOfManufactureYear) even though cash would
+        // otherwise cover buying outright - falls through to leasing
+        // (still legal, LeasableTypes left null/permissive) rather than
+        // skipping growth entirely.
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
+        var away = MakeCity("away", Region.NorthAmerica, 1, 1, 100);
+        var route = new Route(home, away, Wide, AircraftCount: 1);
+        var context = MakeContext(new[] { home, away }, home, routes: new[] { route }, availableCash: Money.FromDollars(50_000_000),
+            purchasableTypes: Array.Empty<AircraftType>());
+
+        var orders = Strategy.DecideOrders(context);
+
         Assert.Empty(orders.OfType<AircraftOrder>().Where(o => o.Type.Id == "wide"));
         var lease = Assert.Single(orders.OfType<LeaseAircraftOrder>().Where(o => o.Type.Id == "wide"));
         Assert.NotNull(lease);

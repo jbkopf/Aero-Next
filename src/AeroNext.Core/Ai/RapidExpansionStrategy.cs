@@ -213,12 +213,13 @@ public sealed class RapidExpansionStrategy : IAiStrategy
                 AiToolkit.ReserveCityWideSlots(bestExisting.Origin, bestExisting.Destination, citySpendReservedByCity);
                 spent += 1;
             }
-            else if (context.AvailableCash is not null && FinancialState.CanAfford(context.AvailableCash.Value, ComfortableOrderCost(bestExisting.Aircraft)))
+            else if (context.AvailableCash is not null && FinancialState.CanAfford(context.AvailableCash.Value, ComfortableOrderCost(bestExisting.Aircraft))
+                && (context.PurchasableTypes is null || context.PurchasableTypes.Contains(bestExisting.Aircraft)))
             {
                 orders.Add(new AircraftOrder(bestExisting.Aircraft, Quantity: 1));
                 spent += 1;
             }
-            else
+            else if (context.LeasableTypes is null || context.LeasableTypes.Contains(bestExisting.Aircraft))
             {
                 // Leasing resolves next quarter now (two-phase,
                 // docs/AIRCRAFT_ACQUISITION_ROADMAP.md) - submit it alone,
@@ -228,6 +229,12 @@ public sealed class RapidExpansionStrategy : IAiStrategy
                 orders.Add(new LeaseAircraftOrder(bestExisting.Aircraft, Quantity: 1));
                 spent += 1;
             }
+            // else: this route's own type is no longer legally
+            // purchasable or leasable for this home city right now
+            // (geopolitical-aircraft-restrictions follow-up,
+            // docs/AI_ACQUISITION_AWARENESS_GAPS_ROADMAP.md) - do nothing
+            // this quarter rather than submit an order QuarterEngine
+            // would reject anyway.
         }
 
         // 3. Negotiate for the best gateway, cross-region-reachable ones

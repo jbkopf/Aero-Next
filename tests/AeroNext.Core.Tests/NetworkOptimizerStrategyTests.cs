@@ -23,10 +23,12 @@ public class NetworkOptimizerStrategyTests
         System.Collections.Generic.IReadOnlyDictionary<(string OriginId, string DestinationId), AiRouteHistory>? routeHistoryByPair = null,
         int quarterNumber = 1,
         System.Collections.Generic.IReadOnlyDictionary<(string OriginId, string DestinationId), long>? lastQuarterSeatsCarriedByRoute = null,
-        IReadOnlySet<Region>? regionsLed = null) =>
+        IReadOnlySet<Region>? regionsLed = null,
+        IReadOnlyList<AircraftType>? purchasableTypes = null, IReadOnlyList<AircraftType>? leasableTypes = null) =>
         new(routes, actionCap, cities, DemandModel, eraTypes, fleet ?? AirlineFleet.Empty, homeRegion, HomeCity: homeCity ?? cities[0], AvailableCash: cash,
             RivalCountByServedRoute: rivalCountByServedRoute, RouteHistoryByPair: routeHistoryByPair, QuarterNumber: quarterNumber,
-            LastQuarterSeatsCarriedByRoute: lastQuarterSeatsCarriedByRoute, RegionsLedLastQuarter: regionsLed);
+            LastQuarterSeatsCarriedByRoute: lastQuarterSeatsCarriedByRoute, RegionsLedLastQuarter: regionsLed,
+            PurchasableTypes: purchasableTypes, LeasableTypes: leasableTypes);
 
     /// <summary>Shorthand for a RouteHistoryByPair entry with only ConsecutiveUnprofitableQuarters set - the only field this strategy's own Suitability reads.</summary>
     private static AiRouteHistory Sustained(int consecutiveUnprofitableQuarters) =>
@@ -246,6 +248,54 @@ public class NetworkOptimizerStrategyTests
 
         // Leasing resolves next quarter now (two-phase,
         // docs/AIRCRAFT_ACQUISITION_ROADMAP.md) - no RouteOrder yet.
+        Assert.Empty(orders.OfType<AircraftOrder>());
+        var lease = Assert.Single(orders.OfType<LeaseAircraftOrder>());
+        Assert.Equal("t", lease.Type.Id);
+        Assert.Empty(orders.OfType<RouteOrder>());
+    }
+
+    [Fact]
+    public void DecideOrders_GrowExisting_NothingIdle_TypeExcludedFromLeasableTypes_ProposesNoAcquisition()
+    {
+        // AI-acquisition-awareness-gaps follow-up
+        // (docs/AI_ACQUISITION_AWARENESS_GAPS_ROADMAP.md): the route's own
+        // type is no longer legally leasable for this home city - growth
+        // must propose nothing rather than an order QuarterEngine would
+        // reject.
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
+        var served = MakeCity("served", Region.NorthAmerica, 1, 1, 500);
+        var cities = new[] { home, served };
+        var aircraft = new AircraftType("t", "Test", Seats: 10, RangeKm: 2000, Cost: Money.FromDollars(1_000_000));
+        var existing = new[] { new Route(home, served, aircraft, AircraftCount: 1) };
+
+        var context = MakeContext(existing, cities, new[] { aircraft }, Region.NorthAmerica, actionCap: 2,
+            leasableTypes: Array.Empty<AircraftType>());
+
+        var orders = Strategy.DecideOrders(context);
+
+        Assert.Empty(orders.OfType<AircraftOrder>());
+        Assert.Empty(orders.OfType<LeaseAircraftOrder>());
+        Assert.Empty(orders.OfType<RouteOrder>());
+    }
+
+    [Fact]
+    public void DecideOrders_GrowExisting_NothingIdle_TypeExcludedFromPurchasableTypes_LeasesInsteadOfBuying()
+    {
+        // Same fixture as the cash-comfortable "orders instead of leasing"
+        // test above, but the route's own type is no longer legally
+        // purchasable - falls through to leasing (still legal here,
+        // LeasableTypes left null/permissive) rather than skipping growth.
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
+        var served = MakeCity("served", Region.NorthAmerica, 1, 1, 500);
+        var cities = new[] { home, served };
+        var aircraft = new AircraftType("t", "Test", Seats: 10, RangeKm: 2000, Cost: Money.FromDollars(1_000_000));
+        var existing = new[] { new Route(home, served, aircraft, AircraftCount: 1) };
+
+        var context = MakeContext(existing, cities, new[] { aircraft }, Region.NorthAmerica, cash: Money.FromDollars(3_000_000),
+            purchasableTypes: Array.Empty<AircraftType>());
+
+        var orders = Strategy.DecideOrders(context);
+
         Assert.Empty(orders.OfType<AircraftOrder>());
         var lease = Assert.Single(orders.OfType<LeaseAircraftOrder>());
         Assert.Equal("t", lease.Type.Id);

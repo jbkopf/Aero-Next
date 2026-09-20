@@ -1,6 +1,8 @@
 # Closing the AI's Remaining Acquisition/Restriction Awareness Gaps
 
-**Status: proposal, not implemented.** Written per the user's own direct
+**Status: Gap B implemented (per the user's own direct "start on Gap B"
+follow-up); Gap A still an open scope question, not implemented.** Written
+per the user's own direct
 request ("make a plan for closing the AI gaps for the new systems"),
 following a fresh investigation into exactly what's left after
 `docs/AIRCRAFT_ACQUISITION_ROADMAP.md` and
@@ -63,24 +65,41 @@ against.
 
 ## Fix for Gap B (the three `StrategyContext`-based files)
 
-A single-item legality check, answered by containment on the lists that
-already exist:
+A single-item legality check — **against the raw nullable
+`PurchasableTypes`/`LeasableTypes` fields directly, not the
+`...OrEraTypes` fallback properties**:
 
 ```csharp
-context.LeasableOrEraTypes.Contains(bestExisting.Aircraft)
-context.PurchasableOrEraTypes.Contains(bestExisting.Aircraft)
+context.LeasableTypes is null || context.LeasableTypes.Contains(bestExisting.Aircraft)
+context.PurchasableTypes is null || context.PurchasableTypes.Contains(bestExisting.Aircraft)
 ```
 
-Safe and exact, not approximate: `AircraftType` is a `record`, so this is
-real structural equality (every field compared), not reference identity —
-no risk of a false negative from two logically-identical instances that
-happen to be different objects.
+**Implemented, and this distinction turned out to matter in practice, not
+just in theory**: the first version of this fix checked
+`PurchasableOrEraTypes`/`LeasableOrEraTypes` instead (reasoning that they
+"fall back to the unrestricted `EraAvailableTypes`, so `Contains` always
+succeeds when nothing real was wired in"). That reasoning was wrong and
+broke 5 real tests immediately: `EraAvailableTypes` is the *new-type
+search* list, and several existing fixtures legitimately leave it empty
+(`Array.Empty<AircraftType>()`) for a "grow an existing route" scenario,
+since growing an already-served route was never supposed to need an
+era-available catalog at all — it targets one fixed, already-known type.
+Falling back to an empty list made the guard read "nothing is ever
+legal" instead of "no restriction data, so everything is legal." The
+`is null ||` form checks the actual opt-in signal directly instead of a
+list whose emptiness can mean two different things depending on which
+step is asking.
+
+`AircraftType` being a `record` (real structural equality, not reference
+identity) makes the `Contains` call itself exact once it's checking the
+right list — no risk of a false negative from two logically-identical
+instances that happen to be different objects.
 
 Applied as an added guard on the existing `else` branch in each of the
 three files:
 
 ```csharp
-else if (context.LeasableOrEraTypes.Contains(bestExisting.Aircraft) && spent + 1 <= context.ActionCap)
+else if (context.LeasableTypes is null || context.LeasableTypes.Contains(bestExisting.Aircraft))
 {
     orders.Add(new LeaseAircraftOrder(bestExisting.Aircraft, Quantity: 1));
     spent += 1;
@@ -93,17 +112,16 @@ else if (context.LeasableOrEraTypes.Contains(bestExisting.Aircraft) && spent + 1
 ```
 
 The buy-outright branch one level up gets the same treatment against
-`PurchasableOrEraTypes`, closing the identical gap for purchase
-specifically (a route's own type could just as easily have passed its
+`PurchasableTypes`, closing the identical gap for purchase specifically
+(a route's own type could just as easily have passed its
 `EndOfManufactureYear`'s purchase window, independent of leasing).
 
-**Permissive by construction, not by extra code**: `PurchasableOrEraTypes`/
-`LeasableOrEraTypes` already fall back to the unrestricted
-`EraAvailableTypes` whenever `PurchasableTypes`/`LeasableTypes` are null —
-every existing test and every real caller that hasn't wired real
-restriction data through yet sees `Contains` always succeed, so this
-guard is a true no-op until a real list is actually passed. No behavior
-changes for anyone not opted in.
+**Permissive by construction, verified against the full suite, not just
+argued**: every existing test and every real caller that hasn't wired
+real restriction data through yet has `PurchasableTypes`/`LeasableTypes`
+null, so the guard is a true no-op until a real list is actually passed —
+confirmed by running the full 1109-test suite after the fix, not assumed
+from the shape of the code alone.
 
 ## Fix for Gap A — an open question, not a unilateral call
 
