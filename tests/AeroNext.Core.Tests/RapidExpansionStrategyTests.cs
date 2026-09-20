@@ -24,10 +24,12 @@ public class RapidExpansionStrategyTests
         AirlineFleet? fleet = null, int actionCap = 3, Money? cash = null, City? homeCity = null,
         int quarterNumber = 1, System.Collections.Generic.IReadOnlyDictionary<(string OriginId, string DestinationId), AiRouteHistory>? routeHistoryByPair = null,
         System.Collections.Generic.IReadOnlyDictionary<(string OriginId, string DestinationId), long>? lastQuarterSeatsCarriedByRoute = null,
-        System.Collections.Generic.IReadOnlyDictionary<(string OriginId, string DestinationId), int>? rivalCountByServedRoute = null) =>
+        System.Collections.Generic.IReadOnlyDictionary<(string OriginId, string DestinationId), int>? rivalCountByServedRoute = null,
+        IReadOnlyList<AircraftType>? purchasableTypes = null, IReadOnlyList<AircraftType>? leasableTypes = null) =>
         new(routes, actionCap, cities, DemandModel, eraTypes, fleet ?? AirlineFleet.Empty, homeRegion, HomeCity: homeCity ?? cities[0], AvailableCash: cash,
             QuarterNumber: quarterNumber, RouteHistoryByPair: routeHistoryByPair, LastQuarterSeatsCarriedByRoute: lastQuarterSeatsCarriedByRoute,
-            RivalCountByServedRoute: rivalCountByServedRoute);
+            RivalCountByServedRoute: rivalCountByServedRoute,
+            PurchasableTypes: purchasableTypes, LeasableTypes: leasableTypes);
 
     [Fact]
     public void DecideOrders_TightBudget_PrefersOpeningANewPair_OverGrowingAnExistingRoute()
@@ -396,10 +398,35 @@ public class RapidExpansionStrategyTests
 
         var orders = Strategy.DecideOrders(context);
 
+        // Leasing resolves next quarter now (two-phase,
+        // docs/AIRCRAFT_ACQUISITION_ROADMAP.md) - no RouteOrder yet.
         Assert.Empty(orders.OfType<AircraftOrder>());
         var lease = Assert.Single(orders.OfType<LeaseAircraftOrder>());
         Assert.Equal("t", lease.Type.Id);
-        Assert.Single(orders.OfType<RouteOrder>());
+        Assert.Empty(orders.OfType<RouteOrder>());
+    }
+
+    [Fact]
+    public void DecideOrders_NewPair_NothingIdle_TypeExcludedWhenNotInPurchasableOrLeasableTypes_ProposesNoAcquisition()
+    {
+        // Geopolitical-aircraft-restrictions follow-up: nothing idle, and
+        // the only era-available type is legal for neither purchase nor
+        // lease (an embargoed bloc) - no AircraftOrder/LeaseAircraftOrder
+        // for it should be proposed at all, rather than one QuarterEngine
+        // would just reject.
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
+        var near = MakeCity("near", Region.NorthAmerica, 1, 1, 90);
+        var cities = new[] { home, near };
+        var aircraft = new AircraftType("t", "Test", Seats: 10, Cost: Money.FromDollars(1_000_000));
+
+        var context = MakeContext(Array.Empty<Route>(), cities, new[] { aircraft }, Region.NorthAmerica,
+            purchasableTypes: Array.Empty<AircraftType>(), leasableTypes: Array.Empty<AircraftType>());
+
+        var orders = Strategy.DecideOrders(context);
+
+        Assert.Empty(orders.OfType<AircraftOrder>());
+        Assert.Empty(orders.OfType<LeaseAircraftOrder>());
+        Assert.Empty(orders.OfType<RouteOrder>());
     }
 
     [Fact]
@@ -434,11 +461,12 @@ public class RapidExpansionStrategyTests
 
         var orders = Strategy.DecideOrders(context);
 
+        // Leasing resolves next quarter now (two-phase,
+        // docs/AIRCRAFT_ACQUISITION_ROADMAP.md) - no RouteOrder yet.
         Assert.Empty(orders.OfType<AircraftOrder>());
         var lease = Assert.Single(orders.OfType<LeaseAircraftOrder>());
         Assert.Equal("t", lease.Type.Id);
-        var routeOrder = Assert.Single(orders.OfType<RouteOrder>());
-        Assert.Equal(new HashSet<string> { "home", "near" }, new HashSet<string> { routeOrder.Origin.Id, routeOrder.Destination.Id });
+        Assert.Empty(orders.OfType<RouteOrder>());
     }
 
     [Fact]
@@ -478,8 +506,13 @@ public class RapidExpansionStrategyTests
         // ranking would have picked home-near; the new demand-based one
         // picks home-far instead. EraAvailableTypes empty and no idle
         // fleet neutralize step 1 entirely (no idle unit, no fallback
-        // aircraft to lease/order with), and no cash forces the lease+route
-        // fallback so the winning pair is directly visible as a RouteOrder.
+        // aircraft to lease/order with), and no cash forces the lease
+        // fallback - growing an existing route always leases the exact
+        // type already flying it, so the winning pair is visible via the
+        // leased type itself (home-far flies bigAircraft, home-near flies
+        // smallAircraft) rather than a same-quarter RouteOrder, which
+        // leasing no longer produces (two-phase now,
+        // docs/AIRCRAFT_ACQUISITION_ROADMAP.md).
         var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
         var near = MakeCity("near", Region.NorthAmerica, 1, 1, 5);
         var far = MakeCity("far", Region.NorthAmerica, 5, 5, 800);
@@ -496,9 +529,9 @@ public class RapidExpansionStrategyTests
 
         var orders = Strategy.DecideOrders(context);
 
-        var routeOrder = Assert.Single(orders.OfType<RouteOrder>());
-        Assert.Equal(new HashSet<string> { "home", "far" }, new HashSet<string> { routeOrder.Origin.Id, routeOrder.Destination.Id });
-        Assert.Single(orders.OfType<LeaseAircraftOrder>());
+        Assert.Empty(orders.OfType<RouteOrder>());
+        var lease = Assert.Single(orders.OfType<LeaseAircraftOrder>());
+        Assert.Equal("big", lease.Type.Id); // home-far's own type, confirming it (not home-near) won
     }
 
     [Fact]

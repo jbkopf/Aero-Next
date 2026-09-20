@@ -63,6 +63,8 @@ for (var i = 0; i < args.Length; i++)
 var cities = CityCatalog.LoadFile(Path.Combine(AppContext.BaseDirectory, "data", "cities.json"));
 var fleetCatalog = AircraftCatalog.LoadFile(Path.Combine(AppContext.BaseDirectory, "data", "aircraft.json"));
 var growthSchedule = DemandGrowthCatalog.LoadCampaignSchedule(Path.Combine(AppContext.BaseDirectory, "data")); // M21: baseline curve + authored historical_events.json, merged
+var knownCityIds = cities.Select(c => c.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+var tradeRestrictions = TradeRestrictionCatalog.LoadFile(Path.Combine(AppContext.BaseDirectory, "data", "trade-restrictions.json"), knownCityIds); // geopolitical-aircraft-restrictions follow-up
 
 Console.WriteLine($"AeroNext QA harness: {games} games x {quarters} quarters, base seed {baseSeed}{(unconstrainedRegions ? " [unconstrained regions: duplicates allowed]" : "")}");
 Console.WriteLine();
@@ -82,7 +84,7 @@ for (var i = 0; i < games; i++)
             ? UnconstrainedSeatGenerator.Generate(configRng, cities)
             : GameSetup.CreateSeats(GameConfigGenerator.Generate(configRng, cities), cities, configRng, fillerWeightExponent: 0.0);
 
-        var result = FullGameRunner.Run(i, configSeed, campaignSeed, quarters, seats, cities, fleetCatalog, growthSchedule);
+        var result = FullGameRunner.Run(i, configSeed, campaignSeed, quarters, seats, cities, fleetCatalog, growthSchedule, tradeRestrictions: tradeRestrictions);
         results.Add(result);
 
         if (!result.Success)

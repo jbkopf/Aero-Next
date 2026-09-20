@@ -244,10 +244,12 @@ public class NetworkOptimizerStrategyTests
 
         var orders = Strategy.DecideOrders(context);
 
+        // Leasing resolves next quarter now (two-phase,
+        // docs/AIRCRAFT_ACQUISITION_ROADMAP.md) - no RouteOrder yet.
         Assert.Empty(orders.OfType<AircraftOrder>());
         var lease = Assert.Single(orders.OfType<LeaseAircraftOrder>());
         Assert.Equal("t", lease.Type.Id);
-        Assert.Contains(orders.OfType<RouteOrder>(), o => new HashSet<string> { "home", "served" }.SetEquals(new[] { o.Origin.Id, o.Destination.Id }));
+        Assert.Empty(orders.OfType<RouteOrder>());
     }
 
     [Fact]
@@ -268,15 +270,22 @@ public class NetworkOptimizerStrategyTests
         // not home-first like highLf's - covers
         // TouchesRegionNotYetLed's own "unled region is the Origin, not
         // just the Destination" branch directly, not just by inspection.
+        // Growing an existing route always leases the exact type already
+        // flying it, so - now that leasing no longer produces a
+        // same-quarter RouteOrder (two-phase,
+        // docs/AIRCRAFT_ACQUISITION_ROADMAP.md) - the two routes are given
+        // distinct (but economically identical) types purely so the
+        // winning pair stays observable via the leased type.
         var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
         var highLf = MakeCity("highlf", Region.Europe, 1, 1, 200);
         var lowLf = MakeCity("lowlf", Region.EastAsia, 2, 2, 8);
         var cities = new[] { home, highLf, lowLf };
-        var aircraft = new AircraftType("t", "Test", Seats: 100, RangeKm: 10_000, CruiseSpeedKmh: 900, CostPerAvailableSeatKm: 0.1);
+        var highLfAircraft = new AircraftType("t-highlf", "Test", Seats: 100, RangeKm: 10_000, CruiseSpeedKmh: 900, CostPerAvailableSeatKm: 0.1);
+        var lowLfAircraft = new AircraftType("t-lowlf", "Test", Seats: 100, RangeKm: 10_000, CruiseSpeedKmh: 900, CostPerAvailableSeatKm: 0.1);
         var existing = new[]
         {
-            new Route(home, highLf, aircraft, AircraftCount: 1),
-            new Route(lowLf, home, aircraft, AircraftCount: 1),
+            new Route(home, highLf, highLfAircraft, AircraftCount: 1),
+            new Route(lowLf, home, lowLfAircraft, AircraftCount: 1),
         };
         var regionsLed = new HashSet<Region> { Region.NorthAmerica, Region.Europe };
 
@@ -284,8 +293,9 @@ public class NetworkOptimizerStrategyTests
 
         var orders = Strategy.DecideOrders(context);
 
-        var routeOrder = Assert.Single(orders.OfType<RouteOrder>());
-        Assert.Equal(new HashSet<string> { "home", "lowlf" }, new HashSet<string> { routeOrder.Origin.Id, routeOrder.Destination.Id });
+        Assert.Empty(orders.OfType<RouteOrder>());
+        var lease = Assert.Single(orders.OfType<LeaseAircraftOrder>());
+        Assert.Equal("t-lowlf", lease.Type.Id);
     }
 
     [Fact]
@@ -298,16 +308,20 @@ public class NetworkOptimizerStrategyTests
         // reproduced directly rather than only argued by inspection.
         // Same fixture as the test above, just with EastAsia also marked
         // led - highLf's own better load factor (100% vs. 93.34%) should
-        // now win.
+        // now win. Distinct-but-identical types again, so the winner
+        // stays observable via the leased type now that leasing no longer
+        // produces a same-quarter RouteOrder (two-phase,
+        // docs/AIRCRAFT_ACQUISITION_ROADMAP.md).
         var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
         var highLf = MakeCity("highlf", Region.Europe, 1, 1, 200);
         var lowLf = MakeCity("lowlf", Region.EastAsia, 2, 2, 8);
         var cities = new[] { home, highLf, lowLf };
-        var aircraft = new AircraftType("t", "Test", Seats: 100, RangeKm: 10_000, CruiseSpeedKmh: 900, CostPerAvailableSeatKm: 0.1);
+        var highLfAircraft = new AircraftType("t-highlf", "Test", Seats: 100, RangeKm: 10_000, CruiseSpeedKmh: 900, CostPerAvailableSeatKm: 0.1);
+        var lowLfAircraft = new AircraftType("t-lowlf", "Test", Seats: 100, RangeKm: 10_000, CruiseSpeedKmh: 900, CostPerAvailableSeatKm: 0.1);
         var existing = new[]
         {
-            new Route(home, highLf, aircraft, AircraftCount: 1),
-            new Route(home, lowLf, aircraft, AircraftCount: 1),
+            new Route(home, highLf, highLfAircraft, AircraftCount: 1),
+            new Route(home, lowLf, lowLfAircraft, AircraftCount: 1),
         };
         var regionsLed = new HashSet<Region> { Region.NorthAmerica, Region.Europe, Region.EastAsia };
 
@@ -315,8 +329,9 @@ public class NetworkOptimizerStrategyTests
 
         var orders = Strategy.DecideOrders(context);
 
-        var routeOrder = Assert.Single(orders.OfType<RouteOrder>());
-        Assert.Equal(new HashSet<string> { "home", "highlf" }, new HashSet<string> { routeOrder.Origin.Id, routeOrder.Destination.Id });
+        Assert.Empty(orders.OfType<RouteOrder>());
+        var lease = Assert.Single(orders.OfType<LeaseAircraftOrder>());
+        Assert.Equal("t-highlf", lease.Type.Id);
     }
 
     [Fact]
@@ -336,15 +351,20 @@ public class NetworkOptimizerStrategyTests
         // idle) fully claim the budget on whichever pair step 2 picks,
         // so no NegotiationOrder or step-3 new-pair order can appear
         // afterward regardless of what candidates exist elsewhere.
+        // Distinct-but-identical types (rather than one shared type), so
+        // the winning pair stays observable via the leased type now that
+        // leasing no longer produces a same-quarter RouteOrder
+        // (two-phase, docs/AIRCRAFT_ACQUISITION_ROADMAP.md).
         var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
         var bad = MakeCity("bad", Region.NorthAmerica, 1, 1, 200);
         var good = MakeCity("good", Region.NorthAmerica, 2, 2, 8);
         var cities = new[] { home, bad, good };
-        var aircraft = new AircraftType("t", "Test", Seats: 100, RangeKm: 10_000, CruiseSpeedKmh: 900, CostPerAvailableSeatKm: 0.1);
+        var badAircraft = new AircraftType("t-bad", "Test", Seats: 100, RangeKm: 10_000, CruiseSpeedKmh: 900, CostPerAvailableSeatKm: 0.1);
+        var goodAircraft = new AircraftType("t-good", "Test", Seats: 100, RangeKm: 10_000, CruiseSpeedKmh: 900, CostPerAvailableSeatKm: 0.1);
         var existing = new[]
         {
-            new Route(home, bad, aircraft, AircraftCount: 1),
-            new Route(home, good, aircraft, AircraftCount: 1),
+            new Route(home, bad, badAircraft, AircraftCount: 1),
+            new Route(home, good, goodAircraft, AircraftCount: 1),
         };
         var badRoute = existing[0];
         var realCarried = new System.Collections.Generic.Dictionary<(string, string), long>
@@ -356,9 +376,9 @@ public class NetworkOptimizerStrategyTests
 
         var orders = Strategy.DecideOrders(context);
 
-        var routeOrder = Assert.Single(orders.OfType<RouteOrder>());
-        Assert.Equal(new HashSet<string> { "home", "good" }, new HashSet<string> { routeOrder.Origin.Id, routeOrder.Destination.Id });
-        Assert.Single(orders.OfType<LeaseAircraftOrder>());
+        Assert.Empty(orders.OfType<RouteOrder>());
+        var lease = Assert.Single(orders.OfType<LeaseAircraftOrder>());
+        Assert.Equal("t-good", lease.Type.Id);
     }
 
     [Fact]
@@ -366,13 +386,18 @@ public class NetworkOptimizerStrategyTests
     {
         // NetworkOptimizerStrategy follow-up: step 3 now reuses
         // AiToolkit.FindMostProfitablePair/TryProposeCandidate directly -
-        // no cash-comfort multiplier and no cash gate on leasing at all
-        // (leasing has no upfront cost, per CLAUDE.md), only the real
-        // profitability floor. Pre-verified: this $1M aircraft's own real
-        // profit including the lease fee is $67,030.60 (100% load factor,
+        // no cash-comfort multiplier and no cash gate on leasing at all,
+        // only the real profitability floor (leasing's own recurring fee
+        // is what EstimatedRealProfit already prices in here; the newer
+        // nominal upfront lease cost, docs/AIRCRAFT_ACQUISITION_ROADMAP.md,
+        // isn't reflected in this strategy's own profitability estimate,
+        // same as it isn't priced into AircraftOrder's own upfront cost
+        // either). Pre-verified: this $1M aircraft's own real profit
+        // including the lease fee is $67,030.60 (100% load factor,
         // distance 157km) - comfortably clears the floor, so it leases
         // even with null cash, unlike the old 6x-cash-comfort design this
-        // replaced.
+        // replaced. Leasing resolves next quarter now (two-phase), so no
+        // RouteOrder appears yet.
         var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
         var near = MakeCity("near", Region.NorthAmerica, 1, 1, 90);
         var cities = new[] { home, near };
@@ -385,8 +410,7 @@ public class NetworkOptimizerStrategyTests
         Assert.Empty(orders.OfType<AircraftOrder>());
         var lease = Assert.Single(orders.OfType<LeaseAircraftOrder>());
         Assert.Equal("t", lease.Type.Id);
-        var routeOrder = Assert.Single(orders.OfType<RouteOrder>());
-        Assert.Equal(new HashSet<string> { "home", "near" }, new HashSet<string> { routeOrder.Origin.Id, routeOrder.Destination.Id });
+        Assert.Empty(orders.OfType<RouteOrder>());
     }
 
     [Fact]

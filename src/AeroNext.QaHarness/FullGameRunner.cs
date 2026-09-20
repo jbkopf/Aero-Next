@@ -59,11 +59,21 @@ public static class FullGameRunner
     /// (see DifficultySettings.RegionCounts) - defaults to
     /// GameDifficulty.Normal, byte-identical to every pre-existing caller.
     /// </param>
+    /// <param name="tradeRestrictions">
+    /// Geopolitical-aircraft-restrictions follow-up
+    /// (docs/GEOPOLITICAL_AIRCRAFT_RESTRICTIONS_ROADMAP.md): null (the
+    /// default) means no restriction ever applies, byte-identical to
+    /// before this parameter existed. A real list feeds both
+    /// QuarterEngine.RunQuarter's own enforcement gate and each seat's own
+    /// StrategyContext.PurchasableTypes/LeasableTypes, so the AI never
+    /// proposes what the engine would reject anyway.
+    /// </param>
     public static FullGameResult Run(
         int gameIndex, int configSeed, int campaignSeed, int quarters,
         IReadOnlyList<AirlineSeat> seats,
         IReadOnlyList<City> cities, IReadOnlyList<AircraftType> fleetCatalog, IReadOnlyList<DemandGrowthPoint> growthSchedule,
-        ExperimentTuning? tuning = null, GameDifficulty difficulty = GameDifficulty.Normal)
+        ExperimentTuning? tuning = null, GameDifficulty difficulty = GameDifficulty.Normal,
+        IReadOnlyList<TradeRestriction>? tradeRestrictions = null)
     {
         tuning ??= ExperimentTuning.Baseline;
         var regionCounts = DifficultySettings.RegionCounts(difficulty);
@@ -74,6 +84,13 @@ public static class FullGameRunner
         // this never runs for the shipped baseline - never perturbs the
         // real negotiation-resolution draws campaignRng itself feeds.
         var routeWeightRng = new SimRng(unchecked(campaignSeed + 800_000_000));
+        // Aircraft-acquisition-limits follow-up (docs/AIRCRAFT_ACQUISITION_ROADMAP.md):
+        // another separate stream, same reasoning - LeaseAllocationResolver's
+        // own even-plus-random allocation draws from this every quarter
+        // any lease demand exceeds a type's own cap, and must never
+        // perturb campaignRng's own negotiation-resolution draws or
+        // routeWeightRng's own (off-by-default) route-selection draws.
+        var leaseAllocationRng = new SimRng(unchecked(campaignSeed + 900_000_000));
 
         var names = seats.Select(s => s.AirlineName).ToList();
 
@@ -130,6 +147,7 @@ public static class FullGameRunner
         var fleets = names.ToDictionary(n => n, n => FleetLedger.ApplyDelivery(
             AirlineFleet.Empty, conditionsByName[n].StartingAircraft, StartingConditionsResolver.StartingAircraftQuantity, FleetOwnershipMode.Owned));
         var aircraftOrderBoard = AircraftOrderBoard.Empty; // shared across all 4 airlines - the production line is genuinely contested
+        var leaseRequestBoard = LeaseRequestBoard.Empty; // shared across all 4 airlines - the same type's own lease pool is genuinely contested too
 
         var landingBoard = LandingRightsBoard.Empty;
         // M46: each city's own 1955 total demand becomes the fixed
@@ -164,6 +182,23 @@ public static class FullGameRunner
             foreach (var delivery in deliveries)
             {
                 fleets[delivery.Airline.Name] = FleetLedger.ApplyDelivery(fleets[delivery.Airline.Name], delivery, FleetOwnershipMode.Owned);
+            }
+
+            // Aircraft-acquisition-limits follow-up: lease requests
+            // submitted last quarter resolve here too, the same "before
+            // this quarter's own route decisions are made" timing -
+            // charged against real delivered quantity, debited straight
+            // into CashBalance before FinancialResolver.Resolve runs for
+            // this same quarter, so a real cash-negative consequence (if
+            // any) is captured by that method's own existing
+            // distress/bankruptcy logic rather than needing to be
+            // duplicated here.
+            IReadOnlyList<LeaseDelivery> leaseDeliveries;
+            (leaseRequestBoard, leaseDeliveries) = LeaseAllocationResolver.ResolveQuarter(leaseRequestBoard, q, year, leaseAllocationRng);
+            foreach (var leaseDelivery in leaseDeliveries)
+            {
+                fleets[leaseDelivery.Airline.Name] = FleetLedger.ApplyDelivery(fleets[leaseDelivery.Airline.Name], leaseDelivery.Type, leaseDelivery.Quantity, FleetOwnershipMode.Leased);
+                finances[leaseDelivery.Airline.Name] = finances[leaseDelivery.Airline.Name] with { CashBalance = finances[leaseDelivery.Airline.Name].CashBalance - leaseDelivery.UpfrontCost };
             }
 
             // Snapshotted before any order processing this quarter, for
@@ -304,6 +339,16 @@ public static class FullGameRunner
                         kv => kv.Key,
                         kv => kv.Value.Count - (kv.Value.Contains(name) ? 1 : 0));
 
+                    // Geopolitical-aircraft-restrictions follow-up: the
+                    // exact same query a UI layer would use to show this
+                    // airline's own home city only real options, computed
+                    // once here and threaded both into the AI's own
+                    // StrategyContext below and into QuarterEngine's own
+                    // enforcement gate - neither can ever drift from the
+                    // other, since both read the same TradeRestriction data.
+                    var purchasableTypes = Timeline.AvailableForPurchase(availableFleet, seatByName[name].StartingCity, year, tradeRestrictions);
+                    var leasableTypes = Timeline.AvailableForLease(availableFleet, seatByName[name].StartingCity, year, tradeRestrictions);
+
                     var strategyContext = new StrategyContext(
                         routes[name], caps[name], cities, yearDemandModel, availableFleet, fleets[name], homeRegionByName[name],
                         HomeCity: seatByName[name].StartingCity,
@@ -330,7 +375,9 @@ public static class FullGameRunner
                         // one-quarter lag every other real-competitive field
                         // here already has.
                         RegionsLedLastQuarter: DominanceTrackedRegions.All.Where(r => dominanceState.StreakFor(name, r) >= 1).ToHashSet(),
-                        TargetRegionCountOverride: regionCounts.TargetRegionCount);
+                        TargetRegionCountOverride: regionCounts.TargetRegionCount,
+                        PurchasableTypes: purchasableTypes,
+                        LeasableTypes: leasableTypes);
 
                     // Bankruptcy-conditions follow-up: SelectStrategy's own
                     // year-boundary rotation keeps advancing regardless of
@@ -362,7 +409,8 @@ public static class FullGameRunner
                     currentDebtBalance: finances[name].DebtBalance,
                     homeCity: q == 1 ? null : seatByName[name].StartingCity,
                     cityWideSlotsRemaining: q == 1 ? null : cityWideSlotsRemaining,
-                    pendingNegotiationCityIds: q == 1 ? null : pendingNegotiationCityIds);
+                    pendingNegotiationCityIds: q == 1 ? null : pendingNegotiationCityIds,
+                    tradeRestrictions: q == 1 ? null : tradeRestrictions);
 
                 if (q == 1 && result.RejectedOrders.Count > 0)
                 {
@@ -422,6 +470,11 @@ public static class FullGameRunner
                 foreach (var aircraftOrder in result.AppliedOrders.OfType<AircraftOrder>())
                 {
                     aircraftOrderBoard = AircraftOrderResolver.Submit(aircraftOrderBoard, airlineSnapshot, aircraftOrder, q);
+                }
+
+                foreach (var leaseOrder in result.AppliedOrders.OfType<LeaseAircraftOrder>())
+                {
+                    leaseRequestBoard = LeaseAllocationResolver.Submit(leaseRequestBoard, airlineSnapshot, leaseOrder, q);
                 }
 
                 // M54: this used to be a real invariant - "a route can

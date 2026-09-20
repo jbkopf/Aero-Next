@@ -135,15 +135,9 @@ public class AircraftOrderResolverTests
         Assert.Single(resolvedBoard.Queue); // C still waiting
     }
 
-    [Fact]
-    public void ResolveLease_DeliversTheSameQuarterItIsOrdered()
-    {
-        var a = MakeAirline("A");
-        var delivery = AircraftOrderResolver.ResolveLease(a, new LeaseAircraftOrder(Type, Quantity: 1), currentQuarter: 5);
-
-        Assert.Equal(5, delivery.DeliveredQuarter);
-        Assert.Equal(1, delivery.Quantity);
-    }
+    // ResolveLease itself is gone (aircraft-acquisition-limits follow-up,
+    // docs/AIRCRAFT_ACQUISITION_ROADMAP.md) - leasing's own two-phase
+    // resolution is tested in LeaseAllocationResolverTests.cs now.
 
     [Fact]
     public void ResolveQuarter_IsDeterministic_RegardlessOfSubmissionOrder()

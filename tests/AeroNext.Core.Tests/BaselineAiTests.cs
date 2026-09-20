@@ -78,8 +78,13 @@ public class BaselineAiTests
 
         var orders = BaselineAi.DecideOrders(existing, QuarterEngine.BaseActionCap, cities, DemandModel, new[] { Aircraft }, FleetWithAircraft);
 
-        var newRouteOrder = orders.OfType<RouteOrder>().Single(o => (o.Origin.Id, o.Destination.Id) != ("a", "b"));
-        Assert.DoesNotContain((newRouteOrder.Origin.Id, newRouteOrder.Destination.Id), new[] { ("a", "b") });
+        // The one legitimate RouteOrder to (a, b) is growth/reinforcement
+        // of the already-served route - a second, "new pair" proposal for
+        // the same pair would show up as a duplicate here. (A genuinely
+        // new pair needing a lease now resolves next quarter, so it never
+        // appears as a same-quarter RouteOrder at all - see
+        // docs/AIRCRAFT_ACQUISITION_ROADMAP.md.)
+        Assert.True(orders.OfType<RouteOrder>().Count(o => (o.Origin.Id, o.Destination.Id) == ("a", "b")) <= 1);
     }
 
     [Fact]
@@ -278,8 +283,9 @@ public class BaselineAiTests
 
         var orders = BaselineAi.DecideOrders(Array.Empty<Route>(), QuarterEngine.BaseActionCap, cities, DemandModel, eraAvailableTypes, AirlineFleet.Empty);
 
-        var routeOrder = Assert.Single(orders.OfType<RouteOrder>());
-        Assert.Equal("long", routeOrder.Aircraft.Id);
+        // Leasing resolves next quarter now (two-phase,
+        // docs/AIRCRAFT_ACQUISITION_ROADMAP.md) - no RouteOrder yet.
+        Assert.Empty(orders.OfType<RouteOrder>());
         var lease = Assert.Single(orders.OfType<LeaseAircraftOrder>());
         Assert.Equal("long", lease.Type.Id);
     }
@@ -318,11 +324,12 @@ public class BaselineAiTests
     }
 
     [Fact]
-    public void DecideOrders_NothingIdle_NotEnoughBudgetForLeasePlusRoute_SkipsBoth()
+    public void DecideOrders_NothingIdle_TightBudgetOfOne_LeasesAloneNoRouteYet()
     {
-        // Cap 1: leasing (1 action) + opening a route with it (1 more
-        // action) needs 2, and this AI never leases speculatively without
-        // also using it the same quarter.
+        // Cap 1: leasing now costs only 1 action on its own (two-phase,
+        // docs/AIRCRAFT_ACQUISITION_ROADMAP.md - the RouteOrder waits for
+        // a later quarter's delivery instead of riding along the same
+        // quarter), so it fits where it wouldn't have before.
         var a = MakeCity("a", 0, 0, 100);
         var b = MakeCity("b", 1, 1, 90);
         var cities = new[] { a, b };
@@ -330,7 +337,7 @@ public class BaselineAiTests
         var orders = BaselineAi.DecideOrders(Array.Empty<Route>(), actionCap: 1, cities, DemandModel, new[] { Aircraft }, AirlineFleet.Empty);
 
         Assert.Empty(orders.OfType<RouteOrder>());
-        Assert.Empty(orders.OfType<LeaseAircraftOrder>());
+        Assert.Single(orders.OfType<LeaseAircraftOrder>());
     }
 
     // --- M33: gate-slot awareness ---
@@ -623,13 +630,13 @@ public class BaselineAiTests
     [Fact]
     public void DecideOrders_CloseRouteOrder_ProducesLegalOrders_WhenRunThroughQuarterEngine()
     {
-        // Worth documenting, not hiding: with only one existing route and
-        // nothing else to grow, the "grow best route" step (unchanged
-        // since M32) re-grows this exact route the same quarter the new
-        // M35 step shrinks it - a real, visible illustration of the gap
-        // M39 exists to close (M35 is reactive/uncoordinated by design).
-        // Both orders are still individually legal and both apply; the
-        // net AircraftCount is unchanged, not reduced, this quarter.
+        // With only one existing route, nothing idle, and no cash passed,
+        // the "grow best route" step falls to its lease branch - which now
+        // resolves next quarter (two-phase, docs/AIRCRAFT_ACQUISITION_ROADMAP.md)
+        // rather than riding a same-quarter RouteOrder. So this quarter's
+        // M35 shrink step is the only thing that actually touches
+        // AircraftCount - no more same-quarter grow/shrink collision to
+        // document here.
         var a = MakeCity("a", 0, 0, 1);
         var b = MakeCity("b", 60, 60, 1);
         var bigAircraft = new AircraftType("big", "Big", Seats: 400);
@@ -642,8 +649,9 @@ public class BaselineAiTests
 
         Assert.Empty(result.RejectedOrders);
         Assert.Contains(orders, o => o is CloseRouteOrder);
+        Assert.Contains(orders, o => o is LeaseAircraftOrder);
         Assert.Single(result.Routes);
-        Assert.Equal(2, result.Routes.Single().AircraftCount); // grow (+1) and close (-1) cancel out this quarter
+        Assert.Equal(1, result.Routes.Single().AircraftCount); // only the shrink applies this quarter now
     }
 
     [Fact]
@@ -988,10 +996,12 @@ public class BaselineAiTests
             existing, QuarterEngine.BaseActionCap, new[] { a, b }, DemandModel, new[] { aircraft }, AirlineFleet.Empty,
             availableSlotsByCity: null, availableCash: Money.FromDollars(2_999_999)); // just short of 3x
 
+        // Leasing resolves next quarter now (two-phase,
+        // docs/AIRCRAFT_ACQUISITION_ROADMAP.md) - no RouteOrder yet.
         Assert.Empty(orders.OfType<AircraftOrder>());
         var lease = Assert.Single(orders.OfType<LeaseAircraftOrder>());
         Assert.Equal("t", lease.Type.Id);
-        Assert.Contains(orders.OfType<RouteOrder>(), o => o.Origin.Id == "a" && o.Destination.Id == "b");
+        Assert.Empty(orders.OfType<RouteOrder>());
     }
 
     [Fact]
@@ -1022,10 +1032,12 @@ public class BaselineAiTests
             Array.Empty<Route>(), QuarterEngine.BaseActionCap, new[] { a, b }, DemandModel, new[] { aircraft }, AirlineFleet.Empty,
             availableSlotsByCity: null, availableCash: Money.FromDollars(2_999_999));
 
+        // Leasing resolves next quarter now (two-phase,
+        // docs/AIRCRAFT_ACQUISITION_ROADMAP.md) - no RouteOrder yet.
         Assert.Empty(orders.OfType<AircraftOrder>());
         var lease = Assert.Single(orders.OfType<LeaseAircraftOrder>());
         Assert.Equal("t", lease.Type.Id);
-        Assert.Single(orders.OfType<RouteOrder>());
+        Assert.Empty(orders.OfType<RouteOrder>());
     }
 
     [Fact]
@@ -1044,11 +1056,11 @@ public class BaselineAiTests
     [Fact]
     public void DecideOrders_TightBudget_OrderingFitsWhereLeasingPlusRouteWouldNot()
     {
-        // Cap 1: leasing (1) + opening a route with it (1 more) needs 2
-        // and wouldn't fit, exactly like the pre-M38 behavior already
-        // tested elsewhere - but ordering alone costs only 1, so it fits
-        // when cash is comfortable, a genuinely new capability this
-        // milestone adds.
+        // Cap 1: ordering costs only 1 action (no RouteOrder the same
+        // quarter either way - AircraftOrder never delivers same-quarter,
+        // and neither does LeaseAircraftOrder now, two-phase,
+        // docs/AIRCRAFT_ACQUISITION_ROADMAP.md), so it's preferred outright
+        // over leasing whenever cash is comfortable, regardless of budget.
         var a = MakeCity("a", 0, 0, 100);
         var b = MakeCity("b", 1, 1, 90);
         var aircraft = new AircraftType("t", "Test", Seats: 10, Cost: Money.FromDollars(1_000_000));

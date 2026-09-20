@@ -140,7 +140,10 @@ public sealed class RapidExpansionStrategy : IAiStrategy
             }
             else if (idleBest is null && spent + 1 <= context.ActionCap)
             {
-                var bestAircraft = context.EraAvailableTypes
+                // Geopolitical-aircraft-restrictions follow-up: nothing
+                // idle, so this candidate will end up bought or leased -
+                // the union of both stays legal for either branch below.
+                var bestAircraft = context.PurchasableOrEraTypes.Union(context.LeasableOrEraTypes)
                     .OrderByDescending(a => a.RangeKm)
                     .ThenBy(a => a.Id, StringComparer.Ordinal)
                     .FirstOrDefault();
@@ -156,15 +159,18 @@ public sealed class RapidExpansionStrategy : IAiStrategy
                     orders.Add(new AircraftOrder(bestAircraft, Quantity: 1));
                     spent += 1;
                 }
-                else if (bestAircraft is not null && oriented is not null && spent + 2 <= context.ActionCap
+                else if (bestAircraft is not null && oriented is not null && spent + 1 <= context.ActionCap
                     && BaselineAi.HasSlotAtEveryGateway(oriented.Value.Origin, oriented.Value.Destination, context.AvailableSlotsByCity, slotsReservedByCity)
                     && AiToolkit.HasRoomAtEveryCity(oriented.Value.Origin, oriented.Value.Destination, context.CityWideSlotsRemaining, citySpendReservedByCity))
                 {
+                    // Leasing resolves next quarter now (two-phase,
+                    // docs/AIRCRAFT_ACQUISITION_ROADMAP.md) - submit it
+                    // alone, 1 action, no paired RouteOrder yet. Once
+                    // delivered it shows up idle and a later quarter's
+                    // own re-evaluation opens the pair via this same
+                    // step's idle-fleet path above.
                     orders.Add(new LeaseAircraftOrder(bestAircraft, Quantity: 1));
-                    orders.Add(new RouteOrder(oriented.Value.Origin, oriented.Value.Destination, bestAircraft));
-                    BaselineAi.ReserveSlots(oriented.Value.Origin, oriented.Value.Destination, slotsReservedByCity);
-                    AiToolkit.ReserveCityWideSlots(oriented.Value.Origin, oriented.Value.Destination, citySpendReservedByCity);
-                    spent += 2;
+                    spent += 1;
                 }
             }
         }
@@ -212,13 +218,15 @@ public sealed class RapidExpansionStrategy : IAiStrategy
                 orders.Add(new AircraftOrder(bestExisting.Aircraft, Quantity: 1));
                 spent += 1;
             }
-            else if (spent + 2 <= context.ActionCap)
+            else
             {
+                // Leasing resolves next quarter now (two-phase,
+                // docs/AIRCRAFT_ACQUISITION_ROADMAP.md) - submit it alone,
+                // 1 action, no paired RouteOrder. Once delivered it shows
+                // up idle and a later quarter's own re-evaluation picks it
+                // up via this same step's idleUnit branch above.
                 orders.Add(new LeaseAircraftOrder(bestExisting.Aircraft, Quantity: 1));
-                orders.Add(new RouteOrder(bestExisting.Origin, bestExisting.Destination, bestExisting.Aircraft));
-                BaselineAi.ReserveSlots(bestExisting.Origin, bestExisting.Destination, slotsReservedByCity);
-                AiToolkit.ReserveCityWideSlots(bestExisting.Origin, bestExisting.Destination, citySpendReservedByCity);
-                spent += 2;
+                spent += 1;
             }
         }
 

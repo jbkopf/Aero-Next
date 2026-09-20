@@ -1,0 +1,20 @@
+[
+  { "cityId": "mow", "restrictedBloc": "American", "startYear": 1948, "endYear": 1991 },
+  { "cityId": "mow", "restrictedBloc": "European", "startYear": 1948, "endYear": 1991 },
+  { "cityId": "kie", "restrictedBloc": "American", "startYear": 1948, "endYear": 1991 },
+  { "cityId": "kie", "restrictedBloc": "European", "startYear": 1948, "endYear": 1991 },
+  { "cityId": "msq", "restrictedBloc": "American", "startYear": 1948, "endYear": 1991 },
+  { "cityId": "msq", "restrictedBloc": "European", "startYear": 1948, "endYear": 1991 },
+  { "cityId": "rov", "restrictedBloc": "American", "startYear": 1948, "endYear": 1991 },
+  { "cityId": "rov", "restrictedBloc": "European", "startYear": 1948, "endYear": 1991 },
+  { "cityId": "khv", "restrictedBloc": "American", "startYear": 1948, "endYear": 1991 },
+  { "cityId": "khv", "restrictedBloc": "European", "startYear": 1948, "endYear": 1991 },
+  { "cityId": "tas", "restrictedBloc": "American", "startYear": 1948, "endYear": 1991 },
+  { "cityId": "tas", "restrictedBloc": "European", "startYear": 1948, "endYear": 1991 },
+  { "cityId": "pek", "restrictedBloc": "American", "startYear": 1949, "endYear": 1972 },
+  { "cityId": "pek", "restrictedBloc": "Soviet",   "startYear": 1960, "endYear": 1989 },
+  { "cityId": "pvg", "restrictedBloc": "American", "startYear": 1949, "endYear": 1972 },
+  { "cityId": "pvg", "restrictedBloc": "Soviet",   "startYear": 1960, "endYear": 1989 },
+  { "cityId": "hav", "restrictedBloc": "American", "startYear": 1960, "endYear": null },
+  { "cityId": "thr", "restrictedBloc": "American", "startYear": 1979, "endYear": null }
+]

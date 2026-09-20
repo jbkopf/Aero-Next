@@ -223,18 +223,17 @@ public static class BaselineAi
                 orders.Add(new AircraftOrder(bestExisting.Aircraft, Quantity: 1));
                 spent += 1;
             }
-            else if (spent + 2 <= actionCap)
+            else
             {
                 // Nothing idle of this route's own type, and cash isn't
-                // comfortable enough to order instead - lease one more
-                // and add it in the same batch, mirroring the new-pair
-                // fallback below. No "best available type" search needed
-                // here: growing an existing route requires the exact type
-                // already flying it - QuarterEngine rejects a mismatch.
+                // comfortable enough to order instead - lease one more.
+                // Leasing resolves next quarter now (two-phase,
+                // docs/AIRCRAFT_ACQUISITION_ROADMAP.md), so it's submitted
+                // alone, 1 action, no paired RouteOrder yet - once
+                // delivered it shows up idle and a later quarter's own
+                // re-evaluation picks it up via the idleUnit branch above.
                 orders.Add(new LeaseAircraftOrder(bestExisting.Aircraft, Quantity: 1));
-                orders.Add(new RouteOrder(bestExisting.Origin, bestExisting.Destination, bestExisting.Aircraft));
-                ReserveSlots(bestExisting.Origin, bestExisting.Destination, slotsReservedByCity);
-                spent += 2;
+                spent += 1;
             }
         }
 
@@ -272,13 +271,17 @@ public static class BaselineAi
                     orders.Add(new AircraftOrder(bestAircraft, Quantity: 1));
                     spent += 1;
                 }
-                else if (bestAircraft is not null && bestUnserved is not null && spent + 2 <= actionCap
+                else if (bestAircraft is not null && bestUnserved is not null && spent + 1 <= actionCap
                     && HasSlotAtEveryGateway(bestUnserved.Origin, bestUnserved.Destination, availableSlotsByCity, slotsReservedByCity))
                 {
+                    // Leasing resolves next quarter now (two-phase,
+                    // docs/AIRCRAFT_ACQUISITION_ROADMAP.md) - submit it
+                    // alone, 1 action, no paired RouteOrder yet. Once
+                    // delivered it shows up idle and a later quarter's own
+                    // re-evaluation opens the pair via the idle-fleet path
+                    // above.
                     orders.Add(new LeaseAircraftOrder(bestAircraft, Quantity: 1));
-                    orders.Add(new RouteOrder(bestUnserved.Origin, bestUnserved.Destination, bestAircraft));
-                    ReserveSlots(bestUnserved.Origin, bestUnserved.Destination, slotsReservedByCity);
-                    spent += 2;
+                    spent += 1;
                 }
             }
         }

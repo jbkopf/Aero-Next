@@ -20,9 +20,14 @@ namespace AeroNext.Core.Fleet;
 /// position (orders placed the same quarter) break deterministically by
 /// airline name.
 ///
-/// Leasing bypasses the queue entirely and delivers the same quarter it's
-/// ordered — the "expensive instant-metal escape hatch." Not contested, so
-/// it needs no board: nobody's lease competes with anybody else's.
+/// Leasing used to bypass the queue entirely and deliver the same quarter
+/// it was ordered. Aircraft-acquisition-limits follow-up
+/// (docs/AIRCRAFT_ACQUISITION_ROADMAP.md): now that a real, contested,
+/// cross-airline lease cap exists, leasing needs the same two-phase
+/// shape purchasing already has - see LeaseAllocationResolver, this
+/// class's own direct counterpart. The instant, uncontested ResolveLease
+/// this comment used to describe is gone; there's no board-free shortcut
+/// left to document.
 /// </summary>
 public static class AircraftOrderResolver
 {
@@ -32,9 +37,6 @@ public static class AircraftOrderResolver
 
         return board with { Queue = board.Queue.Append(pending).ToList() };
     }
-
-    public static AircraftDelivery ResolveLease(Airline airline, LeaseAircraftOrder order, int currentQuarter) =>
-        new(airline, order.Type, order.Quantity, currentQuarter);
 
     public static (AircraftOrderBoard Board, IReadOnlyList<AircraftDelivery> Deliveries) ResolveQuarter(AircraftOrderBoard board, int currentQuarter)
     {

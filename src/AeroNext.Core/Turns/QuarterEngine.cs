@@ -177,6 +177,16 @@ public static class QuarterEngine
     /// step below ever runs, rather than wasting a real bid's worth of
     /// cash on a silently-dropped duplicate.
     /// </param>
+    /// <param name="tradeRestrictions">
+    /// Geopolitical-aircraft-restrictions follow-up
+    /// (docs/GEOPOLITICAL_AIRCRAFT_RESTRICTIONS_ROADMAP.md): null (the
+    /// default) means no restriction ever applies, exactly as before this
+    /// parameter existed. Passing a real list gates AircraftOrder/
+    /// LeaseAircraftOrder on <see cref="TradeRestriction.IsRestricted"/>
+    /// against <paramref name="homeCity"/>, alongside the existing era
+    /// window - RouteOrder/AdjustRouteOrder stay untouched, same
+    /// "flying vs. acquiring" split the era window already uses.
+    /// </param>
     public static QuarterResult RunQuarter(
         int quarterNumber,
         IReadOnlyList<Route> currentRoutes,
@@ -190,7 +200,8 @@ public static class QuarterEngine
         Money? currentDebtBalance = null,
         City? homeCity = null,
         IReadOnlyDictionary<string, int>? cityWideSlotsRemaining = null,
-        IReadOnlySet<string>? pendingNegotiationCityIds = null)
+        IReadOnlySet<string>? pendingNegotiationCityIds = null,
+        IReadOnlyList<TradeRestriction>? tradeRestrictions = null)
     {
         var validOriginCityIds = homeCity is null
             ? null
@@ -228,6 +239,24 @@ public static class QuarterEngine
 
         foreach (var order in orders)
         {
+            // Aircraft-acquisition-limits follow-up: a non-positive
+            // Quantity was never checked anywhere before this - neither
+            // order type's own cost scales with Quantity in a way that
+            // would organically reject it (a flat 1 action either way),
+            // and a zero/negative purchaseCost would trivially "fit"
+            // any cash check. Checked first, before any other gate.
+            if (order is AircraftOrder invalidAircraftOrder && invalidAircraftOrder.Quantity <= 0)
+            {
+                rejected.Add(order);
+                continue;
+            }
+
+            if (order is LeaseAircraftOrder invalidLeaseOrder && invalidLeaseOrder.Quantity <= 0)
+            {
+                rejected.Add(order);
+                continue;
+            }
+
             if (order is RouteOrder ro && !ro.IsWithinRange)
             {
                 rejected.Add(order);
@@ -240,7 +269,7 @@ public static class QuarterEngine
                 continue;
             }
 
-            if (!IsAircraftAvailable(order, year))
+            if (!IsAircraftAvailable(order, year, homeCity, tradeRestrictions ?? Array.Empty<TradeRestriction>()))
             {
                 rejected.Add(order);
                 continue;
@@ -532,17 +561,24 @@ public static class QuarterEngine
                 continue;
             }
 
-            // Leasing bypasses the production queue entirely and delivers
-            // the same quarter it's ordered — resolved right here, inline,
-            // so a RouteOrder later in this same batch can actually use
-            // the newly-leased unit. AircraftOrder (the production-queue
-            // path) genuinely needs cross-quarter, cross-airline board
-            // state this single airline's quarter doesn't have — that
-            // stays external, submitted by the caller as before.
-            if (order is LeaseAircraftOrder leaseOrder && workingFleet is not null)
-            {
-                workingFleet = FleetLedger.ApplyDelivery(workingFleet, leaseOrder.Type, leaseOrder.Quantity, FleetOwnershipMode.Leased);
-            }
+            // Aircraft-acquisition-limits follow-up (docs/AIRCRAFT_ACQUISITION_ROADMAP.md):
+            // leasing used to bypass the production queue and deliver
+            // inline, right here, so a RouteOrder later in this same
+            // batch could immediately use the newly-leased unit. Once a
+            // real cross-airline lease cap exists, that's no longer
+            // possible — QuarterEngine resolves one airline's own quarter
+            // at a time and has no visibility into what every other
+            // airline is also requesting this same quarter, so "who
+            // actually gets how many of this scarce type" can only be
+            // decided once every airline's own request is known. Leasing
+            // now resolves the same two-phase way AircraftOrder already
+            // does — accepted here (era + Quantity checks only, no fleet
+            // mutation), delivered by LeaseAllocationResolver.ResolveQuarter
+            // outside QuarterEngine entirely, the quarter after it's
+            // requested. See that class's own doc comment for the real
+            // allocation rule, and the AI-strategy call sites that used
+            // to pair a same-batch [LeaseAircraftOrder, RouteOrder] for
+            // how this is handled now that same-quarter use is gone.
 
             if (order is RouteOrder appliedRouteOrder && unitToAssign is not null && workingFleet is not null)
             {
@@ -805,12 +841,25 @@ public static class QuarterEngine
     public static (string, string) NormalizedPairKey(City a, City b) =>
         string.CompareOrdinal(a.Id, b.Id) <= 0 ? (a.Id, b.Id) : (b.Id, a.Id);
 
-    private static bool IsAircraftAvailable(QuarterOrder order, int year) => order switch
+    /// <summary>
+    /// Aircraft-acquisition-limits follow-up (docs/AIRCRAFT_ACQUISITION_ROADMAP.md):
+    /// AircraftOrder/LeaseAircraftOrder route to their own acquisition-specific
+    /// windows now, not the plain floor-only IsAvailable RouteOrder/
+    /// AdjustRouteOrder still use - flying an already-acquired aircraft
+    /// never needed an upper bound, only *acquiring* a new one does.
+    ///
+    /// Geopolitical-aircraft-restrictions follow-up
+    /// (docs/GEOPOLITICAL_AIRCRAFT_RESTRICTIONS_ROADMAP.md): the same two
+    /// acquisition arms also check TradeRestriction.IsRestricted now - a
+    /// third gate alongside the era window, still only for *acquiring*, not
+    /// flying.
+    /// </summary>
+    private static bool IsAircraftAvailable(QuarterOrder order, int year, City? homeCity, IReadOnlyList<TradeRestriction> tradeRestrictions) => order switch
     {
         RouteOrder ro => Timeline.IsAvailable(ro.Aircraft, year),
         AdjustRouteOrder aro => Timeline.IsAvailable(aro.AircraftType, year),
-        AircraftOrder ao => Timeline.IsAvailable(ao.Type, year),
-        LeaseAircraftOrder lo => Timeline.IsAvailable(lo.Type, year),
+        AircraftOrder ao => Timeline.IsAvailableForPurchase(ao.Type, year) && !TradeRestriction.IsRestricted(ao.Type, homeCity, year, tradeRestrictions),
+        LeaseAircraftOrder lo => Timeline.IsAvailableForLease(lo.Type, year) && !TradeRestriction.IsRestricted(lo.Type, homeCity, year, tradeRestrictions),
         _ => true, // orders with no aircraft (negotiations, alliances, private actions) are never era-gated
     };
 }
