@@ -1,12 +1,25 @@
 # Sim Core Roadmap
 
 **Status: M0–M14 all complete.** Every milestone below is done, tested, and
-demonstrated from `AeroNext.Sim`. The sim core's own scope — headless
-simulation, no rendering, no client — is fully built out per CLAUDE.md's
-"Current phase." What's next lives outside this roadmap's scope on
-purpose: the Godot client and online play, both named explicitly in "Kept
-in mind" below as constraints this roadmap was written to not foreclose,
-not as milestones to schedule here.
+was demonstrated from `AeroNext.Sim` at the time it shipped. The sim core's
+own scope — headless simulation, no rendering, no client — is fully built
+out per CLAUDE.md's "Current phase." What's next lives outside this
+roadmap's scope on purpose: the Godot client and online play, both named
+explicitly in "Kept in mind" below as constraints this roadmap was written
+to not foreclose, not as milestones to schedule here.
+
+**Codebase-cleanup note (2026-09-20):** the M3–M12 demo code this roadmap's
+"Done when" lines describe was removed from `AeroNext.Sim/Program.cs` —
+that block was frozen (nobody had extended it since each milestone
+shipped) and had no automated consumer (no CI, no test project references
+`AeroNext.Sim`). Real correctness validation for those mechanics now lives
+in `dotnet test` and `AeroNext.QaHarness`'s multi-game sweeps, not a
+manually-run console script. This roadmap's milestone write-ups below are
+kept as the historical record of what was built and verified at each
+stage — read "Done when: `AeroNext.Sim` demonstrates X" as "was
+demonstrated," not as a currently-runnable claim, for M3 through M12
+specifically. M13 onward (the real ~240-quarter campaign loop) and M15–M19
+(the game-setup flow demos) are untouched and still run today.
 
 Scope: **AeroNext.Core and AeroNext.Sim only.** No Godot, no client, no
 networking. Godot client and online play are the eventual product — this
