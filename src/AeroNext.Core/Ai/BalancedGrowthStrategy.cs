@@ -66,9 +66,9 @@ namespace AeroNext.Core.Ai;
 /// blind spot (RouteEvaluator's own fare/competition-agnostic solo
 /// estimate, no idea a rival exists or this route's fare has ever been
 /// touched - originally flagged, not chased) is now fixed at the shared
-/// source: this call passes enableRealProfitabilityGate: true, gating
-/// out a route that's a real loser at its own current economics and
-/// ranking survivors by their own real load factor when one exists. See
+/// source: FindBestPerformingRoute gates out a route that's a real loser
+/// at its own current economics and ranks survivors by their own real
+/// load factor when one exists, unconditionally. See
 /// BaselineAi.FindBestPerformingRoute's own doc comment for the full
 /// reasoning.
 ///
@@ -174,13 +174,12 @@ public sealed class BalancedGrowthStrategy : IAiStrategy
 
         // Reinforce what's already there first - the same "proven demand
         // beats an open bet" priority NetworkOptimizerStrategy's own step
-        // 2 and RapidExpansionStrategy's own step 2 already use, real
-        // observed load factor rather than any estimate.
+        // 2 already uses, real observed load factor rather than any
+        // estimate.
         var bestExisting = BaselineAi.FindBestPerformingRoute(
             context.CurrentRoutes, context.DemandModel,
             excludePairKeys: AiToolkit.RecentlyShrunkPairKeys(context, AiToolkit.GrowthCooldownQuarters),
             lastQuarterSeatsCarriedByRoute: context.LastQuarterSeatsCarriedByRoute,
-            enableRealProfitabilityGate: true,
             regionsNotYetLed: AiToolkit.RegionsNotYetLed(context));
         if (bestExisting is not null && spent + 1 <= context.ActionCap
             && BaselineAi.HasSlotAtEveryGateway(bestExisting.Origin, bestExisting.Destination, context.AvailableSlotsByCity, slotsReservedByCity)

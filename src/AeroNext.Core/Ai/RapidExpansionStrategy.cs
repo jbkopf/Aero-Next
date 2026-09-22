@@ -32,22 +32,22 @@ namespace AeroNext.Core.Ai;
 /// traced directly: $2M bid on the same gateway 6 consecutive quarters),
 /// not aircraft spending. See AiToolkit.CitiesAlreadyPursuedForNegotiation.
 ///
-/// Existing-route-evaluation audit follow-up: BaselineAi.FindBestPerformingRoute's
-/// new enableRealProfitabilityGate was tried here too (gate step 2's
-/// growth pick on real profitability, like NetworkOptimizerStrategy/
-/// BalancedGrowthStrategy below now do) and measured, isolated via a real
-/// 300-game sweep, to be a genuine regression specific to this strategy:
-/// Europe bankruptcy rose 12.2%→13.7% with zero offsetting improvement
-/// anywhere else - reproduced exactly whether this strategy's own flag
-/// was the only one enabled or all three were together, while
-/// NetworkOptimizerStrategy/BalancedGrowthStrategy's own use of the same
-/// flag independently measured as a true no-op (identical numbers with
-/// either or both on vs. fully off). This strategy's whole reason to
-/// exist is expanding as fast as possible (see the class doc comment
-/// above) during the Starting era specifically - gating its growth on
-/// real profitability cuts directly against that design intent in a way
-/// the two later-era strategies' own more measured growth postures don't
-/// share. Stays false; not shipped here.
+/// Existing-route-evaluation audit follow-up: gating BaselineAi.
+/// FindBestPerformingRoute's step-2 growth pick on real profitability
+/// (like NetworkOptimizerStrategy/BalancedGrowthStrategy below do) was
+/// tried here too and measured, isolated via a real 300-game sweep, to be
+/// a genuine regression specific to this strategy: Europe bankruptcy rose
+/// 12.2%→13.7% with zero offsetting improvement anywhere else - reproduced
+/// exactly whether this strategy's own gate was the only one enabled or
+/// all three were together, while NetworkOptimizerStrategy/
+/// BalancedGrowthStrategy's own use of the same gate independently
+/// measured as a true no-op (identical numbers with either or both on vs.
+/// fully off). This strategy's whole reason to exist is expanding as fast
+/// as possible (see the class doc comment above) during the Starting era
+/// specifically - gating its growth on real profitability cuts directly
+/// against that design intent in a way the two later-era strategies' own
+/// more measured growth postures don't share. Not shipped here - see the
+/// Network-profitability follow-up below for what step 2 uses instead.
 ///
 /// Network-profitability follow-up: the user's own direct request - stay
 /// primarily concerned with reaching regions outside the home one, worry

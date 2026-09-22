@@ -174,4 +174,27 @@ public class SelectStrategyTests
         Assert.Contains(BaselineAi.Strategies, s => s is NetworkOptimizerStrategy);
         Assert.Contains(BaselineAi.Strategies, s => s is BalancedGrowthStrategy);
     }
+
+    /// <summary>
+    /// Guards the precondition SelectStrategy's own "no strategy is
+    /// eligible for this era and no current strategy exists to fall back
+    /// to" InvalidOperationException relies on never occurring - every
+    /// GameEra must have at least one covering strategy in the roster, or
+    /// a fresh (no-current) SelectStrategy call for that era throws
+    /// instead of returning one. Written as a roster-coverage invariant
+    /// rather than a test that tries to force the throw itself: this
+    /// catches the actual risk (a future edit narrows some strategy's
+    /// ApplicableEras and leaves a gap) directly, at the point a change
+    /// would introduce it, rather than mocking up an artificially
+    /// incomplete roster to exercise a branch that should never be
+    /// reachable with the real one.
+    /// </summary>
+    [Theory]
+    [InlineData(GameEra.Starting)]
+    [InlineData(GameEra.MidGame)]
+    [InlineData(GameEra.LateGame)]
+    public void Strategies_EveryGameEra_HasAtLeastOneCoveringStrategy(GameEra era)
+    {
+        Assert.Contains(BaselineAi.Strategies, s => s.ApplicableEras.Contains(era));
+    }
 }

@@ -81,6 +81,7 @@ public class DeterminismRegressionTests
         var landingBoard = LandingRightsBoard.Empty;
         var fleetBoard = AircraftOrderBoard.Empty;
         var allianceBoard = AllianceBoard.Empty;
+        var currentStrategyByName = airlineNames.ToDictionary(n => n, n => (IAiStrategy?)null);
 
         var log = new StringBuilder();
 
@@ -101,9 +102,21 @@ public class DeterminismRegressionTests
 
                 // AirlineFleet.Empty every quarter, deliberately - this test
                 // proves reproducibility of the resolver chain, not fleet
-                // economics, so BaselineAi always taking its lease-fallback
-                // path is fine as long as it's identical across both runs.
-                var orders = new List<QuarterOrder>(BaselineAi.DecideOrders(routes[name], caps[name], cities, demandModel, availableFleet, AirlineFleet.Empty));
+                // economics, so the AI always taking its lease-fallback path
+                // is fine as long as it's identical across both runs. Routed
+                // through the real StrategyContext/IAiStrategy path (the only
+                // one any live game seat actually uses, post-M39) rather than
+                // the now-deleted flat BaselineAi.DecideOrders - a single
+                // shared HomeRegion/HomeCity ("a", Region.EastAsia) is fine
+                // here since this scenario never checks per-airline home-city
+                // legality, only that the whole resolver chain reproduces
+                // identically given the same seed.
+                var context = new StrategyContext(
+                    routes[name], caps[name], cities, demandModel, availableFleet, AirlineFleet.Empty,
+                    HomeRegion: Region.EastAsia, HomeCity: cities[0]);
+                var strategy = BaselineAi.SelectStrategy(currentStrategyByName[name], q, context);
+                currentStrategyByName[name] = strategy;
+                var orders = new List<QuarterOrder>(strategy.DecideOrders(context));
 
                 // Hand-scripted injections in early quarters, exercising the
                 // two resolvers BaselineAi never drives on its own.

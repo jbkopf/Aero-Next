@@ -1,8 +1,11 @@
 # Closing the AI's Remaining Acquisition/Restriction Awareness Gaps
 
 **Status: Gap B implemented (per the user's own direct "start on Gap B"
-follow-up); Gap A still an open scope question, not implemented.** Written
-per the user's own direct
+follow-up); Gap A resolved by deletion, not implementation** — see the
+"Gap A: resolved by deletion" section below, added after the user's own
+direct "if that API is not called anywhere in the code outside tests,
+then it sounds like orphaned code that should be cleaned up" follow-up.
+Written per the user's own direct
 request ("make a plan for closing the AI gaps for the new systems"),
 following a fresh investigation into exactly what's left after
 `docs/AIRCRAFT_ACQUISITION_ROADMAP.md` and
@@ -28,14 +31,21 @@ matches). Two consequences, both inside this one method:
   unconditionally submits `LeaseAircraftOrder(bestExisting.Aircraft)`
   (line 235) with no legality check of any kind.
 
-This method's only real caller anywhere in `src/` is one small
-league-demo loop, `src/AeroNext.Sim/Program.cs:315` — confirmed again
-directly, not assumed. Neither real campaign loop
+**Update, post-cleanup:** this method's one real caller — a small
+league-demo loop that used to live at `src/AeroNext.Sim/Program.cs:315`
+(the old M3-M12 milestone-demo block) — was deleted outright in a
+later codebase-cleanup pass (those milestones were frozen, never
+automated, and superseded by the QA harness/test suite as the real
+validation surface). `BaselineAi.DecideOrders` now has **zero callers
+anywhere in `src/`** — its only remaining callers are direct unit tests
+(`BaselineAiTests.cs`, `DeterminismRegressionTests.cs`), which still
+exercise it thoroughly as a tested legacy API. Neither real campaign loop
 (`FullGameRunner.cs`/`AeroNext.Sim/Program.cs`'s own M13 section) has
 called it since M39 replaced it with the `StrategyContext`/`IAiStrategy`
 path. This method has also been explicitly, repeatedly left alone before:
 M50's and M51's own doc comments both call out a "frozen legacy branch...
-untouched, same precedent" when extending unrelated AI behavior.
+untouched, same precedent" when extending unrelated AI behavior. Losing
+its last real caller only strengthens that precedent.
 
 **Gap B — four "grow an existing route via a fresh lease" branches never
 check whether that route's own type is still legally acquirable.**
@@ -128,31 +138,115 @@ from the shape of the code alone.
 Two real options, given the explicit "frozen legacy" precedent already on
 record for this exact method:
 
-1. **Leave it alone, matching M50/M51's own precedent directly.** Its
-   only real consequence today is cosmetic: the one small league demo in
-   `AeroNext.Sim/Program.cs` might occasionally print a lease proposal
-   for a type that (in a game with real restriction data loaded) would
-   get rejected — a demo artifact, never the actual game. Zero risk,
-   zero work, consistent with how this exact method has been treated
-   every other time this codebase added a new acquisition-side concern
-   (`EndOfManufactureYear`'s own Phase (c) already skipped it; M50/M51
-   both skipped it for unrelated reasons).
+1. **Leave it alone, matching M50/M51's own precedent directly.** Now
+   that the one small league demo that used to call this method has been
+   deleted (see the update above), this method has **no consequence at
+   all today** — not even the cosmetic demo-output risk this option
+   originally described, since there's no caller left to produce
+   misleading output. Zero risk, zero work, consistent with how this
+   exact method has been treated every other time this codebase added a
+   new acquisition-side concern (`EndOfManufactureYear`'s own Phase (c)
+   already skipped it; M50/M51 both skipped it for unrelated reasons).
 2. **Thread it through anyway** — add `City? homeCity = null` and
    `IReadOnlyList<TradeRestriction>? tradeRestrictions = null` as two new
    optional parameters (permissive-default, same convention as every
    other addition this session), compute `Timeline.AvailableForPurchase`/
    `AvailableForLease` once inside the method the same way
    `FullGameRunner.cs`/`Program.cs` already do, and apply it to both of
-   this method's own acquisition branches. Its real caller
-   (`AeroNext.Sim/Program.cs:315`) would need updating too to actually
-   pass something, or the new parameters stay permissively null there
-   and nothing changes in practice anyway.
+   this method's own acquisition branches. With no real caller left at
+   all (see above), this would purely be future-proofing a currently
+   test-only API against a caller that doesn't exist yet — even less
+   justified than when this option was first written.
 
 Recommendation: **option 1.** The method has no home-city concept at all
 today — adding one is a real signature change to a method this codebase
 has explicitly, repeatedly decided not to extend, for a caller that isn't
 part of any actual game. Option 2 is here so the choice is visible, not
 because it's the better default.
+
+## Gap A: resolved by deletion
+
+The user's own follow-up, after the option-1/option-2 write-up above:
+"if that API is not called anywhere in the code outside tests, then it
+sounds like orphaned code that should be cleaned up." Correct call —
+"leave it frozen" was the right precedent while a real caller (however
+minor) still existed; once that caller was gone, continuing to carry the
+method was just debt with no offsetting value. `BaselineAi.DecideOrders`
+was deleted outright, along with its now-unreachable `<param>` doc block
+and the 60-test `BaselineAiTests.cs` file that existed solely to exercise
+it (every test in that file called `DecideOrders` directly, confirmed by
+listing every `[Fact]` name before deleting anything).
+
+**The class-level doc comment was rewritten**, not just trimmed — it used
+to describe `DecideOrders`'s own greedy single-heuristic behavior as if
+that were the whole class's purpose, which was already stale post-M39 and
+would have been actively misleading with the method gone. It now
+describes what `BaselineAi` actually is: home of the real `Strategies`
+roster/`SelectStrategy` dispatcher plus the shared static helpers every
+concrete `IAiStrategy` draws on.
+
+**Coverage caught three more casualties**, not assumed: a before/after
+`dotnet test --collect:"XPlat Code Coverage"` diff on `BaselineAi.cs`
+showed line coverage dropping from 98.87% to 53.76%, and per-method rates
+isolated exactly which methods lost *all* coverage — `FindBestUnservedPair`,
+`FindBestUnservedPairUsingIdleFleet`, and `FindBestUnservedGateway`, each
+100% covered before, 0% after. Grepping for real call sites (not doc
+comments — several files had prose like "mirrors
+BaselineAi.FindBestUnservedGateway's shape," which look like usage at a
+glance but aren't) confirmed all three had already lost every real caller:
+`RapidExpansionStrategy`, `DomesticProfitOptimizerStrategy`, and
+`BalancedGrowthStrategy` each evolved their own separate, more specific
+search helper over time and stopped calling into `BaselineAi`'s plain
+global-best versions — `DecideOrders` was the last caller of all three, so
+they were exactly as orphaned as `DecideOrders` itself, just not visible
+as such until it was gone. Deleted alongside it, restoring `BaselineAi.cs`
+to 84.74% (up from the post-deletion 53.76%).
+
+**Update — `enableRealProfitabilityGate` removed too**, per the user's own
+direct follow-up ("the false path seems unnecessary now. the only thing
+that currently would want to not check actual profitability uses its own
+separate method. This can be refactored out."). Correct call, and the
+same principle as Gap A's own resolution: the parameter had a real,
+documented purpose once (letting `BaselineAi.DecideOrders` and, later,
+`RapidExpansionStrategy` opt out of profitability-gating), but both of
+those opt-outs are gone now — `DecideOrders` deleted, `RapidExpansionStrategy`
+moved to its own `FindBestExistingRouteByDemand` specifically *because*
+the gate regressed it (see that class's own doc comment) — so the "off"
+state had no remaining reason to exist as a runtime choice, only as
+history. `FindBestPerformingRoute` now always gates on real profitability
+and ranks by real load factor; the parameter and its `false` branch are
+gone, and the two real call sites (`NetworkOptimizerStrategy`,
+`BalancedGrowthStrategy`) dropped their now-redundant
+`enableRealProfitabilityGate: true` argument. The measured history (300-game
+sweep numbers, the Europe bankruptcy regression story) was preserved by
+folding it into the method's own `<remarks>` and each strategy's class
+doc comment, not deleted — it's still the reason this method behaves the
+way it unconditionally does now.
+
+Verified: build clean, full suite green (1051 + 38, no change — no test
+ever referenced the internal parameter directly), a 30-game QA sweep at
+seed 1 byte-identical to before the refactor (expected: both real callers
+already always passed `true`, so this only removed dead branching, not
+live behavior), and `BaselineAi.cs` coverage rose again, to 96.07%
+line / 79.16% branch (from 84.74%/76.92%). What's left is `SelectStrategy`'s
+own smaller, pre-existing coverage gap (84.61%/62.5%, unchanged throughout
+this whole cleanup) plus two small, pre-existing edge-case branches inside
+`FindBestPerformingRoute` itself (an `excludePairKeys is null` short-circuit
+and a `SeatsPerQuarter == 0` divide-by-zero guard) — confirmed by matching
+hit counts that both predate this round of changes, not introduced by it.
+Gap A is now fully closed, not just scoped.
+
+**Verification, not just argued:** full build (0 warnings, 0 errors),
+full test suite (1051 + 38 passing, down from 1115 core tests — the 64
+removed are exactly `BaselineAiTests.cs`'s own 60 `DecideOrders_*` tests
+plus a few smaller casualties), and a 30-game QA sweep at seed 1 producing
+byte-identical output to the pre-cleanup run — confirming the real game
+(which never called `DecideOrders`, only `Strategies`/`SelectStrategy`)
+is untouched. `DeterminismRegressionTests.cs`'s own scenario, which *did*
+call `DecideOrders` as a convenient deterministic order source, was
+rewired to go through the real `StrategyContext`/`IAiStrategy` path
+instead (its own comment already noted it doesn't care which AI logic
+runs, only that the whole resolver chain reproduces identically).
 
 ## Testing plan
 
