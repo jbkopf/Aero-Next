@@ -801,11 +801,166 @@ any fix can be measured over a real sweep rather than inferred.
   that work has since shipped (two-phase leasing, `EndOfManufactureYear`
   purchase/lease windows, geopolitical restrictions — see
   `docs/AIRCRAFT_ACQUISITION_ROADMAP.md` and
-  `docs/GEOPOLITICAL_AIRCRAFT_RESTRICTIONS_ROADMAP.md`). Re-measure before
-  re-enabling: leasing now takes a quarter, so a proactive swap that has
-  to lease is slower and costlier than it was when the regression was
-  measured, which may change the result either way. Full ablation numbers
-  in `docs/AI_AIRCRAFT_TYPE_SWAP_DESIGN.md`'s M67 section.
+  `docs/GEOPOLITICAL_AIRCRAFT_RESTRICTIONS_ROADMAP.md`). Full ablation
+  numbers in `docs/AI_AIRCRAFT_TYPE_SWAP_DESIGN.md`'s M67 section.
+
+  **Likely root cause (found 2026-09-24, from code, not yet measured):**
+  the swap decision and the swap itself don't match.
+  `AiToolkit.EstimatedRealProfit` compares current vs. candidate type as
+  *single-aircraft* routes, but `AdjustRouteOrder` always resets the route
+  to 1 aircraft - so a proactive swap on a healthy 4-aircraft route can
+  "win" the 1-vs-1 comparison and then cut the route to 1. Fits every M67
+  symptom: `BalancedGrowthStrategy` is the strategy that grows routes to
+  several aircraft, SouthAmerica's thin network absorbs the cut worst, and
+  the freed old-type aircraft get retired for resale cash (M67's inflated
+  average cash). `NetworkOptimizerStrategy` still runs proactive swaps
+  with the same mismatch. The engine already supports swap-then-grow in
+  one turn (`QuarterEngineTests`'s
+  `...SameQuarterSwapThenGrow_CostsExactlyFinalCount`); the AI just never
+  does it - `TryProposeTypeSwap` only ever emits the lone `AdjustRouteOrder`.
+
+  **Design direction, decided by the user (2026-09-24):**
+  - A swap picks the best **(type, count)** for the route, not the old
+    count. Reasons a swap is worth making: a bigger type for more total
+    capacity, a smaller type to match real demand, or efficiency (e.g. a
+    cheaper type). Each candidate type's target count is the one with the
+    highest estimated profit - `EstimatedRealProfit` needs an aircraft-count
+    input (today it's hard-wired to 1). Compare the current route *at its
+    real count* against each candidate at its target count. There's no
+    existing target-count logic to reuse: outside swaps the AI only grows
+    or shrinks a route one aircraft per quarter.
+  - **Slots are out of scope for this round** (the "fewer, larger aircraft
+    to free gateway slots" case) - that belongs in the slots logic.
+  - **Target reachable this turn:** swap, then growth `RouteOrder`s of the
+    new type up to the target, in that order (the engine rejects growth
+    placed before the swap).
+  - **Action-limited** (enough aircraft, not enough actions): swap now and
+    finish adding aircraft on the *following turn* - a rebuild spans at
+    most two turns. Takes precedence over the aircraft-limited rule, but
+    only if the AI can be sure of reaching the target by the following
+    turn. Any gap left after that is handed to the existing route-sizing
+    logic (grow one aircraft per quarter while profitable, shrink while
+    not), not tracked as a longer rebuild.
+  - **Supply the AI may count on for that check:** idle units, deliveries
+    already scheduled in the aircraft-order queue by the following turn,
+    and - for leases - **25% of the type's per-quarter lease cap
+    (`LeaseAllocationResolver.LeaseCapForQuarter`), rounded down**, as a
+    planning assumption (leases are contested and partly random when
+    oversubscribed, so the real allocation isn't knowable in advance). A
+    lease requested on the swap turn arrives the following turn, in time
+    for the second half of the rebuild.
+  - **Aircraft-limited** (not enough aircraft even across the two turns):
+    swap only if the new route, at the count achievable now, is no more
+    than 10% below the current route's estimated profit.
+  - **Reactive swaps** (a losing or low-demand route): the point is a
+    better aircraft/demand match that raises profit. Choose the best
+    (type, count) the same way; swap only if it gives a **positive
+    estimated profit**. If no swap does, hand the route to the existing
+    unprofitable-route handling (fare cut, shrink, sustained-loss closure)
+    instead. The 10% rule is for proactive swaps only.
+
+  **First step: collect real data** on how many aircraft a swap actually
+  needs - the distribution of target count vs. current count across
+  real sweep games, for proactive and reactive candidates separately. The
+  expectation (the user's own) is that swaps rarely need many aircraft,
+  either to downsize to demand or to capture more capacity; the data
+  confirms whether the two-turn rebuild window is ever the constraint.
+
+  **Still to settle before building:**
+  1. *Where the rebuild target lives between the two turns.* Today each
+     quarter re-evaluates from scratch; the second turn needs the target
+     count. `AiRouteHistory` (which already carries `LastTypeSwapQuarter`)
+     is the natural home. `StrategyContext` also has no view of the
+     airline's own scheduled order deliveries or pending lease requests
+     yet (its only "pending" field is `PendingNegotiationCityIds`), so the
+     supply check needs a new field.
+  2. *Acquiring toward the target.* When aircraft-limited and the 10% rule
+     says no, the AI should acquire toward the target and swap once enough
+     aircraft are ready - following the purchase-first policy in the next
+     item (buy when affordable, lease when not, bridge long deliveries)
+     rather than today's one-unit-at-a-time acquire-and-re-evaluate.
+- **AI aircraft acquisition: purchase first, lease to bridge delivery
+  (direction decided by the user, 2026-09-24).** The AI should generally
+  buy aircraft, and still lease when it needs to - when it can't afford a
+  purchase, exactly as it does today (every strategy buys when cash
+  covers `BaselineAi.ComfortableOrderCost`, 3× the price, or 2× in
+  `RapidExpansionStrategy`, and otherwise leases). The new part: when a
+  purchase's delivery time is long, lease to cover the gap, then replace
+  the leased aircraft with the purchased one once it arrives.
+
+  **What the game already supports, and what's missing:**
+  - *Delivery time is knowable.* The aircraft-order queue is public
+    (M10), so the AI can compute when a purchase would arrive and decide
+    whether a bridging lease is needed.
+  - *Returning a lease works; swapping one out cleanly doesn't.* Retiring
+    a leased unit ends its fee (and returns no cash). But only an idle
+    unit can be retired, and there's no single action that puts a newly
+    delivered purchased aircraft onto a route in place of a leased one of
+    the same type. Replacing without a temporary capacity dip needs either
+    a small engine addition or careful sequencing (grow with the purchased
+    unit, then shrink - checking which unit a shrink actually frees).
+  - *No memory of intent.* To replace a bridging lease the AI has to know
+    which purchase it's waiting on and which leased unit it covers - the
+    same cross-quarter-memory gap as the swap rebuild above.
+
+  **Lease replacement differs by strategy (decided by the user,
+  2026-09-24).** Beyond bridging, strategies should also replace existing
+  leased aircraft with purchases, but with different priorities that fit
+  each strategy's purpose:
+  - *Growth-focused* (`RapidExpansionStrategy`, `BalancedGrowthStrategy`):
+    use whatever aircraft they can get to expand - spare cash and actions
+    go to new capacity first; replacing leases is low priority.
+  - *Optimizer* (`NetworkOptimizerStrategy`,
+    `DomesticProfitOptimizerStrategy`): replacing leased aircraft with
+    purchased ones is a higher priority - it's a straight cost reduction
+    on a network they're already running.
+  - *`DistressStrategy`*: not decided. Presumably no replacements (it
+    shouldn't commit cash while in trouble, and already runs its type
+    swaps idle-only). A better fit: **return idle leased aircraft** to stop
+    their fees. Today it only runs the retirement check every strategy
+    shares (`AiToolkit.ApplyManagementToolkit`), which retires an idle unit
+    only when no current route flies its type *and* no unserved pair has
+    any positive demand for it - so idle aircraft are almost never
+    retired, and leased and owned aircraft are treated the same. Its
+    earlier "retire every idle unit" rule was measured and removed
+    (Europe bankruptcy 10.7%→14.7%): selling *owned* aircraft at 40% threw
+    away value that mattered once the airline recovered. Returning
+    *leased* aircraft doesn't have that cost - it just ends a 4%/quarter
+    fee, and re-leasing later costs 1.5% upfront plus a quarter's wait -
+    so a leased-only return rule is a different, untested proposition.
+    Measure before shipping.
+
+  **Replacement only pays off if the aircraft will be kept long enough.**
+  A lease costs 4% of the price per quarter (`FinancialResolver.LeaseFeeRatePerQuarter`);
+  a purchase costs the full price up front and returns 40% when retired
+  (`RetirementResaleFraction`). So owning costs a net 60% of the price,
+  and a replacement breaks even after about 15 quarters (60% ÷ 4%,
+  ignoring interest). The decision should check that the aircraft is
+  expected to stay in service at least that long - not true near the
+  campaign's end (244 quarters) or for a type about to be swapped out.
+- **Revisit the AI's "can afford" logic for aircraft purchases.** Every
+  strategy treats a purchase as affordable only when cash covers 3× the
+  price (`BaselineAi.ComfortableOrderCost`; 2× in `RapidExpansionStrategy`),
+  otherwise it leases. That margin is conservative and is a big part of
+  why the AI leases so much; a purchase-first policy probably wants
+  something closer to 1× the price plus a working-capital buffer for
+  running costs. Needs its own measured sweep - it changes cash flow for
+  every airline.
+- **Event-driven leasing for temporary demand - deferred, a separate
+  topic (user, 2026-09-24).** Leasing for short-term demand spikes like
+  the Olympics. The data already supports it: `data/historical_events.json`
+  has city-scoped one-year events (each Summer/Winter Olympics: +20% at
+  the host city, then an explicit "reversion" entry) and global multi-year
+  shocks with recovery entries (1973/1979 oil, Gulf War, 9/11, 2008), each
+  an `eventGroup` with a known start and end. The AI only sees the current
+  year's demand, not the schedule, so it can't tell a temporary spike from
+  permanent growth; real Olympics are announced years ahead, so giving it
+  the schedule would be fair. Open when picked up: how much lead time to
+  act on, and whether to lease only for events at cities already served.
+
+  Measure over real sweeps before re-enabling proactive swaps on
+  `BalancedGrowthStrategy` - and re-check `NetworkOptimizerStrategy`'s
+  existing proactive swaps under the same fix.
 - **`AllianceCourtOrder`** — excluded everywhere; alliances have no game
   consequence yet, so teaching the AI to court one would be cosmetic.
 - ~~**`HireExecutiveOrder`'s uncapped, costless action-cap growth**~~ —
