@@ -477,6 +477,55 @@ rather than noise. The oil-crisis cluster is gone, not just smaller, and
 stays gone after everything else that's changed since. Closed - not an
 open item any more.
 
+**Next up, per the user's own direction (2026-09-24): get the AI to
+actually use marketing.** Found during a whole-codebase coverage review,
+not by looking for it: across 40 full sweep-configured games (seeds 1-40,
+the real `Program.cs` wiring - `fillerWeightExponent: 0.0`, trade
+restrictions loaded), `AiToolkit.ApplyMarketingCampaign` was called
+25,493 times and **never proposed a single campaign** - no
+`RouteMarketingOrder`, no `NetworkMarketingOrder`. Every call got past
+its early returns (real `RivalCountByServedRoute`, budget available) and
+then found the candidate list empty. The mechanic itself is sound - its
+unit tests in `AiToolkitTests.cs` cover both branches, and
+`QuarterEngine`/`CompetitiveMarket` apply a campaign correctly once
+submitted - so this is a targeting problem, not a broken mechanic. All
+four roster strategies call it, so it's the shared filter, not a missing
+call site.
+
+The filter (`ApplyMarketingCampaign`) requires a served route to be, all
+at once: (1) unprofitable by `FareCalculator.EstimatedProfit` on real
+carried passengers, (2) contested (`RivalCountByServedRoute > 0`), and
+(3) under `MaximumConsecutiveUnprofitableQuartersForMarketing` (4)
+consecutive bad quarters. This is a regression from a working state, not
+a mechanic that never fired: M52's "just contested" trigger fired
+rarely, M53's "contested *and* struggling" retarget fired **zero** times
+(noted then, "flagged, not chased"), M54 retargeted to real profit, and
+by M58 it was firing often enough that the futile-spend fix recorded 326
+real exclusions across a 60-game diagnostic. Something since M58 has left
+no route both losing money and contested at the same time. **Leading
+hypothesis (the user's own read):** the profitability work since then -
+real-profit route selection, `FindBestPerformingRoute`'s now-unconditional
+profitability gate, M54's fare cut/shrink loop - means the AI rarely
+opens or keeps a losing route at all, so condition (1) empties the list
+before (2) ever matters. That would make the dormancy a side effect of
+the AI getting better, not a bug. Other contributors not ruled out: M67's
+reactive type swaps fixing losses first, and the switch to the
+full-random filler default. Unconfirmed until measured.
+
+Two separate questions to answer before changing anything: **why** the
+candidate set is empty now (instrument which of the three conditions
+eliminates the routes - most likely "contested" and "unprofitable" never
+coincide because unprofitable contested routes get cut, shrunk, or swapped
+first), and **what marketing is for** in this design - a defensive tool
+for a losing share fight (today's framing) or also an offensive one for
+winning a contested market the airline is already profitable in. The
+second changes what the trigger should be, not just how loose it is - and
+if the leading hypothesis holds, the defensive framing has almost nothing
+left to act on, so the offensive one is where marketing would matter.
+`FullGameRunner` has no marketing counter yet; adding one (same shape as
+the new `FullGameResult.TypeSwapsApplied`) is the natural first step, so
+any fix can be measured over a real sweep rather than inferred.
+
 ---
 
 ## Deferred / "Kept in mind, not scheduled" items, by roadmap doc
@@ -741,6 +790,22 @@ open item any more.
   reasons.
 
 ### `BASELINE_AI_ROADMAP.md`
+- **`BalancedGrowthStrategy`'s proactive aircraft-type swaps — deferred at
+  M67, and the condition for revisiting is now met.** M67 shipped
+  `BalancedGrowthStrategy` reactive-only (`enableProactiveTypeSwap:
+  false`) because its proactive branch tripled SouthAmerica's bankruptcy
+  count (4→12) in a 300-game ablation — it's the main MidGame/LateGame
+  strategy, so re-evaluating every held route reaches a much larger
+  surface than `NetworkOptimizerStrategy`'s narrower window did. The user
+  deferred it explicitly "until after we work on aircraft acquisition";
+  that work has since shipped (two-phase leasing, `EndOfManufactureYear`
+  purchase/lease windows, geopolitical restrictions — see
+  `docs/AIRCRAFT_ACQUISITION_ROADMAP.md` and
+  `docs/GEOPOLITICAL_AIRCRAFT_RESTRICTIONS_ROADMAP.md`). Re-measure before
+  re-enabling: leasing now takes a quarter, so a proactive swap that has
+  to lease is slower and costlier than it was when the regression was
+  measured, which may change the result either way. Full ablation numbers
+  in `docs/AI_AIRCRAFT_TYPE_SWAP_DESIGN.md`'s M67 section.
 - **`AllianceCourtOrder`** — excluded everywhere; alliances have no game
   consequence yet, so teaching the AI to court one would be cosmetic.
 - ~~**`HireExecutiveOrder`'s uncapped, costless action-cap growth**~~ —
