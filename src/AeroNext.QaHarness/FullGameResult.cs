@@ -48,7 +48,11 @@ public sealed record FullGameResult(
     // quantify that pattern instead of re-deriving it from a one-off trace
     // each time.
     IReadOnlyDictionary<string, long>? NegotiationSpendCentsFirst20QByName = null,
-    IReadOnlyDictionary<string, int>? NegotiationBidCountFirst20QByName = null)
+    IReadOnlyDictionary<string, int>? NegotiationBidCountFirst20QByName = null,
+    // Total AdjustRouteOrders (aircraft type swaps) applied across every
+    // airline this game - lets a sweep, or a test, confirm the type-swap
+    // mechanic actually fires in real play rather than only in isolation.
+    int TypeSwapsApplied = 0)
 {
     public bool Success => Violations.Count == 0;
 }

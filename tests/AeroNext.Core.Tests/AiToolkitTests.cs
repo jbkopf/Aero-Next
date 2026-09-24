@@ -1850,4 +1850,57 @@ public class AiToolkitTests
 
         Assert.Equal(0, AiToolkit.MaxEraAircraftRangeKm(context));
     }
+
+    // --- TryProposeCandidate / TryOrientFromValidOrigin ---
+
+    [Fact]
+    public void TryProposeCandidate_BudgetAlreadySpent_ProposesNothing()
+    {
+        // Every current caller checks the budget itself before calling, so
+        // this is the method's own guard for any caller that doesn't.
+        var home = MakeCity("h", Region.NorthAmerica, 0, 0, 100);
+        var other = MakeCity("o", Region.NorthAmerica, 1, 1, 100);
+        var context = MakeContext(new[] { home, other }, home, actionCap: 3);
+        (PairDemand, AircraftType, Money, bool)? best = (new PairDemand(home, other, 150, 1_000), Aircraft, Money.FromDollars(1), false);
+        var validOrigins = new HashSet<string> { home.Id };
+
+        var blockedOrders = new List<QuarterOrder>();
+        var blockedSpent = 3;
+        AiToolkit.TryProposeCandidate(context, best, validOrigins, blockedOrders, new HashSet<int>(), new Dictionary<string, int>(), new Dictionary<string, int>(), ref blockedSpent);
+
+        // Control: the identical call with one action left does propose,
+        // so the empty result above really is the budget guard.
+        var allowedOrders = new List<QuarterOrder>();
+        var allowedSpent = 2;
+        AiToolkit.TryProposeCandidate(context, best, validOrigins, allowedOrders, new HashSet<int>(), new Dictionary<string, int>(), new Dictionary<string, int>(), ref allowedSpent);
+
+        Assert.Empty(blockedOrders);
+        Assert.Equal(3, blockedSpent);
+        Assert.IsType<LeaseAircraftOrder>(Assert.Single(allowedOrders));
+        Assert.Equal(3, allowedSpent);
+    }
+
+    [Fact]
+    public void TryOrientFromValidOrigin_NeitherEndpointValid_ReturnsFalse()
+    {
+        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 100);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 100);
+
+        var oriented = AiToolkit.TryOrientFromValidOrigin(new PairDemand(a, b, 150, 1_000), new HashSet<string> { "elsewhere" }, out _, out _);
+
+        Assert.False(oriented);
+    }
+
+    [Fact]
+    public void TryOrientFromValidOrigin_OnlyDestinationValid_FlipsOrientation()
+    {
+        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 100);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 100);
+
+        var oriented = AiToolkit.TryOrientFromValidOrigin(new PairDemand(a, b, 150, 1_000), new HashSet<string> { b.Id }, out var origin, out var destination);
+
+        Assert.True(oriented);
+        Assert.Equal(b.Id, origin.Id);
+        Assert.Equal(a.Id, destination.Id);
+    }
 }

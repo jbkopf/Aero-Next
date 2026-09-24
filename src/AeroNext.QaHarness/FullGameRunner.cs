@@ -104,6 +104,17 @@ public static class FullGameRunner
             violations.Add(new GameViolation(0, "-", "Seats did not have distinct starting cities."));
         }
 
+        // An invalid seat set isn't a game worth playing out - and duplicate
+        // names would crash the per-airline dictionaries below before this
+        // violation could ever be reported.
+        if (violations.Count > 0)
+        {
+            return new FullGameResult(
+                gameIndex, configSeed, campaignSeed, seats.Count(s => s.IsHuman), 0, violations,
+                new Dictionary<string, Money>(), new Dictionary<string, int?>(), new Dictionary<string, Region>(),
+                new Dictionary<string, string>(), Winner: null, WinQuarter: null, FinalRanking: Array.Empty<string>());
+        }
+
         var conditionsByName = seats.ToDictionary(
             s => s.AirlineName,
             s => tuning.ApplyTo(s, StartingConditionsResolver.Resolve(s, cities, fleetCatalog, growthSchedule), cities, fleetCatalog, growthSchedule, routeWeightRng));
@@ -119,6 +130,7 @@ public static class FullGameRunner
         // one quarter at a time, over each airline's first 20 quarters only.
         var negotiationSpendCentsFirst20QByName = names.ToDictionary(n => n, n => 0L);
         var negotiationBidCountFirst20QByName = names.ToDictionary(n => n, n => 0);
+        var typeSwapsApplied = 0;
 
         // M54: real, competitively-resolved carried seats per route, one
         // quarter lagged - built from each quarter's own real market.RouteUsage
@@ -448,6 +460,7 @@ public static class FullGameRunner
                     var existingHistory = routeHistoryByAirlineName[name].GetValueOrDefault(pairKey) ?? new AiRouteHistory(null, null, 0);
 
                     routeHistoryByAirlineName[name][pairKey] = existingHistory with { LastTypeSwapQuarter = q };
+                    typeSwapsApplied++;
                 }
 
                 routes[name] = result.Routes;
@@ -634,6 +647,6 @@ public static class FullGameRunner
             gameIndex, configSeed, campaignSeed, humanCount, winQuarter ?? quarters, violations,
             finalCash, bankruptcyQuarter, homeRegionByName, startingCityIdByName, winner, winQuarter, finalRanking,
             winnerRegionsDominated, lastEligibleNames.Count,
-            negotiationSpendCentsFirst20QByName, negotiationBidCountFirst20QByName);
+            negotiationSpendCentsFirst20QByName, negotiationBidCountFirst20QByName, typeSwapsApplied);
     }
 }
