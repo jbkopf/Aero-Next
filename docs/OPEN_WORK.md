@@ -477,54 +477,32 @@ rather than noise. The oil-crisis cluster is gone, not just smaller, and
 stays gone after everything else that's changed since. Closed - not an
 open item any more.
 
-**Next up, per the user's own direction (2026-09-24): get the AI to
-actually use marketing.** Found during a whole-codebase coverage review,
-not by looking for it: across 40 full sweep-configured games (seeds 1-40,
-the real `Program.cs` wiring - `fillerWeightExponent: 0.0`, trade
-restrictions loaded), `AiToolkit.ApplyMarketingCampaign` was called
-25,493 times and **never proposed a single campaign** - no
-`RouteMarketingOrder`, no `NetworkMarketingOrder`. Every call got past
-its early returns (real `RivalCountByServedRoute`, budget available) and
-then found the candidate list empty. The mechanic itself is sound - its
-unit tests in `AiToolkitTests.cs` cover both branches, and
-`QuarterEngine`/`CompetitiveMarket` apply a campaign correctly once
-submitted - so this is a targeting problem, not a broken mechanic. All
-four roster strategies call it, so it's the shared filter, not a missing
-call site.
-
-The filter (`ApplyMarketingCampaign`) requires a served route to be, all
-at once: (1) unprofitable by `FareCalculator.EstimatedProfit` on real
-carried passengers, (2) contested (`RivalCountByServedRoute > 0`), and
-(3) under `MaximumConsecutiveUnprofitableQuartersForMarketing` (4)
-consecutive bad quarters. This is a regression from a working state, not
-a mechanic that never fired: M52's "just contested" trigger fired
-rarely, M53's "contested *and* struggling" retarget fired **zero** times
-(noted then, "flagged, not chased"), M54 retargeted to real profit, and
-by M58 it was firing often enough that the futile-spend fix recorded 326
-real exclusions across a 60-game diagnostic. Something since M58 has left
-no route both losing money and contested at the same time. **Leading
-hypothesis (the user's own read):** the profitability work since then -
-real-profit route selection, `FindBestPerformingRoute`'s now-unconditional
-profitability gate, M54's fare cut/shrink loop - means the AI rarely
-opens or keeps a losing route at all, so condition (1) empties the list
-before (2) ever matters. That would make the dormancy a side effect of
-the AI getting better, not a bug. Other contributors not ruled out: M67's
-reactive type swaps fixing losses first, and the switch to the
-full-random filler default. Unconfirmed until measured.
-
-Two separate questions to answer before changing anything: **why** the
-candidate set is empty now (instrument which of the three conditions
-eliminates the routes - most likely "contested" and "unprofitable" never
-coincide because unprofitable contested routes get cut, shrunk, or swapped
-first), and **what marketing is for** in this design - a defensive tool
-for a losing share fight (today's framing) or also an offensive one for
-winning a contested market the airline is already profitable in. The
-second changes what the trigger should be, not just how loose it is - and
-if the leading hypothesis holds, the defensive framing has almost nothing
-left to act on, so the offensive one is where marketing would matter.
-`FullGameRunner` has no marketing counter yet; adding one (same shape as
-the new `FullGameResult.TypeSwapsApplied`) is the natural first step, so
-any fix can be measured over a real sweep rather than inferred.
+**AI marketing - resolved 2026-09-26 (branch `ai-marketing`).** The AI
+never used marketing (22 campaigns in a whole 300-game sweep): its
+trigger required a route to be both unprofitable and contested, which
+almost never happens (2.0% and 0.46% of route-quarters, never both), and
+it ignored marketing's demand boost on uncontested routes entirely.
+`AiToolkit.ApplyMarketingCampaign` now runs the campaign with the largest
+estimated net gain when one pays for itself - ~180 campaigns per game.
+Doing so exposed a real interaction: the executive-hiring rule counted a
+campaign's action as proof the action cap was binding, and small
+networks hired a $300k/quarter executive to keep a smaller-earning
+campaign running (AustralAsia bankruptcies doubled across two 300-game
+seed ranges). Fixed by excluding marketing actions from that check;
+bankruptcy is back to the pre-redesign level (36 airlines across both
+ranges, before and after) and wins spread more evenly. Full numbers:
+`docs/BASELINE_AI_ROADMAP.md`'s "Marketing redesign" section. Follow-ups:
+- **Executive hiring should weigh value, not just "every action used."**
+  The M50 rule hires whenever the cap was binding, never comparing the
+  $300k/quarter salary with what an extra action would earn. Marketing
+  exposed it; a value-based check would fix it properly.
+- **`NetworkOptimizerStrategy` runs marketing before growth**, so a
+  campaign can take an action growth would otherwise have used (and no
+  longer triggers a hire when it does). No harm measured, but worth
+  checking if that strategy's growth ever looks starved.
+- **The campaign estimate under-predicts** (realized gain 1.1-1.95× the
+  estimate by region). It errs toward not spending, so it's safe; tighter
+  would let marketing fire in marginal cases it now skips.
 
 ---
 
@@ -1717,6 +1695,32 @@ any fix can be measured over a real sweep rather than inferred.
        fixture demand/capacity numbers verified numerically against the
        exact test cities/aircraft, not guessed. `DomesticProfitOptimizerStrategy.cs`
        reads fully covered by the merged coverage report.
+5. **Airlines almost never compete head-to-head on the same route**
+   (found 2026-09-24, while diagnosing why AI marketing never fired).
+   Across 40 full sweep-configured games (seeds 1-40), only **489 of
+   106,006 route-quarters (0.46%)** were contested - a rival flying the
+   same pair (`StrategyContext.RivalCountByServedRoute`) - and every one of
+   those was profitable. That cuts against CLAUDE.md's first design
+   pillar ("an area-control game": taking a slot denies a rival, clashes
+   at chokepoints and gateways), and it hollows out every mechanic built
+   around a contested pair: marketing's share boost, fare competition
+   (M48's share weighting), and `CompetitiveMarket`'s whole contested
+   branch. Questions to look at:
+   - *Is it the AI or the map?* Each strategy may steer away from pairs a
+     rival already serves (new-pair searches exclude served pairs and rank
+     by estimated profit, which a rival's share lowers), or home regions
+     may be far enough apart that networks rarely overlap. An instrumented
+     sweep of how often a rival-served pair is the AI's best candidate,
+     and passed over, would separate the two.
+   - *Does "contested" mean the same thing everywhere?* The AI's count is
+     rivals on the exact nonstop pair; `CompetitiveMarket` treats a pair as
+     contested when more than one airline carries passengers between the
+     two cities by any itinerary, including connections. Connecting
+     competition may be more common than the 0.46% suggests - worth
+     measuring directly.
+   - *Where would contest come from by design?* Gateway slot scarcity and
+     intercontinental demand are meant to force clashes; if they don't,
+     that's a design question as much as an AI one.
 
 ---
 
