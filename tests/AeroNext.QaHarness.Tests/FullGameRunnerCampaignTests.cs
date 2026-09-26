@@ -59,15 +59,34 @@ public class FullGameRunnerCampaignTests
     [Fact]
     public void SweepConfiguredCampaign_AppliesAircraftTypeSwaps_AndStaysInvariantClean()
     {
-        // Seed 14 was picked by searching sweep-configured seeds for a short
-        // game in which NetworkOptimizerStrategy really applies
-        // AdjustRouteOrders, so FullGameRunner's own swap-history stamping
-        // runs inside a real campaign. Same re-pick-don't-weaken rule as above.
-        const int seed = 14;
+        // Seed 18 was picked by searching sweep-configured seeds for a game
+        // in which NetworkOptimizerStrategy really applies AdjustRouteOrders
+        // (15 of them), so FullGameRunner's own swap-history stamping runs
+        // inside a real campaign. Re-picked after the marketing redesign
+        // changed the previous seed's (14) game enough that it stopped
+        // swapping - the test caught that, as designed. Same
+        // re-pick-don't-weaken rule as above.
+        const int seed = 18;
         var result = Run(SweepSeats(seed), seed, quarters: 244);
 
         Assert.True(result.Success, string.Join("; ", result.Violations.Select(v => $"Q{v.Quarter} {v.AirlineName}: {v.Description}")));
         Assert.True(result.TypeSwapsApplied > 0, "Expected this seed's game to apply at least one aircraft type swap.");
+    }
+
+    [Fact]
+    public void SweepConfiguredCampaign_AppliesMarketingCampaigns()
+    {
+        // Marketing was effectively dormant in real play before its
+        // value-based redesign (22 campaigns in a whole 300-game sweep).
+        // Seed 3 is a short game (a dominance win by quarter 12) in which
+        // campaigns really run - a real-game check that the AI uses the
+        // lever at all, not just in AiToolkit's own unit tests.
+        const int seed = 3;
+        var result = Run(SweepSeats(seed), seed, quarters: 244);
+
+        Assert.True(result.Success, string.Join("; ", result.Violations.Select(v => $"Q{v.Quarter} {v.AirlineName}: {v.Description}")));
+        Assert.True(result.RouteCampaignsApplied > 0, "Expected at least one route-targeted marketing campaign.");
+        Assert.True(result.NetworkCampaignsApplied > 0, "Expected at least one network-wide marketing campaign.");
     }
 
     [Fact]

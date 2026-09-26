@@ -168,16 +168,18 @@ public class NetworkOptimizerStrategyTests
     [Fact]
     public void DecideOrders_TightBudget_MarketingClaimsTheBudget_OverANewPair()
     {
-        // Cap 1: a struggling contested route AND a great new-pair
-        // candidate both exist. Marketing runs first in this strategy
-        // (the inversion from both other strategies), so the one action
-        // goes to fixing what's already broken, not opening something new.
+        // Cap 1: a contested route where a marketing campaign pays for
+        // itself AND a great new-pair candidate both exist. Marketing runs
+        // first in this strategy (the inversion from the other strategies),
+        // so the one action goes to the campaign, not opening something new.
         var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
         var strugglingPartner = MakeCity("strug", Region.NorthAmerica, 1, 1, 50);
         var newPairTarget = MakeCity("new", Region.NorthAmerica, 5, 5, 500); // high weight - would be an attractive new pair
         var cities = new[] { home, strugglingPartner, newPairTarget };
         var aircraft = new AircraftType("t", "Test", Seats: 5, RangeKm: 2000);
-        var strugglingRoute = new Route(home, strugglingPartner, BigAircraft, AircraftCount: 1); // unprofitable
+        // Spare seats (BigAircraft) at a fare high enough that a campaign's
+        // share gain against the one rival clearly beats its cost.
+        var strugglingRoute = new Route(home, strugglingPartner, BigAircraft, AircraftCount: 1, FareOverride: Money.FromDollars(1_000));
         var existing = new[] { strugglingRoute };
         var key = QuarterEngine.NormalizedPairKey(home, strugglingPartner);
         var rivalCount = new System.Collections.Generic.Dictionary<(string, string), int> { [key] = 1 };

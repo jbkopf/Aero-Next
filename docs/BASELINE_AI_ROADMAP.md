@@ -3117,3 +3117,104 @@ available models) is further along, since that work is likely to touch
 the same territory.
 
 1052 tests passing (up from 1042), every changed file fully covered.
+
+## Marketing redesign — value-based campaign targeting, and the executive-hiring interaction it exposed ✅ (shipped, a real regression found and fixed)
+
+Direct user request (2026-09-24), after a whole-codebase coverage review
+found marketing effectively dormant: "we will need to get the AI to use
+marketing."
+
+**Why it never fired.** `AiToolkit.ApplyMarketingCampaign` (M52, retargeted
+by M53/M54) only marketed a route that was both unprofitable and
+contested, on the premise — stated in its own doc comment — that
+`CompetitiveMarket`'s boost never applies to an uncontested pair. That
+stopped being true at M47 round 2, which gave an uncontested pair a real
+demand boost into the route's spare seats; the AI was never updated.
+Measured across 40 full sweep games (106,006 route-quarters): 2.0% of
+route-quarters were unprofitable, **0.46% were contested**, and none were
+both. A 300-game sweep found 22 campaigns in total. The user's own read
+— the profitability work since M58 means the AI rarely runs a losing
+route — held; the rarity of contested routes was the second, bigger
+factor (now its own `docs/OPEN_WORK.md` item).
+
+**The redesign.** `ApplyMarketingCampaign` now proposes the single
+campaign — one `RouteMarketingOrder` or one `NetworkMarketingOrder` — with
+the largest estimated net gain this quarter, if positive and affordable.
+A new `EstimatedCampaignGain` mirrors `CompetitiveMarket`'s two effects:
+uncontested, demand grows by the boost × pair demand, capped at spare
+seats; contested, share grows from 1/(rivals+1) to
+(1+boost)/(rivals+1+boost), assuming equal rivals, also capped at spare
+seats. Spare seats use last quarter's real carried passengers. Operating
+cost is charged on seats flown, so the gain is the extra passengers'
+revenue, less the campaign's cost. M58's give-up rule (stop marketing a
+route after 4 unprofitable quarters) was removed — it guarded against
+spend with no payback, which the net-gain check now rules out directly.
+The strategies' call sites are unchanged (`NetworkOptimizerStrategy`
+still runs marketing first; the other three after growth).
+
+**The estimate is conservative, verified rather than assumed.** A
+temporary instrumented run compared each chosen campaign's estimate with
+the gain `CompetitiveMarket` actually produced (the pair resolved with and
+without the boost). Over 100 games, realized net gain exceeded the
+estimate in every region (1.10× EastAsia to 1.95× NorthAmerica); about 5%
+of campaigns lost money, in small amounts.
+
+**A real regression, traced to executive hiring.** The first full
+measurement (300 games, seeds 1-300) had marketing firing ~53,000 times
+and wins spreading out, but AustralAsia's bankruptcies doubled (5→11),
+all new ones mid-game (average quarter 8.8→47.4). A second, independent
+seed range (301-600) reproduced it (6→13). Every bankrupt airline had
+*profitable* marketing — the harm was indirect. A side-by-side trace of
+one case (seed 15, a Saipan-based airline) found the only difference
+between the two games was a single `HireExecutiveOrder` in quarter 3:
+`ApplyManagementToolkit` hires when the action cap "was binding" (M50),
+and the campaign had taken the last action. On a tiny two-route network
+the executive's $300k/quarter salary exceeded marketing's ~$220k/quarter
+net gain, and the gap compounded into a debt spiral (debt $17.0M vs.
+$12.0M by quarter 36, bankruptcy at quarter 73; the baseline airline
+survived).
+
+**The fix:** the hiring rule's binding check now ignores actions spent on
+marketing — a campaign only runs when it pays for itself, so it uses an
+otherwise-spare action rather than showing the airline needs more. New
+unit test: 3 of 3 actions with a campaign among them doesn't hire; the
+same spend without one does.
+
+**Measured (300 games × 2 independent seed ranges, 244 quarters):**
+
+| | Before redesign | Redesign, no hiring fix | Redesign + fix |
+|---|---|---|---|
+| Bankrupt airlines, seeds 1-300 / 301-600 | 19 / 17 | 25 / 25 | **16 / 20** |
+| Bankrupt airlines, both ranges | **36** | 50 | **36** |
+| – AustralAsia | 11 | 24 | 14 |
+| Games with a bankruptcy (1-300 / 301-600) | 16 / 15 | 21 / 22 | 12 / 17 |
+| Marketing campaigns per 300 games | 22 | ~53,000 | ~54,000 |
+| Wins, seeds 1-300 (NA/EU/EA/SWA/AA/SA) | 35/75/71/93/15/11 | 47/81/39/90/28/15 | 44/85/39/88/30/14 |
+| Wins, seeds 301-600 | 30/70/73/101/13/13 | 45/76/46/87/31/15 | 43/75/46/88/31/17 |
+
+Bankruptcy is back to the baseline level (AustralAsia's 14 vs. 11 is
+within run-to-run noise; unfixed it was 24), marketing is a real,
+frequently-used lever (~180 campaigns per game), average cash rose in
+most regions, and wins spread out — EastAsia's dominance fell sharply in
+both ranges while NorthAmerica and AustralAsia gained.
+
+**Kept in mind, not scheduled:**
+- *The hiring rule's proxy is still crude.* "Every action got used" stands
+  in for "an extra action is worth $300k/quarter" without ever weighing
+  the salary against what the action would earn. Marketing exposed it; a
+  value-based hiring check would address it properly.
+- *`NetworkOptimizerStrategy` runs marketing before growth,* so a campaign
+  can take an action growth would otherwise have used, and with the fix
+  that squeeze no longer triggers a hire. No harm showed in either sweep,
+  but it's a real interaction.
+- *The estimate under-predicts* (1.1-1.95× realized). Harmless in
+  direction — it errs toward not spending — but a tighter estimate would
+  let marketing fire in marginal cases it currently skips.
+
+Also: a campaign counter (`FullGameResult.RouteCampaignsApplied`/
+`NetworkCampaignsApplied`, printed in the sweep summary) and a real-game
+test (`SweepConfiguredCampaign_AppliesMarketingCampaigns`, seed 3). The
+seed-14 type-swap test stopped swapping under the new dynamics and was
+re-picked to seed 18, as its own comment requires. 1102 tests passing
+(1058 + 44), merged coverage 96.6% lines / 95.8% branches, the new
+marketing code fully covered.

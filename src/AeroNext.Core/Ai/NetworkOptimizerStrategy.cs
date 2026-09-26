@@ -16,8 +16,8 @@ namespace AeroNext.Core.Ai;
 /// 1); only eligible once a network exists to have opinions about.
 ///
 /// Priorities are deliberately **inverted** from both existing
-/// strategies: ApplyMarketingCampaign (fixing contested, unprofitable
-/// routes) gets first claim on the action budget, then growing the
+/// strategies: ApplyMarketingCampaign (a campaign, only when one is
+/// estimated to pay for itself) gets first claim on the action budget, then growing the
 /// best-performing existing route, and only *then* — if any budget
 /// remains — a new pair. No artificial route cap enforces "sparingly";
 /// the ordering alone does, through the same 3-action-budget competition
@@ -228,8 +228,9 @@ public sealed class NetworkOptimizerStrategy : IAiStrategy
         var spent = 0;
         var validOriginCityIds = AiToolkit.ValidOriginCityIds(context);
 
-        // 1. Fix what's already broken - first claim on the budget,
-        // unlike either existing strategy (both run this last).
+        // 1. A marketing campaign, if one is estimated to pay for itself -
+        // first claim on the budget, unlike the other strategies (which
+        // run it after growth).
         AiToolkit.ApplyMarketingCampaign(context, orders, ref spent);
 
         // 2. Grow the best-performing existing route - a real capability

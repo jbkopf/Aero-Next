@@ -52,7 +52,11 @@ public sealed record FullGameResult(
     // Total AdjustRouteOrders (aircraft type swaps) applied across every
     // airline this game - lets a sweep, or a test, confirm the type-swap
     // mechanic actually fires in real play rather than only in isolation.
-    int TypeSwapsApplied = 0)
+    int TypeSwapsApplied = 0,
+    // Marketing campaigns (route-targeted and network-wide) applied across
+    // every airline this game - same purpose as TypeSwapsApplied.
+    int RouteCampaignsApplied = 0,
+    int NetworkCampaignsApplied = 0)
 {
     public bool Success => Violations.Count == 0;
 }

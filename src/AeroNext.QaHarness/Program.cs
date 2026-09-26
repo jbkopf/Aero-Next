@@ -117,6 +117,8 @@ Console.WriteLine($"  {hardFailures.Count} crashed with an unhandled exception")
 Console.WriteLine($"  {everBankrupt} games had at least one airline go bankrupt before quarter {quarters}");
 Console.WriteLine($"  {wonOutright.Count}/{cleanResults.Count} clean games had a win-condition winner before the timeline ended" +
     (wonOutright.Count > 0 ? $" (avg quarter {wonOutright.Average(r => r.WinQuarter!.Value):N1})" : ""));
+Console.WriteLine($"  AI activity: {results.Sum(r => r.TypeSwapsApplied)} type swaps, " +
+    $"{results.Sum(r => r.RouteCampaignsApplied)} route marketing campaigns, {results.Sum(r => r.NetworkCampaignsApplied)} network marketing campaigns");
 
 if (hardFailures.Count > 0)
 {
