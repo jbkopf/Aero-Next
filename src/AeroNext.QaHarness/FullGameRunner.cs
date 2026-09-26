@@ -131,6 +131,8 @@ public static class FullGameRunner
         var negotiationSpendCentsFirst20QByName = names.ToDictionary(n => n, n => 0L);
         var negotiationBidCountFirst20QByName = names.ToDictionary(n => n, n => 0);
         var typeSwapsApplied = 0;
+        var routeCampaignsApplied = 0;
+        var networkCampaignsApplied = 0;
 
         // M54: real, competitively-resolved carried seats per route, one
         // quarter lagged - built from each quarter's own real market.RouteUsage
@@ -467,6 +469,8 @@ public static class FullGameRunner
                 caps[name] = result.ActionCap;
                 fleets[name] = result.UpdatedFleet!;
                 appliedOrdersByName[name] = result.AppliedOrders;
+                routeCampaignsApplied += result.AppliedOrders.OfType<RouteMarketingOrder>().Count();
+                networkCampaignsApplied += result.AppliedOrders.OfType<NetworkMarketingOrder>().Count();
                 retiredUnitsByName[name] = result.RetiredUnits!;
 
                 var airlineSnapshot = new Airline(name, routes[name]);
@@ -647,6 +651,7 @@ public static class FullGameRunner
             gameIndex, configSeed, campaignSeed, humanCount, winQuarter ?? quarters, violations,
             finalCash, bankruptcyQuarter, homeRegionByName, startingCityIdByName, winner, winQuarter, finalRanking,
             winnerRegionsDominated, lastEligibleNames.Count,
-            negotiationSpendCentsFirst20QByName, negotiationBidCountFirst20QByName, typeSwapsApplied);
+            negotiationSpendCentsFirst20QByName, negotiationBidCountFirst20QByName, typeSwapsApplied,
+            routeCampaignsApplied, networkCampaignsApplied);
     }
 }
