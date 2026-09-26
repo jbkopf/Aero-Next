@@ -245,8 +245,8 @@ public sealed class RapidExpansionStrategy : IAiStrategy
         var bestGateway = FindBestUnservedGatewayCrossRegionFirst(context) ?? AiToolkit.FindBestIdleContestableGateway(context);
         AiToolkit.NegotiateOrBorrow(context, bestGateway, orders, ref spent);
 
-        // 4. M52: a marketing campaign on whichever already-served
-        // route(s) are genuinely contested.
+        // 4. A marketing campaign, if one is estimated to pay for itself
+        // (see AiToolkit.ApplyMarketingCampaign).
         AiToolkit.ApplyMarketingCampaign(context, orders, ref spent);
 
         // 5. Shared toolkit - unchanged from DomesticProfitOptimizerStrategy's own use of it.

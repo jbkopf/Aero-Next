@@ -373,6 +373,25 @@ public class AiToolkitTests
     }
 
     [Fact]
+    public void ApplyManagementToolkit_MarketingTookTheLastAction_DoesNotCountAsBinding()
+    {
+        // 3 of 3 spent, but one of them was a marketing campaign - it only
+        // used an action that was otherwise spare, so the cap wasn't really
+        // the bottleneck and an executive ($300k/quarter forever) isn't
+        // warranted. Control: the same spend with no campaign does hire.
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 50);
+        var context = MakeContext(new[] { home }, home, actionCap: 3, availableCash: Money.FromDollars(10_000_000));
+        var withCampaign = new System.Collections.Generic.List<QuarterOrder> { new NetworkMarketingOrder() };
+        var withoutCampaign = new System.Collections.Generic.List<QuarterOrder>();
+
+        AiToolkit.ApplyManagementToolkit(context, withCampaign, new System.Collections.Generic.HashSet<int>(), spentBeforeToolkit: 3);
+        AiToolkit.ApplyManagementToolkit(context, withoutCampaign, new System.Collections.Generic.HashSet<int>(), spentBeforeToolkit: 3);
+
+        Assert.Empty(withCampaign.OfType<HireExecutiveOrder>());
+        Assert.Single(withoutCampaign.OfType<HireExecutiveOrder>());
+    }
+
+    [Fact]
     public void ApplyManagementToolkit_Unaffordable_DoesNotHireEvenWhenBinding()
     {
         // Binding (3 of 3 spent), but cash falls short of ExecutiveHiringCost
@@ -1426,255 +1445,53 @@ public class AiToolkitTests
         Assert.Equal(Aircraft, adjust.AircraftType);
     }
 
-    // --- ApplyMarketingCampaign (M52, retargeted at load factor by M53, then real profit by M54) ---
+    // --- ApplyMarketingCampaign (value-based redesign: the campaign with the largest estimated net gain, if positive) ---
 
-    // Aircraft (100 seats) against these tests' own close, weight-50 city
-    // pairs produces demand well above capacity - carried is pinned at
-    // 100% of a small capacity, which is also genuinely PROFITABLE at the
-    // default fare's own margin (a "healthy" route, in both the old
-    // load-factor sense and the current real-profit sense). BigAircraft's
-    // huge capacity against the same demand means operating cost (charged
-    // on capacity offered) swamps the same real revenue - genuinely
-    // UNPROFITABLE (a "struggling" route, in both senses too) - the two
-    // together let a test build both kinds from the same cities/demand.
-    // Test names below still say "struggling"; read it as "unprofitable."
+    // The weight-50/weight-50 pair every fixture here shares has ~758,269
+    // pax/qtr of demand at 157km (see the type-swap fixtures above). At
+    // that demand a route campaign costs ~$37.9M ($50 per passenger of
+    // demand) and a network campaign $100k per route. Aircraft (100 seats,
+    // ~75,400 seats/qtr there) always runs full - no spare seats, so no
+    // campaign can add passengers. BigAircraft (100,000 seats) always has
+    // tens of millions of spare seats, so a campaign's reach is limited
+    // only by demand, and FareOverride alone decides whether it pays.
     private static readonly AircraftType BigAircraft = new("big", "Big", Seats: 100_000, RangeKm: 10_000, CruiseSpeedKmh: 900, CostPerAvailableSeatKm: 0.1);
 
     private static StrategyContext MakeMarketingContext(
         IReadOnlyList<Route> routes,
         System.Collections.Generic.IReadOnlyDictionary<(string OriginId, string DestinationId), int>? rivalCountByServedRoute,
         Money? availableCash = null, int actionCap = 3,
-        System.Collections.Generic.IReadOnlyDictionary<(string OriginId, string DestinationId), AiRouteHistory>? routeHistoryByPair = null)
+        System.Collections.Generic.IReadOnlyDictionary<(string OriginId, string DestinationId), AiRouteHistory>? routeHistoryByPair = null,
+        System.Collections.Generic.IReadOnlyDictionary<(string OriginId, string DestinationId), long>? lastQuarterSeatsCarriedByRoute = null)
     {
         var home = routes.Count > 0 ? routes[0].Origin : MakeCity("home", Region.NorthAmerica, 0, 0, 50);
         var cities = routes.SelectMany(r => new[] { r.Origin, r.Destination }).Distinct().DefaultIfEmpty(home).ToList();
 
         return new(routes, actionCap, cities, DemandModel, new[] { Aircraft }, AirlineFleet.Empty, home.Region, home,
-            AvailableCash: availableCash, RivalCountByServedRoute: rivalCountByServedRoute, RouteHistoryByPair: routeHistoryByPair);
+            AvailableCash: availableCash, RivalCountByServedRoute: rivalCountByServedRoute, RouteHistoryByPair: routeHistoryByPair,
+            LastQuarterSeatsCarriedByRoute: lastQuarterSeatsCarriedByRoute);
+    }
+
+    private static System.Collections.Generic.Dictionary<(string, string), int> Rivals(params (Route Route, int Count)[] entries) =>
+        entries.ToDictionary(e => QuarterEngine.NormalizedPairKey(e.Route.Origin, e.Route.Destination), e => e.Count);
+
+    private static Route SpareSeatRoute(City from, City to, long fareDollars) =>
+        new(from, to, BigAircraft, AircraftCount: 1, FareOverride: Money.FromDollars(fareDollars));
+
+    private static (List<QuarterOrder> Orders, int Spent) Market(StrategyContext context, int spentBefore = 0)
+    {
+        var orders = new List<QuarterOrder>();
+        var spent = spentBefore;
+        AiToolkit.ApplyMarketingCampaign(context, orders, ref spent);
+        return (orders, spent);
     }
 
     [Fact]
     public void ApplyMarketingCampaign_NullRivalCount_NoOp()
     {
-        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
-        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
-        var route = new Route(a, b, Aircraft, AircraftCount: 1);
-        var context = MakeMarketingContext(new[] { route }, rivalCountByServedRoute: null, availableCash: Money.FromDollars(50_000_000));
-        var orders = new System.Collections.Generic.List<QuarterOrder>();
-        var spent = 0;
+        var route = SpareSeatRoute(MakeCity("a", Region.NorthAmerica, 0, 0, 50), MakeCity("b", Region.NorthAmerica, 1, 1, 50), 1_000);
 
-        AiToolkit.ApplyMarketingCampaign(context, orders, ref spent);
-
-        Assert.Empty(orders);
-        Assert.Equal(0, spent);
-    }
-
-    [Fact]
-    public void ApplyMarketingCampaign_NoContestedRoutes_NoOp()
-    {
-        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
-        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
-        var route = new Route(a, b, Aircraft, AircraftCount: 1);
-        var key = QuarterEngine.NormalizedPairKey(a, b);
-        var rivalCount = new System.Collections.Generic.Dictionary<(string, string), int> { [key] = 0 };
-        var context = MakeMarketingContext(new[] { route }, rivalCount, availableCash: Money.FromDollars(50_000_000));
-        var orders = new System.Collections.Generic.List<QuarterOrder>();
-        var spent = 0;
-
-        AiToolkit.ApplyMarketingCampaign(context, orders, ref spent);
-
-        Assert.Empty(orders);
-        Assert.Equal(0, spent);
-    }
-
-    [Fact]
-    public void ApplyMarketingCampaign_OneStrugglingContestedRoute_ProposesRouteMarketingOrder()
-    {
-        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
-        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
-        var route = new Route(a, b, BigAircraft, AircraftCount: 1); // huge capacity against real demand - unprofitable
-        var key = QuarterEngine.NormalizedPairKey(a, b);
-        var rivalCount = new System.Collections.Generic.Dictionary<(string, string), int> { [key] = 1 };
-        var context = MakeMarketingContext(new[] { route }, rivalCount, availableCash: Money.FromDollars(50_000_000));
-        var orders = new System.Collections.Generic.List<QuarterOrder>();
-        var spent = 0;
-
-        AiToolkit.ApplyMarketingCampaign(context, orders, ref spent);
-
-        var order = Assert.Single(orders.OfType<RouteMarketingOrder>());
-        Assert.Equal(new HashSet<string> { "a", "b" }, new HashSet<string> { order.Origin.Id, order.Destination.Id });
-        Assert.Empty(orders.OfType<NetworkMarketingOrder>());
-        Assert.Equal(1, spent);
-    }
-
-    // --- M58 resume: give up on marketing a route that's been unprofitable too long ---
-
-    [Fact]
-    public void ApplyMarketingCampaign_RouteSustainedUnprofitableTooLong_NoOp()
-    {
-        // M58 resume: real 300-game evidence found this method repeatedly
-        // re-spending cash on a route whose real problem (a permanent
-        // demand shock) marketing can't fix, since the triggering
-        // condition never clears. Same fixture as the "proposes an
-        // order" test above, except the route's own history already
-        // shows MaximumConsecutiveUnprofitableQuartersForMarketing (4)
-        // consecutive bad quarters - genuinely persistent, not merely
-        // newly-struggling.
-        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
-        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
-        var route = new Route(a, b, BigAircraft, AircraftCount: 1);
-        var key = QuarterEngine.NormalizedPairKey(a, b);
-        var rivalCount = new System.Collections.Generic.Dictionary<(string, string), int> { [key] = 1 };
-        var history = new System.Collections.Generic.Dictionary<(string, string), AiRouteHistory>
-        {
-            [key] = new(LastShrunkQuarter: null, LastClosedQuarter: null, ConsecutiveUnprofitableQuarters: 4),
-        };
-        var context = MakeMarketingContext(new[] { route }, rivalCount, availableCash: Money.FromDollars(50_000_000), routeHistoryByPair: history);
-        var orders = new System.Collections.Generic.List<QuarterOrder>();
-        var spent = 0;
-
-        AiToolkit.ApplyMarketingCampaign(context, orders, ref spent);
-
-        Assert.Empty(orders);
-        Assert.Equal(0, spent);
-    }
-
-    [Fact]
-    public void ApplyMarketingCampaign_RouteNewlyStruggling_BelowGiveUpThreshold_StillProposesOrder()
-    {
-        // One quarter short of the give-up threshold - still a real,
-        // worthwhile target, proving this isn't an overcorrection to
-        // "never market anything."
-        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
-        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
-        var route = new Route(a, b, BigAircraft, AircraftCount: 1);
-        var key = QuarterEngine.NormalizedPairKey(a, b);
-        var rivalCount = new System.Collections.Generic.Dictionary<(string, string), int> { [key] = 1 };
-        var history = new System.Collections.Generic.Dictionary<(string, string), AiRouteHistory>
-        {
-            [key] = new(LastShrunkQuarter: null, LastClosedQuarter: null, ConsecutiveUnprofitableQuarters: 3),
-        };
-        var context = MakeMarketingContext(new[] { route }, rivalCount, availableCash: Money.FromDollars(50_000_000), routeHistoryByPair: history);
-        var orders = new System.Collections.Generic.List<QuarterOrder>();
-        var spent = 0;
-
-        AiToolkit.ApplyMarketingCampaign(context, orders, ref spent);
-
-        Assert.Single(orders.OfType<RouteMarketingOrder>());
-        Assert.Equal(1, spent);
-    }
-
-    [Fact]
-    public void ApplyMarketingCampaign_ContestedRouteNotStruggling_NoOp()
-    {
-        // M54: a contested route that's genuinely PROFITABLE (demand
-        // exceeds this small aircraft's capacity, comfortably clearing
-        // cost at the default fare) no longer draws a campaign - M52's
-        // own original demand-ranking would have picked it unconditionally
-        // regardless of health; the retargeted version requires it be
-        // genuinely unprofitable first.
-        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
-        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
-        var route = new Route(a, b, Aircraft, AircraftCount: 1); // small capacity against real demand - profitable
-        var key = QuarterEngine.NormalizedPairKey(a, b);
-        var rivalCount = new System.Collections.Generic.Dictionary<(string, string), int> { [key] = 1 };
-        var context = MakeMarketingContext(new[] { route }, rivalCount, availableCash: Money.FromDollars(50_000_000));
-        var orders = new System.Collections.Generic.List<QuarterOrder>();
-        var spent = 0;
-
-        AiToolkit.ApplyMarketingCampaign(context, orders, ref spent);
-
-        Assert.Empty(orders);
-        Assert.Equal(0, spent);
-    }
-
-    [Fact]
-    public void ApplyMarketingCampaign_StrugglingContestedRoute_PickedOverHealthierHigherDemandOne()
-    {
-        // M53: two contested routes, only one struggling - the healthier
-        // one (route to c, high raw demand, high load factor) must NOT
-        // be picked even though M52's own original demand-ranking would
-        // have preferred it.
-        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
-        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
-        var c = MakeCity("c", Region.NorthAmerica, 2, 2, 200); // much bigger demand weight
-        var strugglingRoute = new Route(a, b, BigAircraft, AircraftCount: 1);
-        var healthyRoute = new Route(a, c, Aircraft, AircraftCount: 1);
-        var rivalCount = new System.Collections.Generic.Dictionary<(string, string), int>
-        {
-            [QuarterEngine.NormalizedPairKey(a, b)] = 1,
-            [QuarterEngine.NormalizedPairKey(a, c)] = 1,
-        };
-        var context = MakeMarketingContext(new[] { strugglingRoute, healthyRoute }, rivalCount, availableCash: Money.FromDollars(50_000_000));
-        var orders = new System.Collections.Generic.List<QuarterOrder>();
-        var spent = 0;
-
-        AiToolkit.ApplyMarketingCampaign(context, orders, ref spent);
-
-        var order = Assert.Single(orders.OfType<RouteMarketingOrder>());
-        Assert.Equal(new HashSet<string> { "a", "b" }, new HashSet<string> { order.Origin.Id, order.Destination.Id });
-    }
-
-    [Fact]
-    public void ApplyMarketingCampaign_TwoStrugglingContestedRoutes_ProposesNetworkMarketingOrder()
-    {
-        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
-        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
-        var c = MakeCity("c", Region.NorthAmerica, 2, 2, 50);
-        var routeAb = new Route(a, b, BigAircraft, AircraftCount: 1);
-        var routeAc = new Route(a, c, BigAircraft, AircraftCount: 1);
-        var rivalCount = new System.Collections.Generic.Dictionary<(string, string), int>
-        {
-            [QuarterEngine.NormalizedPairKey(a, b)] = 1,
-            [QuarterEngine.NormalizedPairKey(a, c)] = 2,
-        };
-        var context = MakeMarketingContext(new[] { routeAb, routeAc }, rivalCount, availableCash: Money.FromDollars(50_000_000));
-        var orders = new System.Collections.Generic.List<QuarterOrder>();
-        var spent = 0;
-
-        AiToolkit.ApplyMarketingCampaign(context, orders, ref spent);
-
-        Assert.Single(orders.OfType<NetworkMarketingOrder>());
-        Assert.Empty(orders.OfType<RouteMarketingOrder>());
-        Assert.Equal(1, spent);
-    }
-
-    [Fact]
-    public void ApplyMarketingCampaign_TwoStrugglingContestedRoutes_Unaffordable_NoOp()
-    {
-        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
-        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
-        var c = MakeCity("c", Region.NorthAmerica, 2, 2, 50);
-        var routeAb = new Route(a, b, BigAircraft, AircraftCount: 1);
-        var routeAc = new Route(a, c, BigAircraft, AircraftCount: 1);
-        var rivalCount = new System.Collections.Generic.Dictionary<(string, string), int>
-        {
-            [QuarterEngine.NormalizedPairKey(a, b)] = 1,
-            [QuarterEngine.NormalizedPairKey(a, c)] = 2,
-        };
-        var context = MakeMarketingContext(new[] { routeAb, routeAc }, rivalCount, availableCash: Money.FromDollars(1));
-        var orders = new System.Collections.Generic.List<QuarterOrder>();
-        var spent = 0;
-
-        AiToolkit.ApplyMarketingCampaign(context, orders, ref spent);
-
-        Assert.Empty(orders);
-        Assert.Equal(0, spent);
-    }
-
-    [Fact]
-    public void ApplyMarketingCampaign_Unaffordable_NoOp()
-    {
-        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
-        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
-        var route = new Route(a, b, BigAircraft, AircraftCount: 1);
-        var key = QuarterEngine.NormalizedPairKey(a, b);
-        var rivalCount = new System.Collections.Generic.Dictionary<(string, string), int> { [key] = 1 };
-        var context = MakeMarketingContext(new[] { route }, rivalCount, availableCash: Money.FromDollars(1));
-        var orders = new System.Collections.Generic.List<QuarterOrder>();
-        var spent = 0;
-
-        AiToolkit.ApplyMarketingCampaign(context, orders, ref spent);
+        var (orders, spent) = Market(MakeMarketingContext(new[] { route }, rivalCountByServedRoute: null, availableCash: Money.FromDollars(1_000_000_000)));
 
         Assert.Empty(orders);
         Assert.Equal(0, spent);
@@ -1683,60 +1500,171 @@ public class AiToolkitTests
     [Fact]
     public void ApplyMarketingCampaign_BudgetExhausted_NoOp()
     {
-        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
-        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
-        var route = new Route(a, b, Aircraft, AircraftCount: 1);
-        var key = QuarterEngine.NormalizedPairKey(a, b);
-        var rivalCount = new System.Collections.Generic.Dictionary<(string, string), int> { [key] = 1 };
-        var context = MakeMarketingContext(new[] { route }, rivalCount, availableCash: Money.FromDollars(50_000_000), actionCap: 3);
-        var orders = new System.Collections.Generic.List<QuarterOrder>();
-        var spent = 3; // already at cap
+        var route = SpareSeatRoute(MakeCity("a", Region.NorthAmerica, 0, 0, 50), MakeCity("b", Region.NorthAmerica, 1, 1, 50), 1_000);
 
-        AiToolkit.ApplyMarketingCampaign(context, orders, ref spent);
+        var (orders, spent) = Market(MakeMarketingContext(new[] { route }, Rivals((route, 0)), availableCash: Money.FromDollars(1_000_000_000), actionCap: 1), spentBefore: 1);
 
         Assert.Empty(orders);
-        Assert.Equal(3, spent);
+        Assert.Equal(1, spent);
+    }
+
+    [Fact]
+    public void ApplyMarketingCampaign_UncontestedRouteAlreadyFull_NoOp()
+    {
+        // No spare seats means no campaign can add a single passenger.
+        var route = new Route(MakeCity("a", Region.NorthAmerica, 0, 0, 50), MakeCity("b", Region.NorthAmerica, 1, 1, 50), Aircraft, AircraftCount: 1);
+
+        var (orders, _) = Market(MakeMarketingContext(new[] { route }, Rivals((route, 0)), availableCash: Money.FromDollars(1_000_000_000)));
+
+        Assert.Empty(orders);
+    }
+
+    [Fact]
+    public void ApplyMarketingCampaign_UncontestedRouteWithSpareSeats_ProposesRouteMarketingOrder()
+    {
+        // The case the old trigger never covered: no rival, empty seats. At
+        // $1,000 a route campaign nets ~$341M (half of demand into spare
+        // seats, less its ~$37.9M cost) - more than a network campaign's
+        // ~$114M on a one-route network.
+        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
+        var route = SpareSeatRoute(a, b, 1_000);
+
+        var (orders, spent) = Market(MakeMarketingContext(new[] { route }, Rivals((route, 0)), availableCash: Money.FromDollars(1_000_000_000)));
+
+        var order = Assert.Single(orders.OfType<RouteMarketingOrder>());
+        Assert.Equal((a.Id, b.Id), (order.Origin.Id, order.Destination.Id));
+        Assert.Empty(orders.OfType<NetworkMarketingOrder>());
+        Assert.Equal(1, spent);
+    }
+
+    [Fact]
+    public void ApplyMarketingCampaign_FareTooLowForAnyCampaignToPay_NoOp()
+    {
+        // Plenty of spare seats, but at 1 cent a passenger neither campaign
+        // earns back its cost.
+        var route = new Route(MakeCity("a", Region.NorthAmerica, 0, 0, 50), MakeCity("b", Region.NorthAmerica, 1, 1, 50), BigAircraft, AircraftCount: 1, FareOverride: new Money(1));
+
+        var (orders, _) = Market(MakeMarketingContext(new[] { route }, Rivals((route, 0)), availableCash: Money.FromDollars(1_000_000_000)));
+
+        Assert.Empty(orders);
+    }
+
+    [Fact]
+    public void ApplyMarketingCampaign_PicksTheRouteWithTheLargestNetGain()
+    {
+        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
+        var cheaper = SpareSeatRoute(a, MakeCity("b", Region.NorthAmerica, 1, 1, 50), 1_000);
+        var pricier = SpareSeatRoute(a, MakeCity("c", Region.NorthAmerica, -1, -1, 50), 2_000); // same distance, same demand, twice the fare
+
+        var (orders, _) = Market(MakeMarketingContext(new[] { cheaper, pricier }, Rivals((cheaper, 0), (pricier, 0)), availableCash: Money.FromDollars(1_000_000_000)));
+
+        var order = Assert.Single(orders.OfType<RouteMarketingOrder>());
+        Assert.Equal("c", order.Destination.Id);
+    }
+
+    [Fact]
+    public void ApplyMarketingCampaign_ManyRoutesWithSpareSeats_NetworkCampaignBeatsAnySingleRoute()
+    {
+        // Four identical spare-seat routes: a network campaign's +15% on
+        // all four (~$455M net) outweighs a route campaign's +50% on one
+        // (~$341M net).
+        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
+        var routes = new[]
+        {
+            SpareSeatRoute(a, MakeCity("b", Region.NorthAmerica, 1, 1, 50), 1_000),
+            SpareSeatRoute(a, MakeCity("c", Region.NorthAmerica, 1, -1, 50), 1_000),
+            SpareSeatRoute(a, MakeCity("d", Region.NorthAmerica, -1, 1, 50), 1_000),
+            SpareSeatRoute(a, MakeCity("e", Region.NorthAmerica, -1, -1, 50), 1_000),
+        };
+
+        var (orders, spent) = Market(MakeMarketingContext(routes, Rivals(routes.Select(r => (r, 0)).ToArray()), availableCash: Money.FromDollars(1_000_000_000)));
+
+        Assert.Single(orders.OfType<NetworkMarketingOrder>());
+        Assert.Empty(orders.OfType<RouteMarketingOrder>());
+        Assert.Equal(1, spent);
+    }
+
+    [Fact]
+    public void ApplyMarketingCampaign_ContestedRoute_ShareGainThatPays_ProposesRouteMarketingOrder()
+    {
+        // One equal rival: a route campaign lifts this airline's share from
+        // 1/2 to 1.5/2.5, a tenth of demand - ~$75.8M at $1,000, ~$37.9M net
+        // of cost, ahead of the network campaign's smaller share gain.
+        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
+        var route = SpareSeatRoute(a, b, 1_000);
+
+        var (orders, _) = Market(MakeMarketingContext(new[] { route }, Rivals((route, 1)), availableCash: Money.FromDollars(1_000_000_000)));
+
+        Assert.Single(orders.OfType<RouteMarketingOrder>());
+    }
+
+    [Fact]
+    public void ApplyMarketingCampaign_RealCarriedFillsTheSeats_NoOp()
+    {
+        // Last quarter's real carried figure (not the solo estimate) decides
+        // spare seats: a full route has nothing to fill, however big the
+        // aircraft.
+        var route = SpareSeatRoute(MakeCity("a", Region.NorthAmerica, 0, 0, 50), MakeCity("b", Region.NorthAmerica, 1, 1, 50), 1_000);
+        var carried = new System.Collections.Generic.Dictionary<(string, string), long>
+        {
+            [QuarterEngine.NormalizedPairKey(route.Origin, route.Destination)] = route.SeatsPerQuarter,
+        };
+
+        var (orders, _) = Market(MakeMarketingContext(new[] { route }, Rivals((route, 0)), availableCash: Money.FromDollars(1_000_000_000), lastQuarterSeatsCarriedByRoute: carried));
+
+        Assert.Empty(orders);
+    }
+
+    [Fact]
+    public void ApplyMarketingCampaign_LongUnprofitableStreak_StillMarketedWhenTheCampaignPays()
+    {
+        // M58's give-up rule is gone: a campaign that pays back is worth
+        // running whatever the route's history, and one that doesn't never
+        // clears the net-gain check in the first place.
+        var route = SpareSeatRoute(MakeCity("a", Region.NorthAmerica, 0, 0, 50), MakeCity("b", Region.NorthAmerica, 1, 1, 50), 1_000);
+        var history = new System.Collections.Generic.Dictionary<(string, string), AiRouteHistory>
+        {
+            [QuarterEngine.NormalizedPairKey(route.Origin, route.Destination)] = new(LastShrunkQuarter: null, LastClosedQuarter: null, ConsecutiveUnprofitableQuarters: 10),
+        };
+
+        var (orders, _) = Market(MakeMarketingContext(new[] { route }, Rivals((route, 0)), availableCash: Money.FromDollars(1_000_000_000), routeHistoryByPair: history));
+
+        Assert.Single(orders.OfType<RouteMarketingOrder>());
+    }
+
+    [Fact]
+    public void ApplyMarketingCampaign_RouteCampaignUnaffordable_FallsBackToAffordableNetworkCampaign()
+    {
+        // $200k covers the $100k network campaign but not the ~$37.9M route one.
+        var route = SpareSeatRoute(MakeCity("a", Region.NorthAmerica, 0, 0, 50), MakeCity("b", Region.NorthAmerica, 1, 1, 50), 1_000);
+
+        var (orders, _) = Market(MakeMarketingContext(new[] { route }, Rivals((route, 0)), availableCash: Money.FromDollars(200_000)));
+
+        Assert.Single(orders.OfType<NetworkMarketingOrder>());
+        Assert.Empty(orders.OfType<RouteMarketingOrder>());
+    }
+
+    [Fact]
+    public void ApplyMarketingCampaign_NeitherCampaignAffordable_NoOp()
+    {
+        var route = SpareSeatRoute(MakeCity("a", Region.NorthAmerica, 0, 0, 50), MakeCity("b", Region.NorthAmerica, 1, 1, 50), 1_000);
+
+        var (orders, spent) = Market(MakeMarketingContext(new[] { route }, Rivals((route, 0)), availableCash: Money.FromDollars(50_000)));
+
+        Assert.Empty(orders);
+        Assert.Equal(0, spent);
     }
 
     [Fact]
     public void ApplyMarketingCampaign_NullAvailableCash_TreatedAsAffordable_PermissiveDefault()
     {
-        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
-        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
-        var route = new Route(a, b, BigAircraft, AircraftCount: 1);
-        var key = QuarterEngine.NormalizedPairKey(a, b);
-        var rivalCount = new System.Collections.Generic.Dictionary<(string, string), int> { [key] = 1 };
-        var context = MakeMarketingContext(new[] { route }, rivalCount, availableCash: null);
-        var orders = new System.Collections.Generic.List<QuarterOrder>();
-        var spent = 0;
+        var route = SpareSeatRoute(MakeCity("a", Region.NorthAmerica, 0, 0, 50), MakeCity("b", Region.NorthAmerica, 1, 1, 50), 1_000);
 
-        AiToolkit.ApplyMarketingCampaign(context, orders, ref spent);
+        var (orders, _) = Market(MakeMarketingContext(new[] { route }, Rivals((route, 0)), availableCash: null));
 
         Assert.Single(orders.OfType<RouteMarketingOrder>());
-        Assert.Equal(1, spent);
-    }
-
-    [Fact]
-    public void ApplyMarketingCampaign_TwoStrugglingContestedRoutes_NullAvailableCash_TreatedAsAffordable()
-    {
-        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
-        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
-        var c = MakeCity("c", Region.NorthAmerica, 2, 2, 50);
-        var routeAb = new Route(a, b, BigAircraft, AircraftCount: 1);
-        var routeAc = new Route(a, c, BigAircraft, AircraftCount: 1);
-        var rivalCount = new System.Collections.Generic.Dictionary<(string, string), int>
-        {
-            [QuarterEngine.NormalizedPairKey(a, b)] = 1,
-            [QuarterEngine.NormalizedPairKey(a, c)] = 2,
-        };
-        var context = MakeMarketingContext(new[] { routeAb, routeAc }, rivalCount, availableCash: null);
-        var orders = new System.Collections.Generic.List<QuarterOrder>();
-        var spent = 0;
-
-        AiToolkit.ApplyMarketingCampaign(context, orders, ref spent);
-
-        Assert.Single(orders.OfType<NetworkMarketingOrder>());
-        Assert.Equal(1, spent);
     }
 
     // --- M64: route-opening consolidation bonus ---

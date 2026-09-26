@@ -982,60 +982,31 @@ public static class AiToolkit
     }
 
     /// <summary>
-    /// M58 resume (proposed, tunable): a route this far into a sustained
-    /// unprofitable streak (AiRouteHistory.ConsecutiveUnprofitableQuarters)
-    /// is excluded from marketing entirely - real 300-game evidence found
-    /// NetworkOptimizerStrategy (which runs this method first, every
-    /// quarter it's selected) repeatedly re-spending real cash on a route
-    /// whose real problem was a permanent demand shock (the 1973 oil
-    /// crisis), not low visibility - marketing genuinely can't fix that,
-    /// and since the triggering condition never clears, the campaign just
-    /// re-fires forever. Measured: NorthAmerica's own bankruptcy rate
-    /// under NetworkOptimizerStrategy rose from 65.0% to 85.0% once its
-    /// own Suitability signal was fixed to trigger correctly on real,
-    /// sustained trouble - it was the marketing spend itself doing the
-    /// damage once selection worked as intended, confirmed by cash
-    /// trajectory (airlines switching to it collapsed toward zero cash by
-    /// year 30, while ones that stayed on DomesticProfitOptimizerStrategy
-    /// kept growing steadily despite the exact same underlying route
-    /// trouble). A route that's merely newly-struggling (few consecutive
-    /// bad quarters) is still a real, worthwhile marketing target - this
-    /// only gives up once the pattern is genuinely persistent.
-    /// </summary>
-    private const int MaximumConsecutiveUnprofitableQuartersForMarketing = 4;
-
-    /// <summary>
-    /// M52, retargeted by M53 (load factor) then M54 (real profit):
-    /// proposes a marketing campaign to help a genuinely unprofitable
-    /// contested route recover, not to squeeze more out of one already
-    /// doing fine. Restricted to contested routes (CompetitiveMarket.Resolve's
-    /// own boost never applies to an uncontested pair, M47's own design,
-    /// so spending real cash on one there would buy nothing visible)
-    /// with FareCalculator.EstimatedProfit below zero — a real profit
-    /// estimate, using LastQuarterSeatsCarriedByRoute's own real carried
-    /// figure when available (see BestAvailableCarried) rather than the
-    /// load-factor proxy M52/M53 used, since a contested route's real
-    /// carried volume can genuinely differ from the solo-carrier
-    /// estimate. Ranked worst-profit-first among the survivors. A no-op
-    /// (same permissive-default convention as every other nullable
-    /// StrategyContext field) when RivalCountByServedRoute is null, when
-    /// the action budget is already spent, or when no served route is
-    /// both contested and unprofitable. Exactly one such route picks the
-    /// bigger, targeted RouteMarketingOrder there; two or more pick the
-    /// smaller but broader NetworkMarketingOrder instead, since
-    /// QuarterEngine's own mutual-exclusivity rule means a route campaign
-    /// can only ever help one contested pair the same quarter. A
-    /// legible, cheap heuristic - not a modeled cost/benefit optimization
-    /// weighing route-cost-per-pair against network-cost-per-route - kept
-    /// deliberately simple like every other "single best candidate, no
-    /// deeper search" method in this file.
+    /// Marketing redesign (docs/OPEN_WORK.md, 2026-09-24): proposes the
+    /// single marketing campaign - one route-targeted RouteMarketingOrder,
+    /// or one NetworkMarketingOrder - with the largest estimated net gain
+    /// this quarter, and only when that gain is positive and the campaign
+    /// is affordable. Otherwise a no-op, as it also is when
+    /// RivalCountByServedRoute is null (no visibility into which routes
+    /// are contested, the same permissive-default convention as every
+    /// other nullable StrategyContext field) or the action budget is spent.
     ///
-    /// M58 resume: also excludes a route whose own sustained-unprofitable
-    /// streak has already passed MaximumConsecutiveUnprofitableQuartersForMarketing
-    /// - see that constant's own doc comment. A route with no history yet
-    /// (RouteHistoryByPair null, or no entry for this pair) is treated as
-    /// a fresh 0-quarter streak, same permissive-default convention as
-    /// everything else here - never excluded on that basis alone.
+    /// Why value-based: the previous trigger (M52, retargeted by M53/M54)
+    /// only ever marketed a route that was both unprofitable and contested,
+    /// on the premise that CompetitiveMarket's boost never applies to an
+    /// uncontested pair. That premise stopped being true at M47 round 2,
+    /// which gave an uncontested pair a real demand boost into the route's
+    /// spare seats - and the AI was never updated. Measured across 40 full
+    /// sweep games: 2.0% of route-quarters were unprofitable, 0.46% were
+    /// contested, and none were both, so the old trigger never fired once.
+    /// Uncontested routes are 99.5% of the network, and when one has empty
+    /// seats a campaign can pay for itself several times over.
+    ///
+    /// It also replaces M58's give-up rule (stop marketing a route after
+    /// four consecutive unprofitable quarters). That rule existed because
+    /// the old trigger kept re-spending on routes marketing couldn't help;
+    /// a campaign that doesn't pay back now simply never clears this
+    /// method's own net-gain check, whatever the route's history.
     /// </summary>
     public static void ApplyMarketingCampaign(StrategyContext context, List<QuarterOrder> orders, ref int spent)
     {
@@ -1044,54 +1015,83 @@ public static class AiToolkit
             return;
         }
 
-        var routeLoads = RouteEvaluator.EvaluateNetwork(context.CurrentRoutes, context.DemandModel);
+        var routeLoads = RouteEvaluator.EvaluateNetwork(context.CurrentRoutes, context.DemandModel)
+            .OrderBy(load => load.Route.Origin.Id, StringComparer.Ordinal)
+            .ThenBy(load => load.Route.Destination.Id, StringComparer.Ordinal);
 
-        var unprofitableContestedRoutes = routeLoads
-            .Select(load => (load.Route, Profit: FareCalculator.EstimatedProfit(load.Route, BestAvailableCarried(load.Route, load.PassengersCarried, context))))
-            .Where(x => x.Profit < Money.Zero)
-            .Where(x => context.RivalCountByServedRoute.GetValueOrDefault(QuarterEngine.NormalizedPairKey(x.Route.Origin, x.Route.Destination)) > 0)
-            .Where(x => (context.RouteHistoryByPair?.GetValueOrDefault(QuarterEngine.NormalizedPairKey(x.Route.Origin, x.Route.Destination))?.ConsecutiveUnprofitableQuarters ?? 0)
-                < MaximumConsecutiveUnprofitableQuartersForMarketing)
-            .OrderBy(x => x.Profit.Cents)
-            .ThenBy(x => x.Route.Origin.Id, StringComparer.Ordinal)
-            .ThenBy(x => x.Route.Destination.Id, StringComparer.Ordinal)
-            .Select(x => x.Route)
-            .ToList();
+        Route? bestRoute = null;
+        var bestRouteNet = Money.Zero;
+        var networkGain = Money.Zero;
 
-        if (unprofitableContestedRoutes.Count == 1)
+        foreach (var load in routeLoads)
         {
-            var target = unprofitableContestedRoutes[0];
-            var demand = context.DemandModel.ForPair(target.Origin, target.Destination).PassengersPerQuarter;
-            var cost = MarketingCostCalculator.RouteCampaignCost(demand);
+            var demand = context.DemandModel.ForPair(load.Route.Origin, load.Route.Destination).PassengersPerQuarter;
+            var rivals = context.RivalCountByServedRoute.GetValueOrDefault(QuarterEngine.NormalizedPairKey(load.Route.Origin, load.Route.Destination));
+            var routeCost = MarketingCostCalculator.RouteCampaignCost(demand);
+            var routeNet = EstimatedCampaignGain(context, load, demand, rivals, CompetitiveMarket.RouteCampaignBoost) - routeCost;
 
-            if (context.AvailableCash is null || FinancialState.CanAfford(context.AvailableCash.Value, cost))
+            // Strictly greater, over a stable id order, so an exact tie
+            // always goes to the same route.
+            if (routeNet > bestRouteNet && CanAffordCampaign(context, routeCost))
             {
-                orders.Add(new RouteMarketingOrder(target.Origin, target.Destination));
-                spent += 1;
+                bestRoute = load.Route;
+                bestRouteNet = routeNet;
             }
+
+            networkGain += EstimatedCampaignGain(context, load, demand, rivals, CompetitiveMarket.NetworkCampaignBoost);
         }
-        else if (unprofitableContestedRoutes.Count >= 2)
-        {
-            var cost = MarketingCostCalculator.NetworkCampaignCost(context.CurrentRoutes.Count);
 
-            if (context.AvailableCash is null || FinancialState.CanAfford(context.AvailableCash.Value, cost))
-            {
-                orders.Add(new NetworkMarketingOrder());
-                spent += 1;
-            }
+        var networkCost = MarketingCostCalculator.NetworkCampaignCost(context.CurrentRoutes.Count);
+        var networkNet = networkGain - networkCost;
+        var networkWorthwhile = networkNet > Money.Zero && CanAffordCampaign(context, networkCost);
+
+        if (bestRoute is not null && (!networkWorthwhile || bestRouteNet >= networkNet))
+        {
+            orders.Add(new RouteMarketingOrder(bestRoute.Origin, bestRoute.Destination));
+            spent += 1;
+        }
+        else if (networkWorthwhile)
+        {
+            orders.Add(new NetworkMarketingOrder());
+            spent += 1;
         }
     }
 
     /// <summary>
-    /// M44: mirrors BaselineAi.FindBestUnservedPair's own shape (plain
-    /// demand-ranked, no cross-region/domestic preference) but also
-    /// respects network contiguity - used by ApplyManagementToolkit's own
-    /// stranded-unit check rather than BaselineAi.FindBestUnservedPair
-    /// itself, which stays untouched (BaselineAi.DecideOrders is legacy,
-    /// no longer called by either real loop - see its own class doc
-    /// comment). A unit that could only reach a non-contiguous pair now
-    /// correctly counts as stranded: winning a gateway slot doesn't grant
-    /// route rights from a city the airline has no presence near.
+    /// The extra profit one quarter's campaign at <paramref name="boost"/>
+    /// (CompetitiveMarket's own RouteCampaignBoost/NetworkCampaignBoost)
+    /// is estimated to bring this route, mirroring CompetitiveMarket's two
+    /// effects. Uncontested: demand grows by boost × pair demand, capped at
+    /// the route's spare seats. Contested: this airline's share grows from
+    /// 1/(rivals+1) to (1+boost)/(rivals+1+boost) - assuming rivals of
+    /// equal weight, since the AI only knows how many there are - also
+    /// capped at spare seats. Spare seats use last quarter's real carried
+    /// passengers when available (BestAvailableCarried). Operating cost is
+    /// charged on seats flown, not passengers (FareCalculator.EstimatedProfit),
+    /// so the gain is purely the extra passengers' revenue.
+    /// </summary>
+    private static Money EstimatedCampaignGain(StrategyContext context, RouteLoad load, long demand, int rivals, double boost)
+    {
+        var carried = BestAvailableCarried(load.Route, load.PassengersCarried, context);
+        var spareSeats = Math.Max(0L, load.SeatsPerQuarter - carried);
+        var potentialExtra = rivals == 0
+            ? demand * boost
+            : demand * ((1 + boost) / (rivals + 1 + boost) - 1.0 / (rivals + 1));
+        var extra = Math.Min(spareSeats, Math.Max(0L, (long)Math.Round(potentialExtra, MidpointRounding.AwayFromZero)));
+
+        return FareCalculator.EstimatedProfit(load.Route, carried + extra) - FareCalculator.EstimatedProfit(load.Route, carried);
+    }
+
+    private static bool CanAffordCampaign(StrategyContext context, Money cost) =>
+        context.AvailableCash is null || FinancialState.CanAfford(context.AvailableCash.Value, cost);
+
+    /// <summary>
+    /// M44: plain demand-ranked search for the best unserved pair this
+    /// aircraft type can reach, respecting network contiguity - used by
+    /// ApplyManagementToolkit's own stranded-unit check. A unit that could
+    /// only reach a non-contiguous pair correctly counts as stranded:
+    /// winning a gateway slot doesn't grant route rights from a city the
+    /// airline has no presence near.
     /// </summary>
     private static PairDemand? FindBestUnservedPairFromValidOrigin(StrategyContext context, IReadOnlySet<string> validOriginCityIds, AircraftType aircraft)
     {
@@ -1526,7 +1526,18 @@ public static class AiToolkit
         // reactive-to-current-state proxy for "an extra action would
         // have helped," not a forecast of future quarters (matching this
         // toolkit's own close/raise/cut style everywhere else).
-        var actionCapWasBinding = spentBeforeToolkit >= context.ActionCap;
+        //
+        // A marketing campaign's action doesn't count: ApplyMarketingCampaign
+        // only fires when a campaign pays for itself, so it soaks up an
+        // otherwise-spare action rather than showing the airline needs
+        // more. Counting it made the cap look binding almost every quarter
+        // once marketing started firing, and a small network would hire an
+        // executive ($300k/quarter forever) to keep running a campaign
+        // worth less than that - measured as a doubling of AustralAsia's
+        // mid-game bankruptcies across two 300-game seed ranges, traced to
+        // exactly this hire (docs/BASELINE_AI_ROADMAP.md, marketing redesign).
+        var marketingActions = orders.Count(o => o is RouteMarketingOrder or NetworkMarketingOrder);
+        var actionCapWasBinding = spentBeforeToolkit - marketingActions >= context.ActionCap;
 
         var canAffordComfortably = context.AvailableCash is null
             || FinancialState.CanAfford(context.AvailableCash.Value, FinancialResolver.ExecutiveHiringCost * ExecutiveHireCashComfortMultiplier);
