@@ -308,7 +308,8 @@ public sealed class NetworkOptimizerStrategy : IAiStrategy
         if (spent + 1 <= context.ActionCap)
         {
             var best = AiToolkit.FindMostProfitablePair(context, reservedUnitIds, validOriginCityIds,
-                p => p.Origin.Region == context.HomeRegion && p.Destination.Region == context.HomeRegion);
+                p => p.Origin.Region == context.HomeRegion && p.Destination.Region == context.HomeRegion,
+                slotsReservedByCity, citySpendReservedByCity);
             AiToolkit.TryProposeCandidate(context, best, validOriginCityIds, orders, reservedUnitIds, slotsReservedByCity, citySpendReservedByCity, ref spent);
         }
 

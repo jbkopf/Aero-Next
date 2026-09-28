@@ -167,15 +167,15 @@ public sealed class DomesticProfitOptimizerStrategy : IAiStrategy
 
         if (domesticRouteCount < MaxDomesticRoutes && spent + 1 <= context.ActionCap)
         {
-            var idleBest = FindMostProfitableDomesticPairUsingIdleFleet(context, reservedUnitIds, validOriginCityIds);
+            // Both searches below only return routes that can be opened right
+            // now (AiToolkit.CanOpenNow), so no separate slot/capacity check.
+            var idleBest = FindMostProfitableDomesticPairUsingIdleFleet(context, reservedUnitIds, validOriginCityIds, slotsReservedByCity, citySpendReservedByCity);
             if (idleBest is not null && !MeetsCatastropheFloor(idleBest.Value.Pair, idleBest.Value.Aircraft))
             {
                 idleBest = null; // catastrophic mismatch - skip this resource rather than commit; falls through to the buy-new branch below, a genuinely different resource, not a downgrade to a worse pair
             }
 
-            if (idleBest is not null && AiToolkit.TryOrientFromValidOrigin(idleBest.Value.Pair, validOriginCityIds, out var origin, out var destination)
-                && BaselineAi.HasSlotAtEveryGateway(origin, destination, context.AvailableSlotsByCity, slotsReservedByCity)
-                && AiToolkit.HasRoomAtEveryCity(origin, destination, context.CityWideSlotsRemaining, citySpendReservedByCity))
+            if (idleBest is not null && AiToolkit.TryOrientFromValidOrigin(idleBest.Value.Pair, validOriginCityIds, out var origin, out var destination))
             {
                 orders.Add(new RouteOrder(origin, destination, idleBest.Value.Aircraft));
                 BaselineAi.ReserveSlots(origin, destination, slotsReservedByCity);
@@ -198,7 +198,7 @@ public sealed class DomesticProfitOptimizerStrategy : IAiStrategy
                 // leased - the union of both stays legal for either
                 // branch below.
                 var acquirableTypes = context.PurchasableOrEraTypes.Union(context.LeasableOrEraTypes).ToList();
-                var bestOrdered = FindMostProfitableDomesticPairAcrossTypes(context, acquirableTypes, validOriginCityIds);
+                var bestOrdered = FindMostProfitableDomesticPairAcrossTypes(context, acquirableTypes, validOriginCityIds, slotsReservedByCity, citySpendReservedByCity);
                 if (bestOrdered is not null && !MeetsCatastropheFloor(bestOrdered.Value.Pair, bestOrdered.Value.Aircraft))
                 {
                     bestOrdered = null; // catastrophic mismatch - skip opening anything this quarter rather than commit
@@ -214,9 +214,7 @@ public sealed class DomesticProfitOptimizerStrategy : IAiStrategy
                     orders.Add(new AircraftOrder(bestOrdered.Value.Aircraft, Quantity: 1));
                     spent += 1;
                 }
-                else if (bestOrdered is not null && oriented is not null && spent + 1 <= context.ActionCap
-                    && BaselineAi.HasSlotAtEveryGateway(oriented.Value.Origin, oriented.Value.Destination, context.AvailableSlotsByCity, slotsReservedByCity)
-                    && AiToolkit.HasRoomAtEveryCity(oriented.Value.Origin, oriented.Value.Destination, context.CityWideSlotsRemaining, citySpendReservedByCity))
+                else if (bestOrdered is not null && oriented is not null && spent + 1 <= context.ActionCap)
                 {
                     // Leasing resolves next quarter now (two-phase,
                     // docs/AIRCRAFT_ACQUISITION_ROADMAP.md) - submit it
@@ -294,7 +292,9 @@ public sealed class DomesticProfitOptimizerStrategy : IAiStrategy
     /// Mirrors BaselineAi.FindBestUnservedPairUsingIdleFleet's shape, but region-filtered and profitability-ranked instead of demand-ranked.
     /// M58: internal, not private - NetworkOptimizerStrategy reuses this directly (same domestic-only, profit-aware search it wants too, unmodified).
     /// </summary>
-    internal static (PairDemand Pair, AircraftType Aircraft)? FindMostProfitableDomesticPairUsingIdleFleet(StrategyContext context, IReadOnlySet<int> reservedUnitIds, IReadOnlySet<string> validOriginCityIds)
+    internal static (PairDemand Pair, AircraftType Aircraft)? FindMostProfitableDomesticPairUsingIdleFleet(
+        StrategyContext context, IReadOnlySet<int> reservedUnitIds, IReadOnlySet<string> validOriginCityIds,
+        Dictionary<string, int> slotsReservedByCity, Dictionary<string, int> citySpendReservedByCity)
     {
         var candidateTypes = context.OwnFleet.Idle
             .Where(u => !reservedUnitIds.Contains(u.Id))
@@ -302,7 +302,7 @@ public sealed class DomesticProfitOptimizerStrategy : IAiStrategy
             .Distinct()
             .ToList();
 
-        return FindMostProfitableDomesticPairAcrossTypes(context, candidateTypes, validOriginCityIds);
+        return FindMostProfitableDomesticPairAcrossTypes(context, candidateTypes, validOriginCityIds, slotsReservedByCity, citySpendReservedByCity);
     }
 
     /// <summary>
@@ -318,7 +318,9 @@ public sealed class DomesticProfitOptimizerStrategy : IAiStrategy
     /// directly for its own (much lower-priority) new-pair search rather
     /// than re-deriving the same already-proven, already-measured logic.
     /// </summary>
-    internal static (PairDemand Pair, AircraftType Aircraft)? FindMostProfitableDomesticPairAcrossTypes(StrategyContext context, IReadOnlyList<AircraftType> candidateTypes, IReadOnlySet<string> validOriginCityIds)
+    internal static (PairDemand Pair, AircraftType Aircraft)? FindMostProfitableDomesticPairAcrossTypes(
+        StrategyContext context, IReadOnlyList<AircraftType> candidateTypes, IReadOnlySet<string> validOriginCityIds,
+        Dictionary<string, int> slotsReservedByCity, Dictionary<string, int> citySpendReservedByCity)
     {
         var served = context.CurrentRoutes
             .SelectMany(r => new[] { (r.Origin.Id, r.Destination.Id), (r.Destination.Id, r.Origin.Id) })
@@ -330,6 +332,7 @@ public sealed class DomesticProfitOptimizerStrategy : IAiStrategy
             .Where(p => !served.Contains((p.Origin.Id, p.Destination.Id)))
             .Where(p => !recentlyClosed.Contains(QuarterEngine.NormalizedPairKey(p.Origin, p.Destination)))
             .Where(p => validOriginCityIds.Contains(p.Origin.Id) || validOriginCityIds.Contains(p.Destination.Id))
+            .Where(p => AiToolkit.CanOpenNow(context, p, validOriginCityIds, slotsReservedByCity, citySpendReservedByCity))
             .ToList();
 
         // Built once per DecideOrders call, not once per candidate - hub

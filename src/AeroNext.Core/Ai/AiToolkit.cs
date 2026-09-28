@@ -310,8 +310,11 @@ public static class AiToolkit
     /// preserving that class's own unbroken never-cross-region invariant).
     /// </summary>
     public static (PairDemand Pair, AircraftType Aircraft, Money Profit, bool UsesIdleUnit)? FindMostProfitablePair(
-        StrategyContext context, IReadOnlySet<int> reservedUnitIds, IReadOnlySet<string> validOriginCityIds, Func<PairDemand, bool> regionFilter)
+        StrategyContext context, IReadOnlySet<int> reservedUnitIds, IReadOnlySet<string> validOriginCityIds, Func<PairDemand, bool> regionFilter,
+        Dictionary<string, int>? slotsReservedByCity = null, Dictionary<string, int>? citySpendReservedByCity = null)
     {
+        slotsReservedByCity ??= new Dictionary<string, int>();
+        citySpendReservedByCity ??= new Dictionary<string, int>();
         var served = context.CurrentRoutes
             .SelectMany(r => new[] { (r.Origin.Id, r.Destination.Id), (r.Destination.Id, r.Origin.Id) })
             .ToHashSet();
@@ -337,6 +340,7 @@ public static class AiToolkit
             .Where(p => !recentlyClosed.Contains(QuarterEngine.NormalizedPairKey(p.Origin, p.Destination)))
             .Where(p => validOriginCityIds.Contains(p.Origin.Id) || validOriginCityIds.Contains(p.Destination.Id))
             .Where(regionFilter)
+            .Where(p => CanOpenNow(context, p, validOriginCityIds, slotsReservedByCity, citySpendReservedByCity))
             .SelectMany(p => typeCandidates
                 .Where(type => p.DistanceKm <= type.RangeKm)
                 .Select(type =>
@@ -745,9 +749,17 @@ public static class AiToolkit
     /// callers (the M43 priority-boost's own two proof tests) inspect
     /// Pair.Origin/Destination directly against AllPairs's own canonical
     /// ordering.
+    ///
+    /// Also filtered on CanOpenNow: the won city has a slot by definition,
+    /// but the pair's other endpoint may be a gateway with no slot or a
+    /// city with no capacity left.
     /// </summary>
-    public static (PairDemand Pair, AircraftType Aircraft)? FindBestUnservedPairTouchingWonSlot(StrategyContext context, IReadOnlySet<int> reservedUnitIds)
+    public static (PairDemand Pair, AircraftType Aircraft)? FindBestUnservedPairTouchingWonSlot(
+        StrategyContext context, IReadOnlySet<int> reservedUnitIds,
+        Dictionary<string, int>? slotsReservedByCity = null, Dictionary<string, int>? citySpendReservedByCity = null)
     {
+        slotsReservedByCity ??= new Dictionary<string, int>();
+        citySpendReservedByCity ??= new Dictionary<string, int>();
         if (context.AvailableSlotsByCity is null)
         {
             return null;
@@ -785,6 +797,7 @@ public static class AiToolkit
                 .Where(p => validOriginCityIds.Contains(p.Origin.Id) || validOriginCityIds.Contains(p.Destination.Id))
                 .Where(p => !served.Contains((p.Origin.Id, p.Destination.Id)))
                 .Where(p => p.DistanceKm <= type.RangeKm)
+                .Where(p => CanOpenNow(context, p, validOriginCityIds, slotsReservedByCity, citySpendReservedByCity))
                 .Select(p => (Pair: p, Aircraft: type)))
             .OrderByDescending(c => c.Pair.PassengersPerQuarter)
             .ThenBy(c => c.Pair.Origin.Id, StringComparer.Ordinal)
@@ -855,6 +868,27 @@ public static class AiToolkit
             .Where(c => c.AutoCapacity is not null)
             .All(c => cityWideSlotsRemaining.GetValueOrDefault(c.Id) - citySpendReservedThisPass.GetValueOrDefault(c.Id) > 0);
     }
+
+    /// <summary>
+    /// Whether this airline could open <paramref name="pair"/> this quarter:
+    /// one endpoint is a valid origin (network contiguity), the airline has
+    /// a free slot at every gateway endpoint, and every capacity-limited
+    /// endpoint city has room - the same three checks the strategies apply
+    /// before submitting a RouteOrder, net of whatever this same planning
+    /// pass has already reserved. Every new-route search filters on this
+    /// *before* ranking, so the AI picks the best route it can actually
+    /// open. Before it did, a 40-game measurement found 91% of searches'
+    /// top picks couldn't be opened, and the AI simply did nothing for that
+    /// step - even though a profitable openable route existed 81% of the
+    /// time (docs/BASELINE_AI_ROADMAP.md, "Only search routes that can be
+    /// opened now").
+    /// </summary>
+    public static bool CanOpenNow(
+        StrategyContext context, PairDemand pair, IReadOnlySet<string> validOriginCityIds,
+        Dictionary<string, int> slotsReservedByCity, Dictionary<string, int> citySpendReservedByCity) =>
+        TryOrientFromValidOrigin(pair, validOriginCityIds, out var origin, out var destination)
+        && BaselineAi.HasSlotAtEveryGateway(origin, destination, context.AvailableSlotsByCity, slotsReservedByCity)
+        && HasRoomAtEveryCity(origin, destination, context.CityWideSlotsRemaining, citySpendReservedByCity);
 
     /// <summary>M45: the AutoCapacity-modeled sibling of BaselineAi.ReserveSlots.</summary>
     public static void ReserveCityWideSlots(City origin, City destination, Dictionary<string, int> citySpendReservedThisPass)

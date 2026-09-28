@@ -1831,4 +1831,89 @@ public class AiToolkitTests
         Assert.Equal(b.Id, origin.Id);
         Assert.Equal(a.Id, destination.Id);
     }
+
+    // --- CanOpenNow / new-route searches only consider routes that can be opened now ---
+
+    private static StrategyContext MakeOpenabilityContext(
+        IReadOnlyList<City> cities, City home, IReadOnlyDictionary<string, int>? availableSlots = null,
+        IReadOnlyDictionary<string, int>? cityWideSlotsRemaining = null, AirlineFleet? fleet = null) =>
+        new(Array.Empty<Route>(), 3, cities, DemandModel, new[] { Aircraft }, fleet ?? AirlineFleet.Empty, home.Region, home,
+            AvailableSlotsByCity: availableSlots, CityWideSlotsRemaining: cityWideSlotsRemaining);
+
+    private static bool CanOpen(StrategyContext context, City a, City b, Dictionary<string, int>? slotsReserved = null) =>
+        AiToolkit.CanOpenNow(context, new PairDemand(a, b, 150, 1_000), new HashSet<string> { context.HomeCity.Id },
+            slotsReserved ?? new Dictionary<string, int>(), new Dictionary<string, int>());
+
+    [Fact]
+    public void CanOpenNow_GatewayEndpointWithoutASlot_False()
+    {
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 50);
+        var gateway = MakeCity("gw", Region.NorthAmerica, 1, 1, 50, isGateway: true);
+
+        Assert.False(CanOpen(MakeOpenabilityContext(new[] { home, gateway }, home, availableSlots: new Dictionary<string, int>()), home, gateway));
+    }
+
+    [Fact]
+    public void CanOpenNow_GatewayEndpointWithASlot_True()
+    {
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 50);
+        var gateway = MakeCity("gw", Region.NorthAmerica, 1, 1, 50, isGateway: true);
+
+        Assert.True(CanOpen(MakeOpenabilityContext(new[] { home, gateway }, home, availableSlots: new Dictionary<string, int> { ["gw"] = 1 }), home, gateway));
+    }
+
+    [Fact]
+    public void CanOpenNow_OnlySlotAlreadyReservedEarlierThisQuarter_False()
+    {
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 50);
+        var gateway = MakeCity("gw", Region.NorthAmerica, 1, 1, 50, isGateway: true);
+        var context = MakeOpenabilityContext(new[] { home, gateway }, home, availableSlots: new Dictionary<string, int> { ["gw"] = 1 });
+
+        Assert.False(CanOpen(context, home, gateway, slotsReserved: new Dictionary<string, int> { ["gw"] = 1 }));
+    }
+
+    [Fact]
+    public void CanOpenNow_CityWithNoCapacityLeft_False()
+    {
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 50);
+        var full = MakeCity("full", Region.NorthAmerica, 1, 1, 50, autoCapacity: 5);
+
+        Assert.False(CanOpen(MakeOpenabilityContext(new[] { home, full }, home, cityWideSlotsRemaining: new Dictionary<string, int> { ["full"] = 0 }), home, full));
+    }
+
+    [Fact]
+    public void CanOpenNow_NeitherEndpointAValidOrigin_False()
+    {
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 50);
+        var a = MakeCity("a", Region.NorthAmerica, 1, 1, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 2, 2, 50);
+
+        Assert.False(CanOpen(MakeOpenabilityContext(new[] { home, a, b }, home), a, b));
+    }
+
+    [Fact]
+    public void FindMostProfitablePair_TopPairHasNoGatewaySlot_ReturnsTheBestOpenableOneInstead()
+    {
+        // The heavier gateway pair is the most profitable, but the airline
+        // holds no slot there, so the search returns the best pair it can
+        // actually open. Control: holding a slot at the gateway, it wins.
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
+        var gateway = MakeCity("gw", Region.NorthAmerica, 1, 1, 100, isGateway: true);
+        var plain = MakeCity("plain", Region.NorthAmerica, -1, -1, 50);
+        var cities = new[] { home, gateway, plain };
+        var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, Aircraft, quantity: 1, FleetOwnershipMode.Owned);
+        var validOrigins = new HashSet<string> { home.Id };
+
+        var blocked = AiToolkit.FindMostProfitablePair(
+            MakeOpenabilityContext(cities, home, availableSlots: new Dictionary<string, int>(), fleet: fleet),
+            new HashSet<int>(), validOrigins, _ => true);
+        var control = AiToolkit.FindMostProfitablePair(
+            MakeOpenabilityContext(cities, home, availableSlots: new Dictionary<string, int> { ["gw"] = 1 }, fleet: fleet),
+            new HashSet<int>(), validOrigins, _ => true);
+
+        Assert.NotNull(blocked);
+        Assert.NotNull(control);
+        Assert.Contains("plain", new[] { blocked.Value.Pair.Origin.Id, blocked.Value.Pair.Destination.Id });
+        Assert.Contains("gw", new[] { control.Value.Pair.Origin.Id, control.Value.Pair.Destination.Id });
+    }
 }

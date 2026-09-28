@@ -631,6 +631,31 @@ public class DomesticProfitOptimizerStrategyTests
     }
 
     [Fact]
+    public void DecideOrders_BestDomesticPairHasNoCityCapacity_OpensTheNextBestOneInstead()
+    {
+        // Same shape as RapidExpansionStrategy's own test: the better
+        // candidate ("far") has no capacity left, so the search opens the
+        // next-best one it can ("near") rather than nothing. Control: with
+        // room at "far", "far" wins.
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
+        var far = MakeCity("far", Region.NorthAmerica, 1, 1, 90, autoCapacity: 5);
+        var near = MakeCity("near", Region.NorthAmerica, -1, -1, 60, autoCapacity: 5);
+        var cities = new[] { home, far, near };
+        var aircraft = new AircraftType("t", "Test", Seats: 140, RangeKm: 5_000);
+        var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, aircraft, quantity: 1, FleetOwnershipMode.Owned);
+
+        StrategyContext Context(int farRoom) => new(
+            Array.Empty<Route>(), 3, cities, DemandModel, new[] { aircraft }, fleet, Region.NorthAmerica, HomeCity: home,
+            CityWideSlotsRemaining: new Dictionary<string, int> { ["far"] = farRoom, ["near"] = 5 });
+
+        var blocked = Assert.Single(Strategy.DecideOrders(Context(farRoom: 0)).OfType<RouteOrder>());
+        var control = Assert.Single(Strategy.DecideOrders(Context(farRoom: 1)).OfType<RouteOrder>());
+
+        Assert.Equal("near", blocked.Destination.Id);
+        Assert.Equal("far", control.Destination.Id);
+    }
+
+    [Fact]
     public void DecideOrders_NoFullyUnservedDomesticGateway_FallsBackToIdleContestableOne()
     {
         var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);

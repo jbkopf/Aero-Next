@@ -1,5 +1,6 @@
 using AeroNext.Core;
 using AeroNext.Core.Airlines;
+using AeroNext.Core.Competition;
 using AeroNext.Core.Setup;
 using AeroNext.Core.World;
 using AeroNext.QaHarness;
@@ -11,7 +12,7 @@ using AeroNext.QaHarness;
 // - this is the slower, broader QA tier for "does the whole system hold
 // together across the real space of games," not fast per-commit feedback.
 //
-// Usage: dotnet run --project src/AeroNext.QaHarness [--games N] [--quarters N] [--seed N] [--unconstrained-regions]
+// Usage: dotnet run --project src/AeroNext.QaHarness [--games N] [--quarters N] [--seed N] [--unconstrained-regions] [--difficulty normal|hard]
 //
 // Regions aren't exclusive in GameSetup.CreateSeats any more (a player can
 // share a home region with a rival), but its AI-fill logic still always
@@ -48,6 +49,7 @@ var games = 100;
 var quarters = 244; // the full 1955-2015 campaign, matching M13
 var baseSeed = 1;
 var unconstrainedRegions = false;
+var difficulty = GameDifficulty.Normal;
 
 for (var i = 0; i < args.Length; i++)
 {
@@ -57,6 +59,7 @@ for (var i = 0; i < args.Length; i++)
         case "--quarters": quarters = int.Parse(args[++i]); break;
         case "--seed": baseSeed = int.Parse(args[++i]); break;
         case "--unconstrained-regions": unconstrainedRegions = true; break;
+        case "--difficulty": difficulty = Enum.Parse<GameDifficulty>(args[++i], ignoreCase: true); break;
     }
 }
 
@@ -66,7 +69,7 @@ var growthSchedule = DemandGrowthCatalog.LoadCampaignSchedule(Path.Combine(AppCo
 var knownCityIds = cities.Select(c => c.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
 var tradeRestrictions = TradeRestrictionCatalog.LoadFile(Path.Combine(AppContext.BaseDirectory, "data", "trade-restrictions.json"), knownCityIds); // geopolitical-aircraft-restrictions follow-up
 
-Console.WriteLine($"AeroNext QA harness: {games} games x {quarters} quarters, base seed {baseSeed}{(unconstrainedRegions ? " [unconstrained regions: duplicates allowed]" : "")}");
+Console.WriteLine($"AeroNext QA harness: {games} games x {quarters} quarters, base seed {baseSeed}, difficulty {difficulty}{(unconstrainedRegions ? " [unconstrained regions: duplicates allowed]" : "")}");
 Console.WriteLine();
 
 var results = new List<FullGameResult>();
@@ -84,7 +87,7 @@ for (var i = 0; i < games; i++)
             ? UnconstrainedSeatGenerator.Generate(configRng, cities)
             : GameSetup.CreateSeats(GameConfigGenerator.Generate(configRng, cities), cities, configRng, fillerWeightExponent: 0.0);
 
-        var result = FullGameRunner.Run(i, configSeed, campaignSeed, quarters, seats, cities, fleetCatalog, growthSchedule, tradeRestrictions: tradeRestrictions);
+        var result = FullGameRunner.Run(i, configSeed, campaignSeed, quarters, seats, cities, fleetCatalog, growthSchedule, difficulty: difficulty, tradeRestrictions: tradeRestrictions);
         results.Add(result);
 
         if (!result.Success)

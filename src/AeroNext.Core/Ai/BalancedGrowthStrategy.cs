@@ -225,10 +225,10 @@ public sealed class BalancedGrowthStrategy : IAiStrategy
         // Case 1: reach a region not yet touched, chosen by real profit.
         if (touchedRegions.Count < targetRegionCount && spent + 1 <= context.ActionCap)
         {
-            var wonSlotPair = AiToolkit.FindBestUnservedPairTouchingWonSlot(context, reservedUnitIds);
+            var wonSlotPair = AiToolkit.FindBestUnservedPairTouchingWonSlot(context, reservedUnitIds, slotsReservedByCity, citySpendReservedByCity);
             var best = wonSlotPair is not null
                 ? AiToolkit.EvaluateCandidate(context, reservedUnitIds, wonSlotPair.Value.Pair, wonSlotPair.Value.Aircraft)
-                : AiToolkit.FindMostProfitablePair(context, reservedUnitIds, validOriginCityIds, p => TouchesUntouchedRegion(p, touchedRegions));
+                : AiToolkit.FindMostProfitablePair(context, reservedUnitIds, validOriginCityIds, p => TouchesUntouchedRegion(p, touchedRegions), slotsReservedByCity, citySpendReservedByCity);
 
             AiToolkit.TryProposeCandidate(context, best, validOriginCityIds, orders, reservedUnitIds, slotsReservedByCity, citySpendReservedByCity, ref spent);
         }
@@ -251,8 +251,8 @@ public sealed class BalancedGrowthStrategy : IAiStrategy
         if (spent + 1 <= context.ActionCap)
         {
             var regionsNotYetLed = AiToolkit.RegionsNotYetLed(context);
-            var best = AiToolkit.FindMostProfitablePair(context, reservedUnitIds, validOriginCityIds, p => BothEndpointsTouchedAndAtLeastOneUnled(p, touchedRegions, regionsNotYetLed))
-                ?? AiToolkit.FindMostProfitablePair(context, reservedUnitIds, validOriginCityIds, p => BothEndpointsTouched(p, touchedRegions));
+            var best = AiToolkit.FindMostProfitablePair(context, reservedUnitIds, validOriginCityIds, p => BothEndpointsTouchedAndAtLeastOneUnled(p, touchedRegions, regionsNotYetLed), slotsReservedByCity, citySpendReservedByCity)
+                ?? AiToolkit.FindMostProfitablePair(context, reservedUnitIds, validOriginCityIds, p => BothEndpointsTouched(p, touchedRegions), slotsReservedByCity, citySpendReservedByCity);
             AiToolkit.TryProposeCandidate(context, best, validOriginCityIds, orders, reservedUnitIds, slotsReservedByCity, citySpendReservedByCity, ref spent);
         }
 

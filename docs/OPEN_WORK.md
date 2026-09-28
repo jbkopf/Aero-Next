@@ -1722,6 +1722,28 @@ ranges, before and after) and wins spread more evenly. Full numbers:
      intercontinental demand are meant to force clashes; if they don't,
      that's a design question as much as an AI one.
 
+   **Progress (2026-09-27, branch `ai-contested-routes`):**
+   - *Found:* contest is limited mostly by city capacity and by small,
+     separated networks. The new-route searches also had a real bug: they
+     ranked every pair and only then checked whether it could be opened
+     (gateway slot, city capacity), so the top pick was usually
+     unopenable and the airline opened nothing (91% / 81% of the time on
+     two measurements).
+   - *Fixed:* `AiToolkit.CanOpenNow` filters every new-route search before
+     ranking, so the best *openable* pair wins. Networks grew; on Normal,
+     games were won around quarter 67 instead of 151, some as early as
+     quarter 6.
+   - *Hard (4-region win, expected to become the default) exposed early
+     bankruptcies*, which the Normal win condition had hidden by ending
+     games first. Traced to `RapidExpansionStrategy` acquiring the
+     longest-range type for every new route regardless of demand. It now
+     picks per type and acquires the type that flies the route most
+     profitably, or nothing. 2x300 Hard games: games with a bankruptcy
+     51/55 -> 15/21, bankrupt airlines 56/61 -> 20/24. AustralAsia didn't
+     move (9/8 -> 10/12); those are the weak-start early bankruptcies.
+   - *Next:* check the other strategies under Hard, then come back to
+     measuring how often routes are actually contested now.
+
 ---
 
 ## Sequencing note: "dynamic demand" vs. Historical Dynamics
