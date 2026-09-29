@@ -1743,6 +1743,39 @@ ranges, before and after) and wins spread more evenly. Full numbers:
      move (9/8 -> 10/12); those are the weak-start early bankruptcies.
    - *Next:* check the other strategies under Hard, then come back to
      measuring how often routes are actually contested now.
+6. **Some eligible starting cities are dead ends** (found 2026-09-28).
+   Any non-gateway city in a home region can be a start
+   (`HomeRegions.EligibleStartingCities`), with no viability check. AI
+   seats always take the region's highest-demand city, so this only bites
+   human starts - including the QA harness's simulated humans, which pick
+   a region and city uniformly at random and are then played by the AI.
+   2x300 Hard games (seeds 1 and 301), AustralAsia by starting city:
+   Papeete 11/11 bankrupt (avg quarter 12), Guam 6/11 (24), Saipan 5/17
+   (32); every other start 0, including Singapore's 198 AI seats. Those
+   three account for every AustralAsia bankruptcy.
+   - *Papeete:* nearest city is Nadi at 3,492 km; only the Comet, DC-6,
+     L-049 and DC-7 reach it in 1955, so the guaranteed starting route is
+     a large, expensive aircraft between two tiny cities (~$2M/quarter
+     loss from quarter 1). `StartingConditions.cs` already notes "no
+     profitable domestic pair at 1955 tech."
+   - *Guam/Saipan:* 219 km apart and ~2,300 km from anything else. The
+     starting route survives a while, but there's nowhere affordable to
+     grow.
+   - *Nouméa, Nadi, Perth*, flagged as weak in the same old comment, went
+     0/43 bankrupt - no longer a problem.
+
+   **Decision for now: keep them as deliberately hard starts.** Options
+   to come back to:
+   1. A start-viability rule (separate from `EligibleStartingCities`,
+      which also feeds destination choices and `RegionalEconomics`), e.g.
+      the city must have a profitable 1955 starting route.
+   2. A workable opening for isolated starts: a cross-region guaranteed
+      route (Papeete-Honolulu, Guam-Tokyo) or a different starting
+      aircraft.
+   3. Keep them, label them as hard starts in setup, and have the QA
+      harness report human-seat and AI-seat outcomes separately, since
+      uniformly random human starts pick dead ends far more often than
+      real players would and skew region-level bankruptcy numbers.
 
 ---
 
