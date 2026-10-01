@@ -273,9 +273,10 @@ public static class AiToolkit
     /// safe where docs/BASELINE_AI_ROADMAP.md's own M56 section's four
     /// reverted attempts were not.
     /// </summary>
-    public static Money EstimatedRealProfit(StrategyContext context, PairDemand pair, AircraftType aircraft, bool requiresLease)
+    /// <param name="stops">Refuelling stops the route would make (docs/MULTI_STOP_ROUTES_DESIGN.md) - its seats and costs cover every leg; demand stays the pair's.</param>
+    public static Money EstimatedRealProfit(StrategyContext context, PairDemand pair, AircraftType aircraft, bool requiresLease, StopList stops = default)
     {
-        var hypotheticalRoute = new Route(pair.Origin, pair.Destination, aircraft, AircraftCount: 1);
+        var hypotheticalRoute = new Route(pair.Origin, pair.Destination, aircraft, AircraftCount: 1, Stops: stops);
         var pairKey = QuarterEngine.NormalizedPairKey(pair.Origin, pair.Destination);
         var rivalPresence = (context.RivalPresenceByPairKey?.GetValueOrDefault(pairKey) ?? 0)
             + (context.RivalPresenceByRegion?.GetValueOrDefault(pair.Destination.Region) ?? 0);
@@ -429,6 +430,21 @@ public static class AiToolkit
     public const double ProactiveSwapMinimumProfitImprovementFraction = 0.5;
 
     /// <summary>
+    /// The stops a route flies after a swap to <paramref name="type"/>
+    /// (docs/MULTI_STOP_ROUTES_DESIGN.md): none when the type can fly the
+    /// pair nonstop - dropping a stop frees its slot, which is how a
+    /// chokepoint loses value as range improves - otherwise the route's
+    /// current stops if the type can fly every leg, otherwise null (the
+    /// type can't fly this route without stops the airline doesn't hold).
+    /// </summary>
+    public static StopList? SwapStops(Route route, AircraftType type) =>
+        RoutePath.IsWithinRange(route.Origin, StopList.Empty, route.Destination, type)
+            ? StopList.Empty
+            : RoutePath.IsWithinRange(route.Origin, route.Stops, route.Destination, type)
+                ? route.Stops
+                : null;
+
+    /// <summary>
     /// AI-type-swap follow-up: is there a meaningfully better-fitting
     /// aircraft type for a route this airline already operates? Reuses
     /// EstimatedRealProfit - the same real, lease-fee-aware,
@@ -461,7 +477,7 @@ public static class AiToolkit
         StrategyContext context, RouteLoad load, IReadOnlySet<int> reservedUnitIds, bool isReactive, bool allowLeaseOrBuy = true)
     {
         var pair = context.DemandModel.ForPair(load.Route.Origin, load.Route.Destination);
-        var currentProfit = EstimatedRealProfit(context, pair, load.Route.Aircraft, requiresLease: false);
+        var currentProfit = EstimatedRealProfit(context, pair, load.Route.Aircraft, requiresLease: false, load.Route.Stops);
         var idleTypeIds = context.OwnFleet.Idle
             .Where(u => !reservedUnitIds.Contains(u.Id))
             .Select(u => u.Type.Id)
@@ -476,12 +492,12 @@ public static class AiToolkit
         var typeCandidatePool = idleTypeCandidatePool.Concat(acquireTypeCandidatePool);
 
         var candidates = typeCandidatePool
-            .Where(type => type.Id != load.Route.Aircraft.Id && pair.DistanceKm <= type.RangeKm)
+            .Where(type => type.Id != load.Route.Aircraft.Id && SwapStops(load.Route, type) is not null)
             .Where(type => allowLeaseOrBuy || idleTypeIds.Contains(type.Id))
             .Select(type =>
             {
                 var usesIdleUnit = idleTypeIds.Contains(type.Id);
-                var profit = EstimatedRealProfit(context, pair, type, requiresLease: !usesIdleUnit);
+                var profit = EstimatedRealProfit(context, pair, type, requiresLease: !usesIdleUnit, SwapStops(load.Route, type)!.Value);
                 return (Type: type, Profit: profit, UsesIdleUnit: usesIdleUnit);
             })
             .OrderByDescending(c => c.Profit.Cents)
@@ -560,7 +576,7 @@ public static class AiToolkit
 
             var idleUnit = context.OwnFleet.Idle.Where(u => u.Type.Id == candidate.Value.Type.Id && !reservedUnitIds.Contains(u.Id)).OrderBy(u => u.Id).First();
             reservedUnitIds.Add(idleUnit.Id);
-            orders.Add(new AdjustRouteOrder(load.Route.Origin, load.Route.Destination, candidate.Value.Type));
+            orders.Add(new AdjustRouteOrder(load.Route.Origin, load.Route.Destination, candidate.Value.Type, SwapStops(load.Route, candidate.Value.Type)!.Value));
             spent += 1;
         }
         else if (candidate.Value.CanBuyOutright)
@@ -883,11 +899,12 @@ public static class AiToolkit
     /// time (docs/BASELINE_AI_ROADMAP.md, "Only search routes that can be
     /// opened now").
     /// </summary>
+    /// <param name="stops">Refuelling stops the route would make (docs/MULTI_STOP_ROUTES_DESIGN.md) - each needs a free slot too.</param>
     public static bool CanOpenNow(
         StrategyContext context, PairDemand pair, IReadOnlySet<string> validOriginCityIds,
-        Dictionary<string, int> slotsReservedByCity, Dictionary<string, int> citySpendReservedByCity) =>
+        Dictionary<string, int> slotsReservedByCity, Dictionary<string, int> citySpendReservedByCity, StopList stops = default) =>
         TryOrientFromValidOrigin(pair, validOriginCityIds, out var origin, out var destination)
-        && BaselineAi.HasSlotAtEveryGateway(origin, destination, context.AvailableSlotsByCity, slotsReservedByCity)
+        && BaselineAi.HasSlotAtEveryGateway(origin, destination, context.AvailableSlotsByCity, slotsReservedByCity, stops)
         && HasRoomAtEveryCity(origin, destination, context.CityWideSlotsRemaining, citySpendReservedByCity);
 
     /// <summary>M45: the AutoCapacity-modeled sibling of BaselineAi.ReserveSlots.</summary>

@@ -260,22 +260,27 @@ public static class BaselineAi
         return new Money(cents);
     }
 
-    /// <summary>M33: true when availableSlotsByCity is null (permissive), or this airline has a slot left at every gateway origin/destination touches.</summary>
-    internal static bool HasSlotAtEveryGateway(City origin, City destination, IReadOnlyDictionary<string, int>? availableSlotsByCity, Dictionary<string, int> slotsReservedByCity)
+    /// <summary>
+    /// M33: true when availableSlotsByCity is null (permissive), or this
+    /// airline has a slot left at every gateway the route lands at -
+    /// origin, destination, and any refuelling stops
+    /// (docs/MULTI_STOP_ROUTES_DESIGN.md).
+    /// </summary>
+    internal static bool HasSlotAtEveryGateway(City origin, City destination, IReadOnlyDictionary<string, int>? availableSlotsByCity, Dictionary<string, int> slotsReservedByCity, StopList stops = default)
     {
         if (availableSlotsByCity is null)
         {
             return true;
         }
 
-        return new[] { origin, destination }
+        return RoutePath.Cities(origin, stops, destination)
             .Where(c => c.GateCapacity is not null)
             .All(c => availableSlotsByCity.GetValueOrDefault(c.Id) - slotsReservedByCity.GetValueOrDefault(c.Id) > 0);
     }
 
-    internal static void ReserveSlots(City origin, City destination, Dictionary<string, int> slotsReservedByCity)
+    internal static void ReserveSlots(City origin, City destination, Dictionary<string, int> slotsReservedByCity, StopList stops = default)
     {
-        foreach (var city in new[] { origin, destination }.Where(c => c.GateCapacity is not null))
+        foreach (var city in RoutePath.Cities(origin, stops, destination).Where(c => c.GateCapacity is not null))
         {
             slotsReservedByCity[city.Id] = slotsReservedByCity.GetValueOrDefault(city.Id) + 1;
         }

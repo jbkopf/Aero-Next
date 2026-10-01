@@ -56,7 +56,11 @@ public sealed record FullGameResult(
     // Marketing campaigns (route-targeted and network-wide) applied across
     // every airline this game - same purpose as TypeSwapsApplied.
     int RouteCampaignsApplied = 0,
-    int NetworkCampaignsApplied = 0)
+    int NetworkCampaignsApplied = 0,
+    // RouteOrders with refuelling stops (docs/MULTI_STOP_ROUTES_DESIGN.md)
+    // applied across every airline this game - opening a multi-stop route
+    // or adding an aircraft to one. Same purpose as TypeSwapsApplied.
+    int MultiStopRouteOrdersApplied = 0)
 {
     public bool Success => Violations.Count == 0;
 }

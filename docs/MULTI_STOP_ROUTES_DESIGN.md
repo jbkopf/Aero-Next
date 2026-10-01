@@ -1,6 +1,6 @@
 # Multi-Stop Routes: Design
 
-**Status: Phases 1 and 2 implemented; Phase 3 not started.** Written
+**Status: all three phases implemented.** Written
 2026-09-30 at the user's direct request. Phases are built and measured
 in order; each phase's section gets a "Result" note once it ships.
 
@@ -361,6 +361,73 @@ trace used for the 2026-09-28 finding:
 - **The pillar check:** how often routes are contested
   (`OPEN_WORK.md` item 5). Chokepoint slots should become something
   airlines actually fight over.
+
+### Result (2026-10-01)
+
+Built for `RapidExpansionStrategy`, with the shared plumbing every
+strategy needs:
+
+- **`StopPathFinder`** (`src/AeroNext.Core/Airlines/StopPathFinder.cs`):
+  nonstop if possible, else fewest gateway stops (max 2), then shortest
+  total distance, ties on city id. Built once per decision with a
+  gateway-to-gateway distance table, so a sweep runs at about 6 seconds a
+  game, as before.
+- **Existing stop routes stay valid everywhere.** Growth in Rapid
+  Expansion, Network Optimizer and Balanced Growth orders the route's
+  own stops and checks/reserves slots at them;
+  `AiToolkit.EstimatedRealProfit` and `CanOpenNow` take stops; type swaps
+  use `AiToolkit.SwapStops` - nonstop when the new type can fly it
+  (freeing the stop's slot), else the route's current stops.
+- **Rapid Expansion:**
+  - new-route searches include pairs that need stops, priced over the
+    route as flown; a multi-stop candidate must also be profitable;
+  - a candidate through a stop the airline holds an unused slot at ranks
+    first, so held slots get used before they idle out;
+  - a won gateway's lone route must pass `AiToolkit.EvaluateCandidate`
+    (the lone-leg loss is gone);
+  - step 3 bids first on a stop its best profitable multi-stop plan needs
+    (`FindStopNeededByBestMultiStopPlan`); the old size-based gateway
+    bid now only targets a gateway with a profitable nonstop route.
+    Without that last change every chokepoint slot was held by quarter 40
+    in every game and 1,026 of 1,102 sat unused.
+  - a route opened from the far end has its stop list reversed with it.
+- The QA harness reports multi-stop route orders in its "AI activity" line.
+
+Tests: `StopPathFinderTests.cs` (6) and `MultiStopAiTests.cs` (12),
+including a mutation check that letting the lone leg through again fails
+them. Every line phase 3 adds is covered.
+
+Measured against Phase 2:
+
+| 2x300 Hard games | Seed 1 | Seed 301 |
+|---|---|---|
+| Games with a bankruptcy | 15 -> 8 | 21 -> 8 |
+| Bankrupt airlines | 20 -> 10 | 24 -> 9 |
+| Average win quarter | 186.6 -> 179.4 | 188.7 -> 180.8 |
+| Europe's wins | 126 -> 101 | 115 -> 89 |
+| North America's wins | 13 -> 30 | 10 -> 28 |
+| South America's median cash | $1.07B -> $5.5B | $1.07B -> $6.2B |
+| Multi-stop route orders | - | 772 / 801 |
+
+East Asia's bankruptcies went 6 -> 1 and 5 -> 0; AustralAsia's halved.
+On 100 games' first 40 quarters: no lone chokepoint legs (676 across
+600 games before), 234 multi-stop routes, 226 of them profitable, about
+$364M a quarter combined - mostly via Gander, then Dakar, the Azores,
+and two-stop Gander + Azores Atlantic routes.
+
+The pillar check: contested route-quarters on the same 40 Hard games,
+2.21% -> 2.93% - about a third more head-to-head competition.
+
+Open follow-ups (`docs/OPEN_WORK.md`):
+
+- Only Rapid Expansion plans multi-stop routes; Network Optimizer and
+  Balanced Growth only keep the ones they inherit.
+- Many held chokepoint slots still sit unused (363 of 573 at quarter 40),
+  likely waiting on aircraft or a second stop.
+- The AI's own estimate of a contested route still splits demand evenly
+  with rivals rather than using Phase 2's journey cost.
+- Honolulu, Wake and Anchorage barely appear: Pacific crossings are
+  long, thin and need two stops.
 
 ## Deliberately out of scope
 

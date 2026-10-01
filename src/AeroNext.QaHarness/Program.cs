@@ -121,7 +121,8 @@ Console.WriteLine($"  {everBankrupt} games had at least one airline go bankrupt 
 Console.WriteLine($"  {wonOutright.Count}/{cleanResults.Count} clean games had a win-condition winner before the timeline ended" +
     (wonOutright.Count > 0 ? $" (avg quarter {wonOutright.Average(r => r.WinQuarter!.Value):N1})" : ""));
 Console.WriteLine($"  AI activity: {results.Sum(r => r.TypeSwapsApplied)} type swaps, " +
-    $"{results.Sum(r => r.RouteCampaignsApplied)} route marketing campaigns, {results.Sum(r => r.NetworkCampaignsApplied)} network marketing campaigns");
+    $"{results.Sum(r => r.RouteCampaignsApplied)} route marketing campaigns, {results.Sum(r => r.NetworkCampaignsApplied)} network marketing campaigns, " +
+    $"{results.Sum(r => r.MultiStopRouteOrdersApplied)} multi-stop route orders");
 
 if (hardFailures.Count > 0)
 {

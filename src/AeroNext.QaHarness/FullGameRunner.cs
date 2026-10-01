@@ -131,6 +131,7 @@ public static class FullGameRunner
         var negotiationSpendCentsFirst20QByName = names.ToDictionary(n => n, n => 0L);
         var negotiationBidCountFirst20QByName = names.ToDictionary(n => n, n => 0);
         var typeSwapsApplied = 0;
+        var multiStopRouteOrdersApplied = 0;
         var routeCampaignsApplied = 0;
         var networkCampaignsApplied = 0;
 
@@ -465,6 +466,8 @@ public static class FullGameRunner
                     typeSwapsApplied++;
                 }
 
+                multiStopRouteOrdersApplied += result.AppliedOrders.OfType<RouteOrder>().Count(o => !o.Stops.IsEmpty);
+
                 routes[name] = result.Routes;
                 caps[name] = result.ActionCap;
                 fleets[name] = result.UpdatedFleet!;
@@ -652,6 +655,6 @@ public static class FullGameRunner
             finalCash, bankruptcyQuarter, homeRegionByName, startingCityIdByName, winner, winQuarter, finalRanking,
             winnerRegionsDominated, lastEligibleNames.Count,
             negotiationSpendCentsFirst20QByName, negotiationBidCountFirst20QByName, typeSwapsApplied,
-            routeCampaignsApplied, networkCampaignsApplied);
+            routeCampaignsApplied, networkCampaignsApplied, multiStopRouteOrdersApplied);
     }
 }

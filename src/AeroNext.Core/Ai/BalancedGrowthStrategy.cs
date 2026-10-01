@@ -182,7 +182,7 @@ public sealed class BalancedGrowthStrategy : IAiStrategy
             lastQuarterSeatsCarriedByRoute: context.LastQuarterSeatsCarriedByRoute,
             regionsNotYetLed: AiToolkit.RegionsNotYetLed(context));
         if (bestExisting is not null && spent + 1 <= context.ActionCap
-            && BaselineAi.HasSlotAtEveryGateway(bestExisting.Origin, bestExisting.Destination, context.AvailableSlotsByCity, slotsReservedByCity)
+            && BaselineAi.HasSlotAtEveryGateway(bestExisting.Origin, bestExisting.Destination, context.AvailableSlotsByCity, slotsReservedByCity, bestExisting.Stops)
             && AiToolkit.HasRoomAtEveryCity(bestExisting.Origin, bestExisting.Destination, context.CityWideSlotsRemaining, citySpendReservedByCity))
         {
             var idleUnit = context.OwnFleet.Idle
@@ -192,9 +192,9 @@ public sealed class BalancedGrowthStrategy : IAiStrategy
 
             if (idleUnit is not null)
             {
-                orders.Add(new RouteOrder(bestExisting.Origin, bestExisting.Destination, bestExisting.Aircraft));
+                orders.Add(new RouteOrder(bestExisting.Origin, bestExisting.Destination, bestExisting.Aircraft, bestExisting.Stops));
                 reservedUnitIds.Add(idleUnit.Id);
-                BaselineAi.ReserveSlots(bestExisting.Origin, bestExisting.Destination, slotsReservedByCity);
+                BaselineAi.ReserveSlots(bestExisting.Origin, bestExisting.Destination, slotsReservedByCity, bestExisting.Stops);
                 AiToolkit.ReserveCityWideSlots(bestExisting.Origin, bestExisting.Destination, citySpendReservedByCity);
                 spent += 1;
             }

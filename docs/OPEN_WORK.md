@@ -1743,6 +1743,23 @@ ranges, before and after) and wins spread more evenly. Full numbers:
      move (9/8 -> 10/12); those are the weak-start early bankruptcies.
    - *Next:* check the other strategies under Hard, then come back to
      measuring how often routes are actually contested now.
+   - *Multi-stop routes (2026-09-30 to 10-01, branch `multi-stop-routes`,
+     `docs/MULTI_STOP_ROUTES_DESIGN.md`):* tracing early-game losses found
+     81% came from AI airlines flying lone legs into refuelling
+     chokepoints (Gander, Wake) that have almost no demand. Routes can now
+     make refuelling stops at gateways (one slot per aircraft at each),
+     contested share weighs fare plus journey time across rivals, and
+     Rapid Expansion plans multi-stop routes and bids for the stops they
+     need. 2x300 Hard: bankrupt airlines 20/24 -> 10/9, wins 7-8 quarters
+     sooner, Europe's win share down and North America's up; contested
+     route-quarters 2.21% -> 2.93%. Follow-ups:
+     - extend multi-stop planning to Network Optimizer and Balanced
+       Growth;
+     - many held chokepoint slots still sit unused (363 of 573 at
+       quarter 40);
+     - the AI's contested-route estimate still splits demand evenly
+       instead of using journey cost;
+     - Pacific chokepoints (Honolulu, Wake, Anchorage) are barely used.
 6. **Some eligible starting cities are dead ends** (found 2026-09-28).
    Any non-gateway city in a home region can be a start
    (`HomeRegions.EligibleStartingCities`), with no viability check. AI
