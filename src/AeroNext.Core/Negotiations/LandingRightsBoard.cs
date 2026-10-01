@@ -75,8 +75,9 @@ public sealed record LandingRightsBoard(
         return result;
     }
 
+    /// <summary>Aircraft on this airline's routes that land at the city - as an endpoint or, for a multi-stop route, a stop (docs/MULTI_STOP_ROUTES_DESIGN.md).</summary>
     private static int InUse(string cityId, IReadOnlyList<Route> routes) => routes
-        .Where(r => r.Origin.Id == cityId || r.Destination.Id == cityId)
+        .Where(r => r.Touches(cityId))
         .Sum(r => r.AircraftCount);
 
     /// <summary>

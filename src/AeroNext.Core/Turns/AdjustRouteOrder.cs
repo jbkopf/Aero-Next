@@ -24,9 +24,15 @@ namespace AeroNext.Core.Turns;
 /// action, and always resets FareOverride to the computed default — a
 /// real, deliberate consequence of aircraft type having its own cost
 /// structure, not a bug to work around.
+///
+/// Stops (docs/MULTI_STOP_ROUTES_DESIGN.md): the route's stop list after
+/// the swap, which may be empty. A stop the route no longer makes frees
+/// its slot; a stop it didn't make before needs a free slot. This is how a
+/// route drops a refuelling stop once a longer-range type can fly it
+/// nonstop.
 /// </summary>
-public sealed record AdjustRouteOrder(City Origin, City Destination, AircraftType AircraftType) : QuarterOrder
+public sealed record AdjustRouteOrder(City Origin, City Destination, AircraftType AircraftType, StopList Stops = default) : QuarterOrder
 {
-    /// <summary>Whether AircraftType can physically fly Origin-Destination nonstop — mirrors RouteOrder.IsWithinRange.</summary>
-    public bool IsWithinRange => GreatCircle.DistanceKm(Origin, Destination) <= AircraftType.RangeKm;
+    /// <summary>Whether AircraftType can physically fly every leg — mirrors RouteOrder.IsWithinRange.</summary>
+    public bool IsWithinRange => RoutePath.IsWithinRange(Origin, Stops, Destination, AircraftType);
 }

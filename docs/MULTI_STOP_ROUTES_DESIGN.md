@@ -1,8 +1,8 @@
 # Multi-Stop Routes: Design
 
-**Status: proposed, not yet implemented.** Written 2026-09-30 at the
-user's direct request. Phases are built and measured in order; each
-phase's section gets a "Result" note once it ships.
+**Status: Phase 1 implemented; Phases 2 and 3 not started.** Written
+2026-09-30 at the user's direct request. Phases are built and measured
+in order; each phase's section gets a "Result" note once it ships.
 
 ## The problem
 
@@ -178,6 +178,35 @@ and four airlines guarantees someone goes home empty."
   the Gander slot.
 - Every existing test passes unchanged; the QA harness reports no
   invariant violations.
+
+### Result (2026-09-30)
+
+Built as described. Where it lives:
+
+- `StopList` (`src/AeroNext.Core/Airlines/StopList.cs`): a struct, so
+  `default` is the empty list and every existing `Route`/`RouteOrder`
+  construction is unchanged; equality compares city ids in order.
+- `RoutePath`: shared leg geometry (cities, leg distances, total distance,
+  per-leg range, stop validity) used by `Route` and both route orders.
+  Nonstop routes take a fast path that never builds a leg list.
+- `Route` gains `Stops` and `Touches(cityId)`; `FlightPerformance`
+  takes a landings-per-direction count (default 1).
+- `QuarterEngine`: invalid stops rejected; growing a served pair must
+  match its stops (checked in both fleet-aware and permissive mode,
+  tracked across the batch like the committed type); slots checked and
+  spent at stops; a swap needs a slot only at a stop the route didn't
+  make before; applied routes keep their stops.
+- `LandingRightsBoard` counts an aircraft's slot at every city its route
+  touches, stops included. `RouteAdjustmentOptions` checks swap range
+  against the route's current stops.
+- `BriefingGenerator` names stops in order descriptions
+  ("cdg-ord via yqx") and reports invalid stops as their own rejection
+  kind, `OrderRejectedInvalidStops`.
+
+Tests: `MultiStopRouteTests.cs` (31), including the real-data example
+above. Every pre-existing test passes unchanged, and every changed file
+is fully line-covered. No AI proposes stops yet, so game outcomes are
+identical to before.
 
 ## Phase 2: passenger choice by price and journey time
 

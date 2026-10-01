@@ -100,14 +100,24 @@ public static class BriefingGenerator
 
     private static string Describe(QuarterOrder order) => order switch
     {
-        RouteOrder ro => $"{ro.Origin.Id}-{ro.Destination.Id}",
-        AdjustRouteOrder aro => $"{aro.Origin.Id}-{aro.Destination.Id}",
+        RouteOrder ro => DescribeRoute(ro.Origin, ro.Stops, ro.Destination),
+        AdjustRouteOrder aro => DescribeRoute(aro.Origin, aro.Stops, aro.Destination),
         HireExecutiveOrder => "hire executive",
         _ => order.GetType().Name,
     };
 
+    /// <summary>"cdg-ord", or "cdg-ord via yqx" for a multi-stop route (docs/MULTI_STOP_ROUTES_DESIGN.md).</summary>
+    private static string DescribeRoute(City origin, StopList stops, City destination) =>
+        stops.IsEmpty ? $"{origin.Id}-{destination.Id}" : $"{origin.Id}-{destination.Id} via {string.Join(", ", stops.Select(s => s.Id))}";
+
     private static BriefingItem DescribeRejection(QuarterOrder order, int year)
     {
+        if ((order is RouteOrder stopsOrder && !RoutePath.AreValidStops(stopsOrder.Origin, stopsOrder.Stops, stopsOrder.Destination))
+            || (order is AdjustRouteOrder swapStopsOrder && !RoutePath.AreValidStops(swapStopsOrder.Origin, swapStopsOrder.Stops, swapStopsOrder.Destination)))
+        {
+            return new BriefingItem(ExceptionKind.OrderRejectedInvalidStops, $"Order rejected, stops must be distinct gateway cities: {Describe(order)}");
+        }
+
         if (order is RouteOrder ro && !ro.IsWithinRange)
         {
             return new BriefingItem(ExceptionKind.OrderRejectedOutOfRange, $"Order rejected, aircraft out of range: {Describe(order)}");
