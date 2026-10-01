@@ -30,6 +30,16 @@ namespace AeroNext.Core.Competition;
 /// to redistribute. That's not a bug: it's the same "capacity- vs demand-
 /// constrained" distinction M3 established, now applied per competitor.
 ///
+/// Phase 2 of docs/MULTI_STOP_ROUTES_DESIGN.md: the weight also carries a
+/// journey-cost multiplier - each offer's fare plus journey time
+/// (<see cref="JourneyCost"/>) compared with the cheapest offer on the pair,
+/// raised to FareCalculator.FareDemandElasticity. Passengers compare real
+/// price and time across rivals: a dearer fare, a slower aircraft, a
+/// refuelling stop or a connection all cost share, with no flat penalty for
+/// any of them. It replaced an earlier multiplier (M48) that compared each
+/// airline's fare only with its own default fare, so a cheap nonstop and a
+/// dear multi-stop route looked equally attractive at their defaults.
+///
 /// Simplification: capacity freed up by capping one airline's share at its
 /// ceiling is not redistributed to less-constrained rivals (no iterative
 /// water-filling). Leftover demand in that case goes uncarried by anyone
@@ -116,10 +126,12 @@ public static class CompetitiveMarket
             }
             else if (competitors.Count > 1)
             {
+                var journeyCosts = competitors.Select(c => JourneyCost.PerPassenger(c.Load!.Itinerary)).ToList();
+                var cheapestJourney = new Money(journeyCosts.Min(c => c.Cents));
                 var weights = competitors
-                    .Select(c => (
+                    .Select((c, i) => (
                         c.Airline,
-                        Weight: c.Load!.Itinerary.Legs.Min(l => l.SeatsPerQuarter) * EffectiveContestedQuality(c.Airline, origin, destination, marketingByAirlineName) * EffectiveFareMultiplier(c.Load!),
+                        Weight: c.Load!.Itinerary.Legs.Min(l => l.SeatsPerQuarter) * EffectiveContestedQuality(c.Airline, origin, destination, marketingByAirlineName) * JourneyMultiplier(journeyCosts[i], cheapestJourney),
                         Ceiling: c.Load!.PassengersCarried))
                     .ToList();
                 var totalWeight = weights.Sum(w => w.Weight);
@@ -158,9 +170,17 @@ public static class CompetitiveMarket
     private static double EffectiveContestedQuality(Airline airline, City origin, City destination, IReadOnlyDictionary<string, AirlineMarketingCampaign>? marketingByAirlineName) =>
         airline.Quality * (1 + MarketingDeltaFraction(airline, origin, destination, marketingByAirlineName));
 
-    /// <summary>M48: FareCalculator.DemandDeltaFraction, as a weight multiplier for the contested branch — a discount widens this airline's share of the pair, a premium narrows it, floored at zero so an extreme premium can never make the weight negative.</summary>
-    private static double EffectiveFareMultiplier(ItineraryLoad load) =>
-        Math.Max(0.0, 1 + load.Itinerary.Legs.Min(leg => FareCalculator.DemandDeltaFraction(leg)));
+    /// <summary>
+    /// Phase 2 of docs/MULTI_STOP_ROUTES_DESIGN.md: how this offer's journey
+    /// cost compares with the cheapest on the pair - 1.0 for the cheapest,
+    /// (cheapest / own) ^ FareCalculator.FareDemandElasticity for the rest,
+    /// so a 10% dearer journey keeps about 87% of the weight. A fare cut
+    /// still moves share, since it lowers this offer's own journey cost.
+    /// Both costs are floored at one cent, so a zero or negative player fare
+    /// can never produce a zero divisor or a negative base.
+    /// </summary>
+    private static double JourneyMultiplier(Money ownJourneyCost, Money cheapestJourneyCost) =>
+        Math.Pow((double)Math.Max(1, cheapestJourneyCost.Cents) / Math.Max(1, ownJourneyCost.Cents), FareCalculator.FareDemandElasticity);
 
     /// <summary>M47: this airline's active campaign's own boost fraction for this specific pair — a route campaign's, else a network campaign's smaller one, else zero. Shared by both the contested weight multiplier and the uncontested demand adjustment below.</summary>
     private static double MarketingDeltaFraction(Airline airline, City origin, City destination, IReadOnlyDictionary<string, AirlineMarketingCampaign>? marketingByAirlineName)

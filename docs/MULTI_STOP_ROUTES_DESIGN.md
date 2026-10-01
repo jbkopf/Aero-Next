@@ -1,6 +1,6 @@
 # Multi-Stop Routes: Design
 
-**Status: Phase 1 implemented; Phases 2 and 3 not started.** Written
+**Status: Phases 1 and 2 implemented; Phase 3 not started.** Written
 2026-09-30 at the user's direct request. Phases are built and measured
 in order; each phase's section gets a "Result" note once it ships.
 
@@ -275,6 +275,39 @@ should be small, but it's measured on its own before Phase 3.
   by an amount that follows from its fare and time, not a flat penalty.
 - Measured: 2×300 Hard sweeps with no regression in bankruptcies or win
   timing beyond what the change explains.
+
+### Result (2026-10-01)
+
+Built as described:
+
+- `JourneyCost` (`src/AeroNext.Core/Competition/JourneyCost.cs`): fare
+  paid (both fares on a connection) plus journey hours at
+  `ValueOfTimePerHour` = **$20/hour** (proposed, tunable). Hours are
+  flying time over every route's full distance, 1 hour on the ground per
+  refuelling stop, and `ConnectionHours` = **2 hours** per change of
+  aircraft. At these values a 1955 DC-7 Paris-Gander-Chicago journey is
+  about $1,120 fare + 12.7 hours (~$1,380 total), and a 1958 707 nonstop
+  about $890 + 7.4 hours (~$1,035): the 707 keeps 1.0 of its weight, the
+  DC-7 about 0.65.
+- `CompetitiveMarket`'s contested weight uses
+  `(cheapest / own journey cost) ^ 1.5` in place of the old own-fare
+  multiplier, which is removed. Costs are floored at one cent so a zero or
+  negative player fare can't break the split. The uncontested demand
+  adjustment is unchanged.
+
+Tests: `JourneyCostTests.cs` (9): the cost arithmetic, and contested
+splits that follow the formula exactly for a dearer fare, a slower
+aircraft and a refuelling stop, plus even splits for equal offers and a
+safe split for a negative fare. Every pre-existing market test passes
+unchanged, including the discount/premium ones, and both changed files
+are fully line-covered.
+
+Measured on 2x300 Hard games (seeds 1 and 301) against the same code
+without it: bankruptcies, wins by region and the average win quarter are
+identical on both seeds (15/21 games with a bankruptcy; wins at quarter
+186.6/188.7); cash moved by under 1%. Expected, since contested pairs
+are rare today - the change matters once routes actually compete, which
+is Phase 3's job.
 
 ## Phase 3: AI uses multi-stop routes
 
