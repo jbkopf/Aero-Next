@@ -412,6 +412,35 @@ public class MultiStopRouteTests
     }
 
     [Fact]
+    public void AStop_UsesOneSlot_WhereTwoSeparateRoutesThroughTheSameCityUseTwo()
+    {
+        // The design's core claim: Paris-Gander-Chicago is one aircraft
+        // landing at Gander, so one Gander slot - not the two that
+        // Paris-Gander plus Gander-Chicago as separate routes take.
+        var airline = new Airline("Test Air", Array.Empty<Route>());
+        var board = LandingRightsBoard.Empty with
+        {
+            SlotsHeld = new Dictionary<(string, string), int> { [("Test Air", "stp")] = 2 },
+        };
+        var multiStop = new[] { new Route(Origin, Destination, ShortRange, 1, Stops: StopList.Of(Stop)) };
+        var separateRoutes = new[] { new Route(Origin, Stop, ShortRange, 1), new Route(Stop, Destination, ShortRange, 1) };
+
+        Assert.Equal(1, board.AvailableSlotsByCity(airline, multiStop)["stp"]);
+        Assert.Equal(0, board.AvailableSlotsByCity(airline, separateRoutes)["stp"]);
+
+        // And opening them: one held slot is enough for the stop route,
+        // but only lets one of the two separate routes through.
+        var oneSlot = new Dictionary<string, int> { ["stp"] = 1 };
+        var openMultiStop = Run(new[] { new RouteOrder(Origin, Destination, ShortRange, StopList.Of(Stop)) }, availableSlotsByCity: oneSlot);
+        var openSeparate = Run(new[] { new RouteOrder(Origin, Stop, ShortRange), new RouteOrder(Stop, Destination, ShortRange) }, availableSlotsByCity: oneSlot);
+
+        Assert.Single(openMultiStop.AppliedOrders);
+        Assert.Empty(openMultiStop.RejectedOrders);
+        Assert.Single(openSeparate.AppliedOrders);
+        Assert.Single(openSeparate.RejectedOrders);
+    }
+
+    [Fact]
     public void NetworkPlanner_MultiStopRoute_CarriesTheEndpointPairOnly()
     {
         var demandModel = new GravityDemandModel();
