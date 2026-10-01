@@ -225,10 +225,15 @@ public sealed class BalancedGrowthStrategy : IAiStrategy
         // Case 1: reach a region not yet touched, chosen by real profit.
         if (touchedRegions.Count < targetRegionCount && spent + 1 <= context.ActionCap)
         {
+            // A won gateway's own best pair goes first if it's profitable;
+            // otherwise the ordinary search runs. Multi-stop routes
+            // (docs/MULTI_STOP_ROUTES_DESIGN.md): a held refuelling-stop slot
+            // always offers a thin lone leg here that fails the profit check,
+            // and before this fell through to nothing at all - so the
+            // multi-stop route the slot was won for never opened.
             var wonSlotPair = AiToolkit.FindBestUnservedPairTouchingWonSlot(context, reservedUnitIds, slotsReservedByCity, citySpendReservedByCity);
-            var best = wonSlotPair is not null
-                ? AiToolkit.EvaluateCandidate(context, reservedUnitIds, wonSlotPair.Value.Pair, wonSlotPair.Value.Aircraft)
-                : AiToolkit.FindMostProfitablePair(context, reservedUnitIds, validOriginCityIds, p => TouchesUntouchedRegion(p, touchedRegions), slotsReservedByCity, citySpendReservedByCity);
+            var best = (wonSlotPair is null ? null : AiToolkit.EvaluateCandidate(context, reservedUnitIds, wonSlotPair.Value.Pair, wonSlotPair.Value.Aircraft))
+                ?? AiToolkit.FindMostProfitablePair(context, reservedUnitIds, validOriginCityIds, p => TouchesUntouchedRegion(p, touchedRegions), slotsReservedByCity, citySpendReservedByCity);
 
             AiToolkit.TryProposeCandidate(context, best, validOriginCityIds, orders, reservedUnitIds, slotsReservedByCity, citySpendReservedByCity, ref spent);
         }
@@ -257,7 +262,17 @@ public sealed class BalancedGrowthStrategy : IAiStrategy
         }
 
         var withinRegionGateway = FindBestUnservedGateway(context, c => touchedRegions.Contains(c.Region));
-        AiToolkit.NegotiateOrBorrow(context, touchedRegions.Count < targetRegionCount ? newRegionGateway : withinRegionGateway, orders, ref spent);
+
+        // Multi-stop routes (docs/MULTI_STOP_ROUTES_DESIGN.md): a refuelling
+        // stop this phase's best profitable multi-stop route still needs
+        // comes before any other gateway - reaching a new region while
+        // expanding, else within touched ones, the same split as the two
+        // cases above.
+        var expanding = touchedRegions.Count < targetRegionCount;
+        var plannedStop = AiToolkit.FindStopNeededByBestMultiStopPlan(context, reservedUnitIds, validOriginCityIds,
+            expanding ? p => TouchesUntouchedRegion(p, touchedRegions) : p => BothEndpointsTouched(p, touchedRegions),
+            slotsReservedByCity, citySpendReservedByCity);
+        AiToolkit.NegotiateOrBorrow(context, plannedStop ?? (expanding ? newRegionGateway : withinRegionGateway), orders, ref spent);
 
         // Low priority, same placement as RapidExpansionStrategy - this
         // is a growth-focused strategy, not a fix-what's-broken one
@@ -312,6 +327,7 @@ public sealed class BalancedGrowthStrategy : IAiStrategy
             .Where(c => c.IsGateway && !touchedCityIds.Contains(c.Id) && !alreadyPursued.Contains(c.Id))
             .Where(c => AiToolkit.DistanceFromNetworkKm(context, c) <= maxRangeKm)
             .Where(regionFilter)
+            .Where(c => AiToolkit.HasProfitableNonstopRouteTo(context, c))
             .OrderByDescending(c => c.DemandWeight)
             .ThenBy(c => c.Id, StringComparer.Ordinal)
             .FirstOrDefault();

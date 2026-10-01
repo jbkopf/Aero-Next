@@ -169,7 +169,7 @@ public sealed class RapidExpansionStrategy : IAiStrategy
             if (idleBest is not null && AiToolkit.TryOrientFromValidOrigin(idleBest.Value.Pair, validOriginCityIds, out var origin, out var destination))
             {
                 var aircraft = idleBest.Value.Aircraft;
-                var stops = OrientStops(idleBest.Value.Pair, origin, idleBest.Value.Stops);
+                var stops = AiToolkit.OrientStops(idleBest.Value.Pair, origin, idleBest.Value.Stops);
                 var idleUnit = context.OwnFleet.Idle.Where(u => u.Type.Id == aircraft.Id && !reservedUnitIds.Contains(u.Id)).OrderBy(u => u.Id).First();
                 orders.Add(new RouteOrder(origin, destination, aircraft, stops));
                 reservedUnitIds.Add(idleUnit.Id);
@@ -504,37 +504,6 @@ public sealed class RapidExpansionStrategy : IAiStrategy
         stops.Any(stop => heldStopIds.Contains(stop.Id));
 
     /// <summary>
-    /// Whether some idle or acquirable type could fly a profitable nonstop
-    /// route between this gateway and a city the airline can originate from
-    /// (AiToolkit.EvaluateCandidate, the won-gateway step's own check).
-    /// </summary>
-    private static bool HasProfitableNonstopRouteTo(StrategyContext context, City gateway)
-    {
-        var validOriginCityIds = AiToolkit.ValidOriginCityIds(context);
-        var types = context.OwnFleet.Idle.Select(u => u.Type)
-            .Concat(context.PurchasableOrEraTypes)
-            .Concat(context.LeasableOrEraTypes)
-            .Distinct()
-            .ToList();
-        var noneReserved = new HashSet<int>();
-
-        return context.AllCities
-            .Where(c => c.Id != gateway.Id && validOriginCityIds.Contains(c.Id))
-            .Select(c => context.DemandModel.ForPair(c, gateway))
-            .Any(pair => types.Any(type => pair.DistanceKm <= type.RangeKm && AiToolkit.EvaluateCandidate(context, noneReserved, pair, type) is not null));
-    }
-
-    /// <summary>
-    /// The stop list for a route opened from <paramref name="origin"/>:
-    /// unchanged when the route flies the pair in its canonical direction,
-    /// reversed when it was oriented the other way round to start from a
-    /// valid origin - stops are an ordered path, and a two-stop list read
-    /// backwards would fly the wrong legs.
-    /// </summary>
-    private static StopList OrientStops(PairDemand pair, City origin, StopList stops) =>
-        origin.Id == pair.Origin.Id ? stops : new StopList(stops.Reverse());
-
-    /// <summary>
     /// The refuelling stop this airline's best profitable multi-stop route
     /// still needs a slot at (docs/MULTI_STOP_ROUTES_DESIGN.md, Phase 3) -
     /// what step 3 bids on before anything else, so chokepoint bids follow
@@ -610,7 +579,7 @@ public sealed class RapidExpansionStrategy : IAiStrategy
     ///
     /// Multi-stop routes (docs/MULTI_STOP_ROUTES_DESIGN.md, Phase 3): also
     /// only a gateway the airline could fly a profitable nonstop route to
-    /// from its network (<see cref="HasProfitableNonstopRouteTo"/>) - the
+    /// from its network (AiToolkit.HasProfitableNonstopRouteTo) - the
     /// same check a won gateway's first route now has to pass. Measured
     /// without it, refuelling stops were bid on simply because nothing
     /// bigger was left in reach: every chokepoint slot in every game was
@@ -628,7 +597,7 @@ public sealed class RapidExpansionStrategy : IAiStrategy
         return context.AllCities
             .Where(c => c.IsGateway && !touchedCityIds.Contains(c.Id) && !alreadyPursued.Contains(c.Id))
             .Where(c => AiToolkit.DistanceFromNetworkKm(context, c) <= maxRangeKm)
-            .Where(c => HasProfitableNonstopRouteTo(context, c))
+            .Where(c => AiToolkit.HasProfitableNonstopRouteTo(context, c))
             .OrderByDescending(c => c.Region != context.HomeRegion)
             .ThenByDescending(c => c.DemandWeight)
             .ThenBy(c => c.Id, StringComparer.Ordinal)

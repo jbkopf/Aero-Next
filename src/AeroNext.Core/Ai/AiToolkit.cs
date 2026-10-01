@@ -314,8 +314,42 @@ public static class AiToolkit
         StrategyContext context, IReadOnlySet<int> reservedUnitIds, IReadOnlySet<string> validOriginCityIds, Func<PairDemand, bool> regionFilter,
         Dictionary<string, int>? slotsReservedByCity = null, Dictionary<string, int>? citySpendReservedByCity = null)
     {
-        slotsReservedByCity ??= new Dictionary<string, int>();
-        citySpendReservedByCity ??= new Dictionary<string, int>();
+        var candidates = ProfitCandidates(context, reservedUnitIds, validOriginCityIds, regionFilter,
+            slotsReservedByCity ?? new Dictionary<string, int>(), citySpendReservedByCity ?? new Dictionary<string, int>(), requireStopSlots: true)
+            .Select(c => (c.Pair, c.Aircraft, c.Profit, c.UsesIdleUnit))
+            .ToList();
+
+        if (candidates.Count == 0)
+        {
+            return null;
+        }
+
+        var best = candidates
+            .OrderByDescending(c => c.Profit.Cents)
+            .ThenBy(c => c.Pair.Origin.Id, StringComparer.Ordinal)
+            .ThenBy(c => c.Pair.Destination.Id, StringComparer.Ordinal)
+            .ThenBy(c => c.Aircraft.Id, StringComparer.Ordinal)
+            .First();
+
+        return best.Profit >= ProfitabilityFloor ? best : null;
+    }
+
+    /// <summary>
+    /// Every (pair, aircraft) FindMostProfitablePair weighs: unserved,
+    /// not recently closed, touching a valid origin, passing the caller's
+    /// region filter, with both endpoints openable now - priced at every
+    /// idle or leasable type over that type's own path
+    /// (docs/MULTI_STOP_ROUTES_DESIGN.md): nonstop when it can, otherwise
+    /// through the refuelling stops <see cref="StopPathFinder"/> finds.
+    /// <paramref name="requireStopSlots"/> keeps only paths whose stops
+    /// the airline holds a free slot at (what can open now); without it,
+    /// stops are left unchecked - what FindStopNeededByBestMultiStopPlan
+    /// looks through for a stop worth bidding on.
+    /// </summary>
+    private static List<(PairDemand Pair, AircraftType Aircraft, Money Profit, bool UsesIdleUnit, StopList Stops)> ProfitCandidates(
+        StrategyContext context, IReadOnlySet<int> reservedUnitIds, IReadOnlySet<string> validOriginCityIds, Func<PairDemand, bool> regionFilter,
+        Dictionary<string, int> slotsReservedByCity, Dictionary<string, int> citySpendReservedByCity, bool requireStopSlots)
+    {
         var served = context.CurrentRoutes
             .SelectMany(r => new[] { (r.Origin.Id, r.Destination.Id), (r.Destination.Id, r.Origin.Id) })
             .ToHashSet();
@@ -334,46 +368,123 @@ public static class AiToolkit
         // it already owns.
         var idleTypeCandidates = context.EraAvailableTypes.Where(type => idleTypeIds.Contains(type.Id));
         var leaseTypeCandidates = context.LeasableOrEraTypes.Where(type => !idleTypeIds.Contains(type.Id));
-        var typeCandidates = idleTypeCandidates.Concat(leaseTypeCandidates);
+        var typeCandidates = idleTypeCandidates.Concat(leaseTypeCandidates).ToList();
+        var stopPaths = new StopPathFinder(context.AllCities);
 
-        var candidates = context.DemandModel.AllPairs(context.AllCities)
+        return context.DemandModel.AllPairs(context.AllCities)
             .Where(p => !served.Contains((p.Origin.Id, p.Destination.Id)))
             .Where(p => !recentlyClosed.Contains(QuarterEngine.NormalizedPairKey(p.Origin, p.Destination)))
             .Where(p => validOriginCityIds.Contains(p.Origin.Id) || validOriginCityIds.Contains(p.Destination.Id))
             .Where(regionFilter)
             .Where(p => CanOpenNow(context, p, validOriginCityIds, slotsReservedByCity, citySpendReservedByCity))
             .SelectMany(p => typeCandidates
-                .Where(type => p.DistanceKm <= type.RangeKm)
-                .Select(type =>
+                .Select(type => (Type: type, Stops: stopPaths.ShortestStops(p.Origin, p.Destination, type.RangeKm)))
+                .Where(x => x.Stops is not null)
+                .Where(x => !requireStopSlots || x.Stops!.Value.IsEmpty || CanOpenNow(context, p, validOriginCityIds, slotsReservedByCity, citySpendReservedByCity, x.Stops!.Value))
+                .Select(x =>
                 {
-                    var usesIdleUnit = idleTypeIds.Contains(type.Id);
-                    var profit = EstimatedRealProfit(context, p, type, requiresLease: !usesIdleUnit);
-                    return (Pair: p, Aircraft: type, Profit: profit, UsesIdleUnit: usesIdleUnit);
+                    var usesIdleUnit = idleTypeIds.Contains(x.Type.Id);
+                    var profit = EstimatedRealProfit(context, p, x.Type, requiresLease: !usesIdleUnit, x.Stops!.Value);
+                    return (Pair: p, Aircraft: x.Type, Profit: profit, UsesIdleUnit: usesIdleUnit, Stops: x.Stops!.Value);
                 }))
             .ToList();
+    }
 
-        if (candidates.Count == 0)
+    /// <summary>
+    /// The refuelling stop this airline's best profitable multi-stop route
+    /// still needs a slot at (docs/MULTI_STOP_ROUTES_DESIGN.md) - the stop a
+    /// strategy should bid on before falling back to any other gateway, so
+    /// chokepoint bids follow a real plan. Plans are the same candidates
+    /// FindMostProfitablePair weighs, through the caller's own region
+    /// filter, keeping those that need stops and clear ProfitabilityFloor
+    /// over their whole path; they rank by estimated profit. A stop already
+    /// being negotiated for is skipped. Null in permissive mode (no slot
+    /// data) or when no plan needs a stop the airline lacks.
+    /// <paramref name="stopFilter"/> limits which cities may be bid on as
+    /// a stop - a home-region-only strategy never bids abroad; a plan that
+    /// would need a stop it rules out isn't considered at all.
+    /// </summary>
+    public static City? FindStopNeededByBestMultiStopPlan(
+        StrategyContext context, IReadOnlySet<int> reservedUnitIds, IReadOnlySet<string> validOriginCityIds, Func<PairDemand, bool> regionFilter,
+        Dictionary<string, int> slotsReservedByCity, Dictionary<string, int> citySpendReservedByCity, Func<City, bool>? stopFilter = null)
+    {
+        if (context.AvailableSlotsByCity is null)
         {
             return null;
         }
 
-        var best = candidates
-            .OrderByDescending(c => c.Profit.Cents)
-            .ThenBy(c => c.Pair.Origin.Id, StringComparer.Ordinal)
-            .ThenBy(c => c.Pair.Destination.Id, StringComparer.Ordinal)
-            .ThenBy(c => c.Aircraft.Id, StringComparer.Ordinal)
-            .First();
+        var alreadyPursued = CitiesAlreadyPursuedForNegotiation(context);
 
-        return best.Profit >= ProfitabilityFloor ? best : null;
+        City? NeededStop(StopList stops) => stops.FirstOrDefault(stop =>
+            !alreadyPursued.Contains(stop.Id)
+            && context.AvailableSlotsByCity.GetValueOrDefault(stop.Id) - slotsReservedByCity.GetValueOrDefault(stop.Id) <= 0);
+
+        return ProfitCandidates(context, reservedUnitIds, validOriginCityIds, regionFilter, slotsReservedByCity, citySpendReservedByCity, requireStopSlots: false)
+            .Where(c => !c.Stops.IsEmpty && c.Profit >= ProfitabilityFloor)
+            .Where(c => stopFilter is null || c.Stops.All(stopFilter))
+            .Select(c => (Candidate: c, Needed: NeededStop(c.Stops)))
+            .Where(x => x.Needed is not null)
+            .OrderByDescending(x => x.Candidate.Profit.Cents)
+            .ThenBy(x => x.Candidate.Pair.Origin.Id, StringComparer.Ordinal)
+            .ThenBy(x => x.Candidate.Pair.Destination.Id, StringComparer.Ordinal)
+            .ThenBy(x => x.Candidate.Aircraft.Id, StringComparer.Ordinal)
+            .Select(x => x.Needed)
+            .FirstOrDefault();
     }
+
+    /// <summary>
+    /// Whether some idle or acquirable type could fly a profitable nonstop
+    /// route (EvaluateCandidate) between this gateway and a city the
+    /// airline can originate from. Gateway bids that aren't for a planned
+    /// refuelling stop require it (docs/MULTI_STOP_ROUTES_DESIGN.md):
+    /// measured without it, refuelling stops with almost no demand of their
+    /// own were bid on simply because nothing bigger was left in reach -
+    /// every chokepoint slot was held by quarter 40, and 1,026 of 1,102 sat
+    /// unused.
+    /// </summary>
+    public static bool HasProfitableNonstopRouteTo(StrategyContext context, City gateway)
+    {
+        var validOriginCityIds = ValidOriginCityIds(context);
+        var types = context.OwnFleet.Idle.Select(u => u.Type)
+            .Concat(context.PurchasableOrEraTypes)
+            .Concat(context.LeasableOrEraTypes)
+            .Distinct()
+            .ToList();
+        var noneReserved = new HashSet<int>();
+
+        return context.AllCities
+            .Where(c => c.Id != gateway.Id && validOriginCityIds.Contains(c.Id))
+            .Select(c => context.DemandModel.ForPair(c, gateway))
+            .Any(pair => types.Any(type => pair.DistanceKm <= type.RangeKm && EvaluateCandidate(context, noneReserved, pair, type) is not null));
+    }
+
+    /// <summary>
+    /// The stop list for a route opened from <paramref name="origin"/>:
+    /// unchanged when the route flies the pair in its canonical direction,
+    /// reversed when it was oriented the other way round to start from a
+    /// valid origin - stops are an ordered path, and a two-stop list read
+    /// backwards would fly the wrong legs.
+    /// </summary>
+    public static StopList OrientStops(PairDemand pair, City origin, StopList stops) =>
+        origin.Id == pair.Origin.Id ? stops : new StopList(stops.Reverse());
 
     /// <summary>Builds the real order for a winning candidate from FindMostProfitablePair - a RouteOrder alone against an idle unit (no fee, already ours), or a LeaseAircraftOrder alone otherwise (1 action; leasing is two-phase now, docs/AIRCRAFT_ACQUISITION_ROADMAP.md, so the RouteOrder itself waits for a later quarter's delivery).</summary>
     public static void TryProposeCandidate(
         StrategyContext context, (PairDemand Pair, AircraftType Aircraft, Money Profit, bool UsesIdleUnit)? best, IReadOnlySet<string> validOriginCityIds,
         List<QuarterOrder> orders, HashSet<int> reservedUnitIds, Dictionary<string, int> slotsReservedByCity, Dictionary<string, int> citySpendReservedByCity, ref int spent)
     {
-        if (best is null || !TryOrientFromValidOrigin(best.Value.Pair, validOriginCityIds, out var origin, out var destination)
-            || !BaselineAi.HasSlotAtEveryGateway(origin, destination, context.AvailableSlotsByCity, slotsReservedByCity)
+        if (best is null || !TryOrientFromValidOrigin(best.Value.Pair, validOriginCityIds, out var origin, out var destination))
+        {
+            return;
+        }
+
+        // The same deterministic path FindMostProfitablePair priced this
+        // candidate over, read from the oriented origin
+        // (docs/MULTI_STOP_ROUTES_DESIGN.md) - empty for a nonstop route.
+        var stops = new StopPathFinder(context.AllCities).ShortestStops(origin, destination, best.Value.Aircraft.RangeKm);
+
+        if (stops is null
+            || !BaselineAi.HasSlotAtEveryGateway(origin, destination, context.AvailableSlotsByCity, slotsReservedByCity, stops.Value)
             || !HasRoomAtEveryCity(origin, destination, context.CityWideSlotsRemaining, citySpendReservedByCity))
         {
             return;
@@ -387,9 +498,9 @@ public static class AiToolkit
         if (best.Value.UsesIdleUnit)
         {
             var idleUnit = context.OwnFleet.Idle.Where(u => u.Type.Id == best.Value.Aircraft.Id && !reservedUnitIds.Contains(u.Id)).OrderBy(u => u.Id).First();
-            orders.Add(new RouteOrder(origin, destination, best.Value.Aircraft));
+            orders.Add(new RouteOrder(origin, destination, best.Value.Aircraft, stops.Value));
             reservedUnitIds.Add(idleUnit.Id);
-            BaselineAi.ReserveSlots(origin, destination, slotsReservedByCity);
+            BaselineAi.ReserveSlots(origin, destination, slotsReservedByCity, stops.Value);
             ReserveCityWideSlots(origin, destination, citySpendReservedByCity);
             spent += 1;
         }

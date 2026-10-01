@@ -1752,9 +1752,10 @@ ranges, before and after) and wins spread more evenly. Full numbers:
      Rapid Expansion plans multi-stop routes and bids for the stops they
      need. 2x300 Hard: bankrupt airlines 20/24 -> 10/9, wins 7-8 quarters
      sooner, Europe's win share down and North America's up; contested
-     route-quarters 2.21% -> 2.93%. Follow-ups:
-     - extend multi-stop planning to Network Optimizer and Balanced
-       Growth;
+     route-quarters 2.21% -> 2.93%. Extended to Network Optimizer,
+     Balanced Growth and Domestic Profit Optimizer: games won ~20 quarters
+     sooner (179/181 -> 162/158), wins spread further from Europe,
+     contested route-quarters 2.93% -> 3.38%. Follow-ups:
      - many held chokepoint slots still sit unused (363 of 573 at
        quarter 40);
      - the AI's contested-route estimate still splits demand evenly

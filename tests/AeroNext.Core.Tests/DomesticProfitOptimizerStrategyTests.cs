@@ -15,6 +15,15 @@ public class DomesticProfitOptimizerStrategyTests
     private static readonly GravityDemandModel DemandModel = new();
     private static readonly DomesticProfitOptimizerStrategy Strategy = new();
 
+    /// <summary>
+    /// One seat, so any pair with real demand flies it full - a profitable
+    /// nonstop route to a gateway exists, which a gateway bid that isn't
+    /// for a planned refuelling stop requires
+    /// (AiToolkit.HasProfitableNonstopRouteTo). For tests about which
+    /// gateway is chosen, not whether a route there is viable.
+    /// </summary>
+    private static readonly AircraftType Tiny = new("tiny", "Tiny", Seats: 1);
+
     // M44: homeCity defaults to cities[0] - every existing fixture in this
     // file already lists its own "home" city first, matching the pattern
     // MakeContext's own callers were already written against; explicit
@@ -271,7 +280,7 @@ public class DomesticProfitOptimizerStrategyTests
         var domesticGateway = MakeCity("dgw", Region.NorthAmerica, 30, 30, 90, isGateway: true);
         var cities = new[] { home, domesticGateway };
 
-        var context = MakeContext(Array.Empty<Route>(), cities, Array.Empty<AircraftType>(), Region.NorthAmerica, cash: Money.FromDollars(10_000_000));
+        var context = MakeContext(Array.Empty<Route>(), cities, new[] { Tiny }, Region.NorthAmerica, cash: Money.FromDollars(10_000_000));
 
         var orders = Strategy.DecideOrders(context);
 
@@ -293,7 +302,7 @@ public class DomesticProfitOptimizerStrategyTests
         var cities = new[] { home, best, next };
 
         var context = new StrategyContext(
-            Array.Empty<Route>(), 3, cities, DemandModel, Array.Empty<AircraftType>(), AirlineFleet.Empty, Region.NorthAmerica, HomeCity: home,
+            Array.Empty<Route>(), 3, cities, DemandModel, new[] { Tiny }, AirlineFleet.Empty, Region.NorthAmerica, HomeCity: home,
             AvailableCash: Money.FromDollars(10_000_000),
             PendingNegotiationCityIds: new HashSet<string> { "best" });
 
@@ -312,7 +321,7 @@ public class DomesticProfitOptimizerStrategyTests
         var cities = new[] { home, best, next };
 
         var context = new StrategyContext(
-            Array.Empty<Route>(), 3, cities, DemandModel, Array.Empty<AircraftType>(), AirlineFleet.Empty, Region.NorthAmerica, HomeCity: home,
+            Array.Empty<Route>(), 3, cities, DemandModel, new[] { Tiny }, AirlineFleet.Empty, Region.NorthAmerica, HomeCity: home,
             AvailableSlotsByCity: new Dictionary<string, int> { ["best"] = 1 },
             AvailableCash: Money.FromDollars(10_000_000));
 
@@ -519,7 +528,7 @@ public class DomesticProfitOptimizerStrategyTests
         var domesticGateway = MakeCity("dgw", Region.NorthAmerica, 30, 30, 90, isGateway: true);
         var cities = new[] { home, domesticGateway };
 
-        var context = MakeContext(Array.Empty<Route>(), cities, Array.Empty<AircraftType>(), Region.NorthAmerica); // cash defaults to null
+        var context = MakeContext(Array.Empty<Route>(), cities, new[] { Tiny }, Region.NorthAmerica); // cash defaults to null
 
         var orders = Strategy.DecideOrders(context);
 
@@ -600,7 +609,7 @@ public class DomesticProfitOptimizerStrategyTests
         var domesticGateway = MakeCity("dgw", Region.NorthAmerica, 30, 30, 90, isGateway: true);
 
         var context = new StrategyContext(
-            Array.Empty<Route>(), 3, new[] { home, domesticGateway }, DemandModel, Array.Empty<AircraftType>(), AirlineFleet.Empty, Region.NorthAmerica, HomeCity: home,
+            Array.Empty<Route>(), 3, new[] { home, domesticGateway }, DemandModel, new[] { Tiny }, AirlineFleet.Empty, Region.NorthAmerica, HomeCity: home,
             AvailableCash: Money.FromDollars(500_000), CurrentDebtBalance: Money.Zero);
 
         var orders = Strategy.DecideOrders(context);

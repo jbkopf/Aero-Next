@@ -418,10 +418,55 @@ and two-stop Gander + Azores Atlantic routes.
 The pillar check: contested route-quarters on the same 40 Hard games,
 2.21% -> 2.93% - about a third more head-to-head competition.
 
+### Extended to every strategy that opens routes (2026-10-01)
+
+- `AiToolkit.FindMostProfitablePair` (Network Optimizer, Balanced Growth)
+  prices each type over its own stop path and keeps multi-stop candidates
+  whose stop slots are held; `TryProposeCandidate` orders the same
+  deterministic path from the oriented origin.
+- `AiToolkit.FindStopNeededByBestMultiStopPlan`: the stop each strategy
+  bids on first, through its own region rule - Balanced Growth by its
+  expanding/consolidating phase, Network Optimizer and Domestic Profit
+  Optimizer home region only, with a stop filter so neither ever bids on
+  a gateway abroad.
+- Domestic Profit Optimizer's own searches carry stops; a multi-stop
+  candidate there must be profitable, as in Rapid Expansion. (In 1955,
+  43 North American domestic pairs need a stop, 12 in AustralAsia, 7 in
+  Europe.)
+- Every strategy's fallback gateway bid requires a profitable nonstop
+  route (`AiToolkit.HasProfitableNonstopRouteTo`, moved from Rapid
+  Expansion).
+- Bug fixed on the way: Balanced Growth's first case only ran its search
+  when there was no won-gateway candidate, so a held stop slot - which
+  always offers a thin, unprofitable lone leg - left it opening nothing.
+  It now falls back to the search when the won-gateway candidate fails
+  the profit check.
+
+Tests: `MultiStopStrategyTests.cs` (13). Six older negotiation tests used
+gateways no profitable route could reach (five with no aircraft at all);
+they now have a viable route, so they still test which gateway is chosen.
+
+Measured against Rapid Expansion alone:
+
+| 2x300 Hard games | Seed 1 | Seed 301 |
+|---|---|---|
+| Games with a bankruptcy | 8 -> 8 | 8 -> 8 |
+| Average win quarter | 179.4 -> 162.3 | 180.8 -> 157.9 |
+| Multi-stop route orders | 772 -> 1,133 | 801 -> 1,164 |
+| North America's wins | 30 -> 43 | 28 -> 36 |
+| Europe's wins | 101 -> 101 | 89 -> 77 |
+
+Bankruptcies are unchanged - they all happen in the early game, before
+these strategies run. Contested route-quarters on the same 40 games:
+2.93% -> 3.38% (2.21% before any multi-stop work). Median final cash
+fell sharply in most regions, but at a fixed point (quarter 120, same 40
+games) cash is within about +/-20% by region with no debt anywhere: the
+drop comes mostly from games ending sooner, since cash grows fastest
+late. Fewer games reach quarter 120 now (80 airlines vs 96), so that
+comparison covers the longer games only.
+
 Open follow-ups (`docs/OPEN_WORK.md`):
 
-- Only Rapid Expansion plans multi-stop routes; Network Optimizer and
-  Balanced Growth only keep the ones they inherit.
 - Many held chokepoint slots still sit unused (363 of 573 at quarter 40),
   likely waiting on aircraft or a second stop.
 - The AI's own estimate of a contested route still splits demand evenly

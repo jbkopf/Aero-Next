@@ -315,7 +315,14 @@ public sealed class NetworkOptimizerStrategy : IAiStrategy
 
         // 4. Negotiate a domestic gateway - never cross-region, same
         // contract as DomesticProfitOptimizerStrategy.
-        var bestDomesticGateway = DomesticProfitOptimizerStrategy.FindBestUnservedDomesticGateway(context) ?? DomesticProfitOptimizerStrategy.FindBestIdleContestableDomesticGateway(context);
+        // Multi-stop routes (docs/MULTI_STOP_ROUTES_DESIGN.md): a home-region
+        // refuelling stop its best profitable domestic multi-stop route
+        // still needs comes first.
+        var bestDomesticGateway = AiToolkit.FindStopNeededByBestMultiStopPlan(context, reservedUnitIds, validOriginCityIds,
+                p => p.Origin.Region == context.HomeRegion && p.Destination.Region == context.HomeRegion,
+                slotsReservedByCity, citySpendReservedByCity, stopFilter: c => c.Region == context.HomeRegion)
+            ?? DomesticProfitOptimizerStrategy.FindBestUnservedDomesticGateway(context)
+            ?? DomesticProfitOptimizerStrategy.FindBestIdleContestableDomesticGateway(context);
         AiToolkit.NegotiateOrBorrow(context, bestDomesticGateway, orders, ref spent);
 
         // 5. Shared toolkit - free, always last, same as every strategy.

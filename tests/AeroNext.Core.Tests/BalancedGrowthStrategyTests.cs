@@ -412,24 +412,24 @@ public class BalancedGrowthStrategyTests
     [Fact]
     public void DecideOrders_Phase2_NegotiatesForTouchedRegionGateway_NotUntouchedRegionOne()
     {
-        // withinEuropeGateway's own weight (1) is deliberately too weak
-        // for any candidate pair reaching it (home/europeHub/asiaHub, the
-        // only Wide-reachable candidates - Small is excluded from this
-        // fixture's own era types) to clear the profitability floor -
-        // pre-verified (Wide, all three: -$10.7M/-$1.9M/-$9.2M) - so Case
-        // 2's own new-pair search leaves it alone. Europe-EastAsia and
-        // home-auHub are already-served routes - either would otherwise
-        // be a real, profitable Case 2 candidate of its own, consuming
-        // the whole remaining budget and leaving nothing for negotiation
-        // - exactly what this test exists to isolate. auHub (AustralAsia)
-        // is the 4th touched region, matching TargetRegionCount=4, so the
-        // negotiation ternary resolves to the within-touched-region
-        // gateway search, not the reach-a-new-region one.
+        // withinEuropeGateway carries enough demand (weight 50) that a
+        // profitable nonstop route to it exists - a gateway bid that isn't
+        // for a planned refuelling stop requires one
+        // (AiToolkit.HasProfitableNonstopRouteTo); an earlier version of
+        // this test used weight 1 precisely so no route reached it, which
+        // that rule now treats as not worth bidding on. Case 2 uses one
+        // action leasing for a new route, leaving the last one for
+        // negotiation - exactly what this test exists to isolate.
+        // Europe-EastAsia and home-auHub are already-served routes. auHub
+        // (AustralAsia) is the 4th touched region, matching
+        // TargetRegionCount=4, so the negotiation ternary resolves to the
+        // within-touched-region gateway search, not the reach-a-new-region
+        // one - and the far bigger untouchedGateway is passed over.
         var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
         var europeHub = MakeCity("euhub", Region.Europe, 10, 10, 100);
         var asiaHub = MakeCity("asiahub", Region.EastAsia, 20, 20, 100);
         var auHub = MakeCity("auhub", Region.AustralAsia, -20, -20, 1);
-        var withinEuropeGateway = MakeCity("eugw", Region.Europe, 11, 11, 1, isGateway: true);
+        var withinEuropeGateway = MakeCity("eugw", Region.Europe, 11, 11, 50, isGateway: true);
         var untouchedGateway = MakeCity("elsewheregw", Region.SouthAmerica, -30, -30, 5000, isGateway: true);
         var cities = new[] { home, europeHub, asiaHub, auHub, withinEuropeGateway, untouchedGateway };
         var existing = new[]
