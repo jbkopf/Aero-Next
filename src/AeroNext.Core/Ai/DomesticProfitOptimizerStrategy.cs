@@ -277,6 +277,8 @@ public sealed class DomesticProfitOptimizerStrategy : IAiStrategy
     /// <summary>
     /// M45: the region-restricted sibling of AiToolkit.FindBestIdleContestableGateway - "never cross-region" (the class doc comment) covers this too.
     /// M58: internal, not private - NetworkOptimizerStrategy reuses this directly.
+    /// Multi-stop routes follow-up: only a gateway with a profitable nonstop
+    /// route, the same filter as AiToolkit.FindBestIdleContestableGateway.
     /// </summary>
     internal static City? FindBestIdleContestableDomesticGateway(StrategyContext context)
     {
@@ -292,6 +294,7 @@ public sealed class DomesticProfitOptimizerStrategy : IAiStrategy
             .Where(kv => kv.Value > 0 && !alreadyPursued.Contains(kv.Key))
             .Select(kv => cityById[kv.Key])
             .Where(c => c.Region == context.HomeRegion)
+            .Where(c => AiToolkit.HasProfitableNonstopRouteTo(context, c))
             .OrderByDescending(c => c.DemandWeight)
             .ThenBy(c => c.Id, StringComparer.Ordinal)
             .FirstOrDefault();

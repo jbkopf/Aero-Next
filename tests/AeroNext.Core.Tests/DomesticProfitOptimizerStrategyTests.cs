@@ -674,7 +674,7 @@ public class DomesticProfitOptimizerStrategyTests
         var existing = new[] { new Route(home, domesticGateway, aircraft, AircraftCount: 1) }; // already touched - excluded from FindBestUnservedDomesticGateway
 
         var context = new StrategyContext(
-            existing, 3, cities, DemandModel, new[] { aircraft }, AirlineFleet.Empty, Region.NorthAmerica, HomeCity: home,
+            existing, 3, cities, DemandModel, new[] { aircraft, Tiny }, AirlineFleet.Empty, Region.NorthAmerica, HomeCity: home,
             AvailableCash: Money.FromDollars(10_000_000),
             IdleContestableSlotsByCity: new Dictionary<string, int> { ["dgw"] = 1 });
 

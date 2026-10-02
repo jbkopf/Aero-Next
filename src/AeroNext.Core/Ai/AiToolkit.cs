@@ -1073,6 +1073,14 @@ public static class AiToolkit
     /// caller that doesn't populate it has nothing to target, same
     /// permissive-default convention as every other nullable
     /// StrategyContext field.
+    ///
+    /// Multi-stop routes follow-up (docs/MULTI_STOP_ROUTES_DESIGN.md): only
+    /// a gateway the airline could fly a profitable nonstop route to
+    /// (HasProfitableNonstopRouteTo) - a refuelling stop it needs is bid on
+    /// through FindStopNeededByBestMultiStopPlan instead. Traced without
+    /// this: every chokepoint bid with no plan behind it came from here
+    /// (461 of 1,008 across 60 Hard games), passing idle refuelling-stop
+    /// slots from one airline that couldn't use them to another.
     /// </summary>
     public static City? FindBestIdleContestableGateway(StrategyContext context)
     {
@@ -1087,6 +1095,7 @@ public static class AiToolkit
         return context.IdleContestableSlotsByCity
             .Where(kv => kv.Value > 0 && !alreadyPursued.Contains(kv.Key))
             .Select(kv => cityById[kv.Key])
+            .Where(c => HasProfitableNonstopRouteTo(context, c))
             .OrderByDescending(c => c.DemandWeight)
             .ThenBy(c => c.Id, StringComparer.Ordinal)
             .FirstOrDefault();

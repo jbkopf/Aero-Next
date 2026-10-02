@@ -1756,8 +1756,13 @@ ranges, before and after) and wins spread more evenly. Full numbers:
      Balanced Growth and Domestic Profit Optimizer: games won ~20 quarters
      sooner (179/181 -> 162/158), wins spread further from Europe,
      contested route-quarters 2.93% -> 3.38%. Follow-ups:
-     - many held chokepoint slots still sit unused (363 of 573 at
-       quarter 40);
+     - held chokepoint slots stranded by a strategy switch: an airline
+       wins a stop under Rapid Expansion or Balanced Growth, then spends
+       the mid/late game in Network Optimizer, which never opens
+       cross-region routes (37% of remaining unused-slot time after the
+       idle-contest fix, 79% of it Network Optimizer). Options: let it
+       use slots it already holds, relinquish unused slots, or leave
+       them to the idle-contest bid;
      - the AI's contested-route estimate still splits demand evenly
        instead of using journey cost;
      - Pacific chokepoints (Honolulu, Wake, Anchorage) are barely used.

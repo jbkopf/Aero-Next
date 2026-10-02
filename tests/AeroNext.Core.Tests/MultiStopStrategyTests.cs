@@ -127,6 +127,23 @@ public class MultiStopStrategyTests
     }
 
     [Fact]
+    public void FindBestIdleContestableGateway_SkipsAThinStop_ButTakesAUsableGateway()
+    {
+        // Both have an idle-expired slot up for grabs; only the big gateway
+        // has a profitable nonstop route from the network.
+        var bigGateway = new City("big", "BIG", Region.NorthAmerica, 0, 20, 100, true, 3);
+        var context = MakeContext(Abroad, stopSlotHeld: false) with
+        {
+            AllCities = new[] { Abroad.Home, Abroad.Stop, Abroad.Far, bigGateway },
+            IdleContestableSlotsByCity = new Dictionary<string, int> { [Abroad.Stop.Id] = 1, ["big"] = 1 },
+        };
+        var stopOnly = context with { IdleContestableSlotsByCity = new Dictionary<string, int> { [Abroad.Stop.Id] = 1 } };
+
+        Assert.Equal("big", AiToolkit.FindBestIdleContestableGateway(context)?.Id);
+        Assert.Null(AiToolkit.FindBestIdleContestableGateway(stopOnly));
+    }
+
+    [Fact]
     public void OrientStops_ReversesTheStopsWhenTheRouteStartsAtTheOtherEnd()
     {
         var second = new City("st2", "ST2", Region.NorthAmerica, 0, 45, 1, true, 2);

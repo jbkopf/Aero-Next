@@ -465,10 +465,40 @@ drop comes mostly from games ending sooner, since cash grows fastest
 late. Fewer games reach quarter 120 now (80 airlines vs 96), so that
 comparison covers the longer games only.
 
+### Held but unused chokepoint slots (2026-10-01)
+
+Traced on 60 Hard games (temporary instrumentation, reverted): 788
+airlines held a chokepoint slot (Gander, Azores, Wake, Honolulu,
+Anchorage, Dakar) they weren't using at some point, for a median of 70
+quarters; only 56 of those holdings were ever used. Every chokepoint bid
+with no profitable plan behind it (461 of 1,008) came from the
+idle-contestable fallback, the one gateway bid without the
+profitable-nonstop filter: idle stop slots passed from one airline that
+couldn't use them to another. Both versions of that fallback
+(`AiToolkit.FindBestIdleContestableGateway`, Domestic Profit
+Optimizer's domestic one) now carry the filter.
+
+Same 60 games after: unplanned chokepoint bids 461 -> 0, unused holdings
+788 -> 448, slot-quarters with no profitable plan 3,086 -> 168,
+multi-stop route orders 205 -> 243. 2x300 Hard: bankruptcies identical
+(8/8 games), win quarter 162.3/157.9 -> 159.9/159.2, multi-stop route
+orders 1,133/1,164 -> 1,284/1,332, South America's wins 30/32 -> 50/43.
+
+What the remaining unused slots are waiting on: a usable, profitable
+route exists but isn't opened (37% - 79% of those held by Network
+Optimizer, which never opens cross-region routes, usually with a spare
+aircraft ready: the slot was won under Rapid Expansion or Balanced
+Growth before the airline switched strategy); an endpoint can't be
+opened (28% - no slot at a gateway endpoint, or the city's shared
+capacity is used up by the time the stop is won); the AI's rival-aware
+estimate says the route would lose money (20%); a two-stop route's
+second stop isn't held (11%).
+
 Open follow-ups (`docs/OPEN_WORK.md`):
 
-- Many held chokepoint slots still sit unused (363 of 573 at quarter 40),
-  likely waiting on aircraft or a second stop.
+- Slots stranded by a strategy switch (above): let Network Optimizer use
+  slots it already holds, relinquish unused ones (`RelinquishSlotOrder`,
+  never used by the AI), or leave them to the idle-contest bid.
 - The AI's own estimate of a contested route still splits demand evenly
   with rivals rather than using Phase 2's journey cost.
 - Honolulu, Wake and Anchorage barely appear: Pacific crossings are
