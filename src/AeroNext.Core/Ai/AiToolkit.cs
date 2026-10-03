@@ -167,11 +167,9 @@ public static class AiToolkit
 
     /// <summary>
     /// M58/BalancedGrowthStrategy follow-up: "is this airline's network
-    /// in real trouble" - Math.Max of unprofitableRatio (a route read
-    /// unprofitable for MinimumSustainedUnprofitableQuarters in a row,
-    /// reusing AiRouteHistory.ConsecutiveUnprofitableQuarters) and
-    /// contestedRatio (the exact same "contested" definition
-    /// ApplyMarketingCampaign already acts on), each gated by
+    /// in real trouble" - the share of routes read unprofitable for
+    /// MinimumSustainedUnprofitableQuarters in a row (reusing
+    /// AiRouteHistory.ConsecutiveUnprofitableQuarters), gated by
     /// MinimumTroubledRouteCountForSignal so a tiny, young network with
     /// one struggling route doesn't register as "the network is in
     /// trouble" the way a mature one genuinely does. Originally
@@ -183,6 +181,18 @@ public static class AiToolkit
     /// direct complement (see that class's own doc comment for why a
     /// guaranteed partition, not two independently-tuned scores, is the
     /// safe way for two MidGame/LateGame strategies to coexist).
+    ///
+    /// Contested routes no longer count (2026-10-03). The signal was
+    /// Math.Max of this and the share of routes a rival also flies, but
+    /// traced on 100 Hard games, 95% of the year-boundary picks it gave
+    /// NetworkOptimizerStrategy were triggered only by contested routes
+    /// that were all profitable - usually one route out of ~23. A rival on
+    /// the same pair rarely leaves, so the trigger never cleared (99% of
+    /// NetworkOptimizerStrategy years were followed by another), and the
+    /// airlines it parked in "stabilize, don't expand" were the successful
+    /// ones (median cash $5.9B vs $0.79B for BalancedGrowthStrategy picks).
+    /// Head-to-head competition is the game's core, not trouble; marketing
+    /// still acts on contested routes (ApplyMarketingCampaign).
     /// </summary>
     private const int MinimumTroubledRouteCountForSignal = 1;
 
@@ -201,13 +211,8 @@ public static class AiToolkit
         var sustainedUnprofitableCount = routes.Count(r =>
             (context.RouteHistoryByPair?.GetValueOrDefault(QuarterEngine.NormalizedPairKey(r.Origin, r.Destination))?.ConsecutiveUnprofitableQuarters ?? 0)
                 >= MinimumSustainedUnprofitableQuarters);
-        var unprofitableRatio = sustainedUnprofitableCount < MinimumTroubledRouteCountForSignal ? 0.0 : sustainedUnprofitableCount / (double)routes.Count;
 
-        var contestedCount = routes.Count(r =>
-            (context.RivalCountByServedRoute?.GetValueOrDefault(QuarterEngine.NormalizedPairKey(r.Origin, r.Destination)) ?? 0) > 0);
-        var contestedRatio = contestedCount < MinimumTroubledRouteCountForSignal ? 0.0 : contestedCount / (double)routes.Count;
-
-        return Math.Max(unprofitableRatio, contestedRatio);
+        return sustainedUnprofitableCount < MinimumTroubledRouteCountForSignal ? 0.0 : sustainedUnprofitableCount / (double)routes.Count;
     }
 
     /// <summary>

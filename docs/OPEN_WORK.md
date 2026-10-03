@@ -1756,6 +1756,25 @@ ranges, before and after) and wins spread more evenly. Full numbers:
      Balanced Growth and Domestic Profit Optimizer: games won ~20 quarters
      sooner (179/181 -> 162/158), wins spread further from Europe,
      contested route-quarters 2.93% -> 3.38%. Follow-ups:
+     - *Mid/late-game strategy selection (2026-10-03):* traced on 100
+       Hard games, Network Optimizer took 57% of yearly picks (87% after
+       quarter 200), 95% of them triggered only by contested routes that
+       were all profitable - usually one route of ~23 - and airlines
+       almost never left (99% stayed the next year). Contested routes no
+       longer count as network trouble (`AiToolkit.NetworkTroubleRatio`):
+       Network Optimizer now takes 4% of picks, mostly airlines with
+       genuinely losing routes (median cash $0.45B vs $2.77B for Balanced
+       Growth picks), and 21% of them leave each year. 2x300 Hard:
+       bankruptcies unchanged, wins 7 quarters sooner, Europe's wins
+       93/78 -> 47/44 with every other region up, multi-stop route orders
+       up ~27%. Side effect: type swaps fell 94% (32k -> 1.9k per 300
+       games) - only Network Optimizer makes proactive swaps; Balanced
+       Growth has them off since M67's measured regression, so mid/late
+       fleets now barely modernize. Follow-ups: revisit proactive swaps
+       for Balanced Growth under the new mix; 65% of the remaining Network
+       Optimizer picks involve a losing route the closure rule can never
+       close (streak started before the mid-game) - the full-streak,
+       one-closure-per-quarter fix proposed earlier;
      - held chokepoint slots stranded by a strategy switch: an airline
        wins a stop under Rapid Expansion or Balanced Growth, then spends
        the mid/late game in Network Optimizer, which never opens

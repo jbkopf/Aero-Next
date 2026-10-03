@@ -62,11 +62,26 @@ public class BalancedGrowthStrategyTests
         var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
         var away = MakeCity("away", Region.NorthAmerica, 1, 1, 100);
         var route = new Route(home, away, Wide, AircraftCount: 1);
+        var history = new Dictionary<(string, string), AiRouteHistory> { [QuarterEngine.NormalizedPairKey(home, away)] = new AiRouteHistory(null, null, ConsecutiveUnprofitableQuarters: 2) };
+        var context = new StrategyContext(new[] { route }, ActionCap: 3, new[] { home, away }, DemandModel, new[] { Wide }, AirlineFleet.Empty,
+            home.Region, home, RouteHistoryByPair: history);
+
+        Assert.Equal(0.0, Strategy.Suitability(context));
+    }
+
+    [Fact]
+    public void Suitability_ContestedButProfitableNetwork_IsOne_StaysInGrowth()
+    {
+        // A rival on the same pair is competition, not trouble
+        // (AiToolkit.NetworkTroubleRatio, 2026-10-03).
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
+        var away = MakeCity("away", Region.NorthAmerica, 1, 1, 100);
+        var route = new Route(home, away, Wide, AircraftCount: 1);
         var rivalCount = new Dictionary<(string, string), int> { [QuarterEngine.NormalizedPairKey(home, away)] = 1 };
         var context = new StrategyContext(new[] { route }, ActionCap: 3, new[] { home, away }, DemandModel, new[] { Wide }, AirlineFleet.Empty,
             home.Region, home, RivalCountByServedRoute: rivalCount);
 
-        Assert.Equal(0.0, Strategy.Suitability(context));
+        Assert.Equal(1.0, Strategy.Suitability(context));
     }
 
     [Fact]

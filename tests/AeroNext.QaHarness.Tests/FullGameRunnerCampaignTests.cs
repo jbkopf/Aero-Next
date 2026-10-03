@@ -80,8 +80,12 @@ public class FullGameRunnerCampaignTests
         // inside a real campaign. Re-picked after the marketing redesign
         // changed the previous seed's (14) game enough that it stopped
         // swapping - the test caught that, as designed. Same
-        // re-pick-don't-weaken rule as above.
-        const int seed = 18;
+        // re-pick-don't-weaken rule as above. Re-picked again (18 -> 16, 6
+        // swaps) when contested routes stopped counting as network
+        // trouble (AiToolkit.NetworkTroubleRatio), which moved most
+        // late-game airlines from NetworkOptimizerStrategy to
+        // BalancedGrowthStrategy.
+        const int seed = 16;
         var result = Run(SweepSeats(seed), seed, quarters: 244);
 
         Assert.True(result.Success, string.Join("; ", result.Violations.Select(v => $"Q{v.Quarter} {v.AirlineName}: {v.Description}")));

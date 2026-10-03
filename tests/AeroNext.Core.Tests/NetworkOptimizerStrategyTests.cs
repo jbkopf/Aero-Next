@@ -134,7 +134,7 @@ public class NetworkOptimizerStrategyTests
     }
 
     [Fact]
-    public void Suitability_ThreeOrMoreContestedRoutes_IsOne()
+    public void Suitability_ContestedButProfitableRoutes_AreNotTrouble()
     {
         var home = MakeCity("home", Region.NorthAmerica, 0, 0, 50);
         var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
@@ -147,10 +147,13 @@ public class NetworkOptimizerStrategyTests
             new Route(home, c, aircraft, AircraftCount: 1),
             new Route(home, d, aircraft, AircraftCount: 1),
         };
+        // Every route has a rival, none is losing money: competition, not
+        // trouble (AiToolkit.NetworkTroubleRatio, 2026-10-03). Traced, this
+        // alone used to account for 95% of this strategy's selections.
         var rivalCount = routes.ToDictionary(r => QuarterEngine.NormalizedPairKey(r.Origin, r.Destination), _ => 1);
         var context = MakeContext(routes, new[] { home, b, c, d }, new[] { aircraft }, Region.NorthAmerica, rivalCountByServedRoute: rivalCount);
 
-        Assert.Equal(1.0, Strategy.Suitability(context));
+        Assert.Equal(0.0, Strategy.Suitability(context));
     }
 
     [Fact]
