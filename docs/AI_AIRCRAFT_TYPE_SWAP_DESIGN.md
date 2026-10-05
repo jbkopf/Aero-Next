@@ -697,3 +697,60 @@ to a newer aircraft type becoming available).
 1052 tests passing (up from 1042), every changed file fully covered
 (the same two small pre-existing, unrelated gaps from M66 left
 untouched).
+
+### Follow-up (2026-10-05): proactive swaps for BalancedGrowthStrategy, and two evaluation bugs
+
+**Why revisited.** Contested routes stopped counting as network trouble
+(`AiToolkit.NetworkTroubleRatio`, 2026-10-03), so `BalancedGrowthStrategy`
+went from ~43% to ~96% of mid/late-game picks and
+`NetworkOptimizerStrategy` - the only strategy with proactive swaps -
+almost disappeared. Type swaps fell 94% (~32k -> ~1.9k per 300 games);
+mid/late fleets stopped modernizing, including dropping refuelling stops
+once range allows.
+
+**First attempt: just turn it on.** No bankruptcy regression on 2x300
+Hard and airlines 60-110% richer, but ~200 swaps a game and, traced on 60
+games, 30% of them swap-backs (a route returning to the type it just
+left), one route swapped 44 times.
+
+**Root cause, traced on 40 games (temporary instrumentation, reverted):**
+
+1. `EstimatedRealProfit` divided a pair's demand by rivals on the pair
+   *plus* every rival airline touching the destination region. For a
+   route already flown, only pair rivals share its passengers; 92% of
+   swaps were on routes with no pair rival, and 86% of those were still
+   cut 2-4x by the region term - often below what the (usually full)
+   route really carried.
+2. The proactive bar is `0.5 x current profit`, assuming that's positive
+   ("the caller guarantees" it). The caller checks the route's *actual*
+   profit; the bar used the *estimate*, negative in 36% of swaps. A
+   negative bar let 1,141 swaps go to a type estimated worse than the
+   current one, and 83% of swap-backs involved such a swap.
+
+**Fixed:** `EstimatedRealProfit` gained `includeRegionRivals` (default
+true, so new-route searches are unchanged); `EvaluateTypeSwapCandidate`
+passes false for the current type and every candidate, and a proactive
+swap now requires a positive current estimate. Tests:
+`TypeSwapEvaluationTests.cs` (4), each fix mutation-checked.
+
+**Measured.** 60-game trace: swap-backs 30% -> 8%, most swaps on one route
+44 -> 10, stops dropped by a swap 92 -> 256, median seats after/before a
+swap 1.08 -> 1.97 (growing with demand). 2x300 Hard:
+
+| | Proactive off | On, unfixed | **On, fixed** |
+|---|---|---|---|
+| Games with a bankruptcy | 8 / 8 | 8 / 8 | 9 / 8 |
+| Average win quarter | 152.8 / 153.7 | 168.1 / 155.4 | 166.2 / 161.1 |
+| Type swaps | 1.9k / 1.8k | 66.5k / 60.1k | 58.4k / 56.7k |
+| NorthAmerica average cash | $7.7B / $7.8B | $13.7B / $13.7B | $20.7B / $21.9B |
+| Europe's wins | 47 / 44 | 62 / 59 | 59 / 62 |
+| AustralAsia's wins | 33 / 40 | 32 / 34 | 19 / 29 |
+| Network marketing campaigns | 32k / 33k | 42k / 41k | 120k / 116k |
+
+The one extra bankruptcy is a single SouthAmerica airline at quarter 115
+- the late-campaign pattern M67 found, but one airline in 600 games, not
+4 -> 12. **Shipped on**, as a trade-off to revisit: much richer,
+modernizing airlines against wins 8-13 quarters later and some of the
+2026-10-03 win balance (Europe, AustralAsia) given back. Network
+marketing tripling with richer airlines is unverified as to whether it
+pays.

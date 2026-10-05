@@ -1768,10 +1768,13 @@ ranges, before and after) and wins spread more evenly. Full numbers:
        bankruptcies unchanged, wins 7 quarters sooner, Europe's wins
        93/78 -> 47/44 with every other region up, multi-stop route orders
        up ~27%. Side effect: type swaps fell 94% (32k -> 1.9k per 300
-       games) - only Network Optimizer makes proactive swaps; Balanced
-       Growth has them off since M67's measured regression, so mid/late
-       fleets now barely modernize. Follow-ups: revisit proactive swaps
-       for Balanced Growth under the new mix; 65% of the remaining Network
+       games) - only Network Optimizer made proactive swaps. Resolved
+       2026-10-05: Balanced Growth now makes proactive swaps, after
+       fixing two swap-evaluation bugs that caused heavy churn (see the
+       M67 follow-up in `docs/AI_AIRCRAFT_TYPE_SWAP_DESIGN.md`). Trade-off
+       to revisit: airlines 2-3x richer, but wins 8-13 quarters later and
+       Europe's wins back to ~60; network marketing campaigns tripled
+       (unverified whether they pay). Follow-ups: 65% of the remaining Network
        Optimizer picks involve a losing route the closure rule can never
        close (streak started before the mid-game) - the full-streak,
        one-closure-per-quarter fix proposed earlier;

@@ -119,9 +119,8 @@ namespace AeroNext.Core.Ai;
 ///
 /// M67 (docs/AI_AIRCRAFT_TYPE_SWAP_DESIGN.md): extends M66's
 /// AdjustRouteOrder awareness here, per the user's own direct follow-up
-/// request. Reactive only - enableProactiveTypeSwap stays false,
-/// deliberately, unlike NetworkOptimizerStrategy's own full reactive+
-/// proactive wiring. A real 300-game ablation traced proactive swapping
+/// request. Shipped reactive-only at first, unlike
+/// NetworkOptimizerStrategy's own full reactive+proactive wiring. A real 300-game ablation traced proactive swapping
 /// specifically to a real regression (SouthAmerica bankruptcy
 /// 4→12, total bankruptcy 16→25) once enabled here: this class is the
 /// primary MidGame/LateGame workhorse, active far more broadly than
@@ -132,6 +131,18 @@ namespace AeroNext.Core.Ai;
 /// the user's own explicit call, with proactive revisited as a real
 /// follow-up once aircraft-ordering/leasing work (the user's own stated
 /// next area) is further along.
+///
+/// Proactive swaps on (2026-10-05). Once contested routes stopped counting
+/// as network trouble, this strategy took ~96% of mid/late-game picks and
+/// type swaps fell 94%, so fleets barely modernized. Re-enabling proactive
+/// swaps here first showed heavy churn (30% of swaps were swap-backs),
+/// traced to AiToolkit.EvaluateTypeSwapCandidate itself rather than to
+/// volume: region rivals cut a flown route's estimate and a negative
+/// estimate made the +50% bar negative. Both fixed there. 2x300 Hard,
+/// against proactive off: bankruptcies 8/8 -> 9/8 (one late SouthAmerica
+/// airline, not M67's 4 -> 12), average cash 2-3x higher, wins 8-13
+/// quarters later, Europe's wins 47/44 -> 59/62. See the M67 follow-up in
+/// docs/AI_AIRCRAFT_TYPE_SWAP_DESIGN.md.
 /// </summary>
 public sealed class BalancedGrowthStrategy : IAiStrategy
 {
@@ -279,7 +290,7 @@ public sealed class BalancedGrowthStrategy : IAiStrategy
         // (that's NetworkOptimizerStrategy's own job).
         AiToolkit.ApplyMarketingCampaign(context, orders, ref spent);
 
-        AiToolkit.ApplyManagementToolkit(context, orders, reservedUnitIds, spent, enableSustainedSingleAircraftClosure: true, enableReactiveTypeSwap: true, enableProactiveTypeSwap: false); // proactive deliberately off - real regression traced to it, see docs/AI_AIRCRAFT_TYPE_SWAP_DESIGN.md's M67 section
+        AiToolkit.ApplyManagementToolkit(context, orders, reservedUnitIds, spent, enableSustainedSingleAircraftClosure: true, enableReactiveTypeSwap: true, enableProactiveTypeSwap: true);
 
         return orders;
     }

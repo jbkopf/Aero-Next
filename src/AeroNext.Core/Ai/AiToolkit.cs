@@ -279,12 +279,22 @@ public static class AiToolkit
     /// reverted attempts were not.
     /// </summary>
     /// <param name="stops">Refuelling stops the route would make (docs/MULTI_STOP_ROUTES_DESIGN.md) - its seats and costs cover every leg; demand stays the pair's.</param>
-    public static Money EstimatedRealProfit(StrategyContext context, PairDemand pair, AircraftType aircraft, bool requiresLease, StopList stops = default)
+    /// <param name="includeRegionRivals">
+    /// Whether rivals anywhere in the destination region also divide the
+    /// pair's demand (the default, for a pair this airline is weighing
+    /// entering). Type-swap evaluation passes false: for a route the
+    /// airline already flies, only rivals on the same pair actually share
+    /// its passengers. Traced on 40 Hard games, the region term cut the
+    /// estimate 2-4x on routes with no rival on the pair at all (86% of
+    /// swaps) - often below what a full route was really carrying - and a
+    /// negative estimate turned the proactive swap bar negative.
+    /// </param>
+    public static Money EstimatedRealProfit(StrategyContext context, PairDemand pair, AircraftType aircraft, bool requiresLease, StopList stops = default, bool includeRegionRivals = true)
     {
         var hypotheticalRoute = new Route(pair.Origin, pair.Destination, aircraft, AircraftCount: 1, Stops: stops);
         var pairKey = QuarterEngine.NormalizedPairKey(pair.Origin, pair.Destination);
         var rivalPresence = (context.RivalPresenceByPairKey?.GetValueOrDefault(pairKey) ?? 0)
-            + (context.RivalPresenceByRegion?.GetValueOrDefault(pair.Destination.Region) ?? 0);
+            + (includeRegionRivals ? context.RivalPresenceByRegion?.GetValueOrDefault(pair.Destination.Region) ?? 0 : 0);
         var assumedCaptured = pair.PassengersPerQuarter / (rivalPresence + 1);
         var carried = Math.Min(assumedCaptured, hypotheticalRoute.SeatsPerQuarter);
 
@@ -593,7 +603,19 @@ public static class AiToolkit
         StrategyContext context, RouteLoad load, IReadOnlySet<int> reservedUnitIds, bool isReactive, bool allowLeaseOrBuy = true)
     {
         var pair = context.DemandModel.ForPair(load.Route.Origin, load.Route.Destination);
-        var currentProfit = EstimatedRealProfit(context, pair, load.Route.Aircraft, requiresLease: false, load.Route.Stops);
+        var currentProfit = EstimatedRealProfit(context, pair, load.Route.Aircraft, requiresLease: false, load.Route.Stops, includeRegionRivals: false);
+
+        // The proactive bar is a fraction of current profit, so it only
+        // means something when that's positive. The caller checks the
+        // route's *actual* profit, not this estimate - traced on 40 Hard
+        // games, the estimate was negative in 36% of proactive swaps,
+        // making the bar negative: 1,141 swaps went to a type estimated
+        // worse than the current one, and 83% of swap-backs (a route
+        // returning to the type it just left) involved one.
+        if (!isReactive && currentProfit <= Money.Zero)
+        {
+            return null;
+        }
         var idleTypeIds = context.OwnFleet.Idle
             .Where(u => !reservedUnitIds.Contains(u.Id))
             .Select(u => u.Type.Id)
@@ -613,7 +635,7 @@ public static class AiToolkit
             .Select(type =>
             {
                 var usesIdleUnit = idleTypeIds.Contains(type.Id);
-                var profit = EstimatedRealProfit(context, pair, type, requiresLease: !usesIdleUnit, SwapStops(load.Route, type)!.Value);
+                var profit = EstimatedRealProfit(context, pair, type, requiresLease: !usesIdleUnit, SwapStops(load.Route, type)!.Value, includeRegionRivals: false);
                 return (Type: type, Profit: profit, UsesIdleUnit: usesIdleUnit);
             })
             .OrderByDescending(c => c.Profit.Cents)
@@ -629,11 +651,10 @@ public static class AiToolkit
         var delta = best.Profit - currentProfit;
 
         // The proactive fraction only means something against a positive
-        // current profit, which the caller guarantees for that branch
-        // (see ApplyManagementToolkit) - the reactive floor is a flat
-        // dollar amount specifically because currentProfit can be zero
-        // or negative there, where a fraction of it wouldn't be
-        // meaningful.
+        // current profit, which the guard above guarantees for that branch
+        // - the reactive floor is a flat dollar amount specifically
+        // because currentProfit can be zero or negative there, where a
+        // fraction of it wouldn't be meaningful.
         var required = isReactive
             ? ReactiveSwapMinimumProfitImprovement
             : new Money((long)(currentProfit.Cents * ProactiveSwapMinimumProfitImprovementFraction));
