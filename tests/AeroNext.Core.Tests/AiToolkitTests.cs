@@ -707,18 +707,13 @@ public class AiToolkitTests
     }
 
     [Fact]
-    public void ApplyManagementToolkit_EnabledClosure_RawStreakOlderThanMidGame_GetsZeroCredit_StillOnlyCuts()
+    public void ApplyManagementToolkit_EnabledClosure_StreakStartedBeforeMidGame_StillCloses()
     {
-        // The real bug this fixes: a route's raw ConsecutiveUnprofitableQuarters
-        // (20) clears the threshold on its own, but MidGame only just
-        // began 3 quarters ago (quarterNumber 43, 2 past GameEras.MidGameStartQuarter
-        // 41) - the streak necessarily includes pre-MidGame quarters, so
-        // it gets zero credit (not partial/capped credit - an earlier
-        // attempt at this exact fix used Math.Min-style capping instead,
-        // measured to still synchronize every long-backlog route onto the
-        // exact same calendar quarter, just delayed - see the class doc
-        // comment's own evidence chain) until it actually improves and
-        // goes bad again for real, entirely within MidGame.
+        // The streak (20) began before the mid-game (quarter 43, 3 quarters
+        // in). It used to get zero credit, and since the streak and the
+        // mid-game clock grow together, a route already losing at quarter
+        // 41 could never close. Full credit now; pacing (one closure per
+        // airline per quarter) keeps a backlog from closing all at once.
         var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
         var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
         var route = new Route(a, b, BigAircraft, AircraftCount: 1);
@@ -732,7 +727,34 @@ public class AiToolkitTests
 
         AiToolkit.ApplyManagementToolkit(context, orders, new System.Collections.Generic.HashSet<int>(), spentBeforeToolkit: 0, enableSustainedSingleAircraftClosure: true);
 
-        Assert.Empty(orders.OfType<CloseRouteOrder>());
+        Assert.Single(orders.OfType<CloseRouteOrder>());
+        Assert.Empty(orders.OfType<SetFareOrder>());
+    }
+
+    [Fact]
+    public void ApplyManagementToolkit_EnabledClosure_SeveralEligible_ClosesOnlyTheWorstLoserThisQuarter()
+    {
+        // Two eligible dead routes: only the bigger loser closes now; the
+        // other just gets its fare cut and waits for a later quarter.
+        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
+        var c = MakeCity("c", Region.NorthAmerica, 2, 2, 50);
+        var smallerLoss = new Route(a, b, BigAircraft, AircraftCount: 1);
+        var biggerLoss = new Route(a, c, BigAircraft, AircraftCount: 1);
+        var history = new System.Collections.Generic.Dictionary<(string, string), AiRouteHistory>
+        {
+            [QuarterEngine.NormalizedPairKey(a, b)] = new(LastShrunkQuarter: null, LastClosedQuarter: null, ConsecutiveUnprofitableQuarters: 20),
+            [QuarterEngine.NormalizedPairKey(a, c)] = new(LastShrunkQuarter: null, LastClosedQuarter: null, ConsecutiveUnprofitableQuarters: 20),
+        };
+        var context = MakeContext(new[] { a, b, c }, a, routes: new[] { smallerLoss, biggerLoss }, routeHistoryByPair: history, quarterNumber: 100);
+        var loss = (Route r) => FareCalculator.EstimatedProfit(r, RouteEvaluator.Evaluate(r, context.DemandModel).PassengersCarried);
+        var worse = loss(smallerLoss) < loss(biggerLoss) ? smallerLoss : biggerLoss;
+        var orders = new System.Collections.Generic.List<QuarterOrder>();
+
+        AiToolkit.ApplyManagementToolkit(context, orders, new System.Collections.Generic.HashSet<int>(), spentBeforeToolkit: 0, enableSustainedSingleAircraftClosure: true);
+
+        var closed = Assert.Single(orders.OfType<CloseRouteOrder>());
+        Assert.Equal(worse.Destination.Id, closed.Destination.Id);
         Assert.Single(orders.OfType<SetFareOrder>());
     }
 

@@ -1774,10 +1774,10 @@ ranges, before and after) and wins spread more evenly. Full numbers:
        M67 follow-up in `docs/AI_AIRCRAFT_TYPE_SWAP_DESIGN.md`). Trade-off
        to revisit: airlines 2-3x richer, but wins 8-13 quarters later and
        Europe's wins back to ~60; network marketing campaigns tripled
-       (unverified whether they pay). Follow-ups: 65% of the remaining Network
-       Optimizer picks involve a losing route the closure rule can never
-       close (streak started before the mid-game) - the full-streak,
-       one-closure-per-quarter fix proposed earlier;
+       (unverified whether they pay). Resolved 2026-10-05: losing streaks
+       that began before the mid-game now count toward closure, paced at
+       one closure per airline per quarter (see `BASELINE_AI_ROADMAP.md`,
+       M58 follow-up round 2) - games with a bankruptcy 9/8 -> 5/2;
      - held chokepoint slots stranded by a strategy switch: an airline
        wins a stop under Rapid Expansion or Balanced Growth, then spends
        the mid/late game in Network Optimizer, which never opens
@@ -1808,6 +1808,13 @@ ranges, before and after) and wins spread more evenly. Full numbers:
      grow.
    - *Nouméa, Nadi, Perth*, flagged as weak in the same old comment, went
      0/43 bankrupt - no longer a problem.
+
+   **Update 2026-10-05:** most of this was the closure rule, not the
+   cities. No dead route could be closed before quarter 41, so these
+   airlines flew their loss-making starting route into bankruptcy. With
+   that fixed, AustralAsia bankruptcies on 2x300 Hard fell 11 -> 1. The
+   starts are still weak; re-measure per city before acting on the
+   options below.
 
    **Decision for now: keep them as deliberately hard starts.** Options
    to come back to:

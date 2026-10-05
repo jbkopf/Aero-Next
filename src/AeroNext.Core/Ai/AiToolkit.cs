@@ -1340,6 +1340,31 @@ public static class AiToolkit
     private const int SustainedSingleAircraftClosureThreshold = 8;
 
     /// <summary>
+    /// A single-aircraft, uncontested route unprofitable for at least
+    /// SustainedSingleAircraftClosureThreshold quarters in a row - its
+    /// full streak, including quarters before the mid-game.
+    ///
+    /// The streak used to get zero credit whenever it began before the
+    /// mid-game (the Starting-era strategies never close these routes, so
+    /// every airline reached quarter 41 with a backlog, and closing it all
+    /// at once had cut the win rate 7.3% -> 4.0%). But the streak and the
+    /// mid-game clock then grow together, so a route already losing at
+    /// quarter 41 could never close. Traced 2026-10-03: 65% of the
+    /// remaining NetworkOptimizerStrategy picks involved such a route,
+    /// keeping the trouble signal from ever clearing. Full credit now,
+    /// with the backlog paced instead - ApplyManagementToolkit closes at
+    /// most one of these per airline per quarter, the worst loser first.
+    /// </summary>
+    private static bool IsSustainedClosureEligible(StrategyContext context, Route route)
+    {
+        var pairKey = QuarterEngine.NormalizedPairKey(route.Origin, route.Destination);
+        var streak = context.RouteHistoryByPair?.GetValueOrDefault(pairKey)?.ConsecutiveUnprofitableQuarters ?? 0;
+        var uncontested = (context.RivalCountByServedRoute?.GetValueOrDefault(pairKey) ?? 0) == 0;
+
+        return route.AircraftCount == 1 && streak >= SustainedSingleAircraftClosureThreshold && uncontested;
+    }
+
+    /// <summary>
     /// (Proposed, tunable) — bankruptcy-conditions investigation: a real
     /// 300-game diagnostic found 100% of 545 bankruptcy events were
     /// triggered by cash going negative, never the $80M debt ceiling
@@ -1525,6 +1550,21 @@ public static class AiToolkit
             }
         }
 
+        // The one sustained-loss closure this airline makes this quarter
+        // (see SustainedSingleAircraftClosureThreshold): its worst-losing
+        // eligible route, ties broken by pair id. One per quarter is what
+        // keeps a backlog from closing all at once.
+        var closureTarget = enableSustainedSingleAircraftClosure
+            ? routeLoads
+                .Select(load => (Load: load, Profit: FareCalculator.EstimatedProfit(load.Route, BestAvailableCarried(load.Route, load.PassengersCarried, context))))
+                .Where(x => x.Profit < Money.Zero && IsSustainedClosureEligible(context, x.Load.Route))
+                .OrderBy(x => x.Profit.Cents)
+                .ThenBy(x => x.Load.Route.Origin.Id, StringComparer.Ordinal)
+                .ThenBy(x => x.Load.Route.Destination.Id, StringComparer.Ordinal)
+                .Select(x => x.Load.Route)
+                .FirstOrDefault()
+            : null;
+
         // M54: real profitability drives this now, not load factor -
         // replaces M35's own shrink-only loop and M51/M53's own cut loop
         // with one consolidated per-route decision. See
@@ -1565,38 +1605,9 @@ public static class AiToolkit
             // same reasoning ("don't bother trying to save what's
             // probably a fundamentally weak pair, not a bad type")
             // applies either way.
-            var rawSustainedQuartersForRoute = context.RouteHistoryByPair?.GetValueOrDefault(unprofitablePairKey)?.ConsecutiveUnprofitableQuarters ?? 0;
-            var quartersSinceMidGameStartForRoute = Math.Max(0, context.QuarterNumber - GameEras.MidGameStartQuarter + 1);
-            var sustainedQuartersForRoute = rawSustainedQuartersForRoute > quartersSinceMidGameStartForRoute ? 0 : rawSustainedQuartersForRoute;
-            var isUncontestedForRoute = (context.RivalCountByServedRoute?.GetValueOrDefault(unprofitablePairKey) ?? 0) == 0;
-            var closureEligible = load.Route.AircraftCount == 1 && sustainedQuartersForRoute >= SustainedSingleAircraftClosureThreshold && isUncontestedForRoute;
+            var closureEligible = IsSustainedClosureEligible(context, load.Route);
 
-            // Zero credit - not capped/partial credit - whenever the raw
-            // streak (rawSustainedQuartersForRoute, above) is older than
-            // MidGame itself. A real 100-game measurement found the raw,
-            // uncapped streak (which keeps accumulating under
-            // Starting-era strategies that never once check it)
-            // averaging 34 quarters the very first time this branch ever
-            // runs, at quarter GameEras.MidGameStartQuarter exactly, for
-            // every airline simultaneously - a synchronized "backlog
-            // dump" collapsing the real win rate 7.3%→4.0%. A first fix
-            // attempt (Math.Min-style capping to quarters-since-MidGame)
-            // measured *no better* - every route with a long enough
-            // backlog still hits the exact same capped value on the
-            // exact same calendar quarter (quartersSinceMidGameStartForRoute,
-            // identical for every route in the world that quarter), just
-            // delaying the identical synchronized dump from quarter 41 to
-            // quarter 48 (MidGameStartQuarter + SustainedSingleAircraftClosureThreshold
-            // - 1) instead of removing it. The real fix: a route whose
-            // raw streak *exceeds* how long MidGame has existed
-            // necessarily includes at least one pre-MidGame quarter - it
-            // gets zero credit, full stop, until it actually improves
-            // (streak resets to 0 on a real profitable quarter) and goes
-            // bad again for real, genuinely fresh, entirely within the
-            // MidGame/LateGame window - which happens at a different real
-            // quarter for each independent route, the real
-            // desynchronization a shared global cap can never provide.
-            if (enableSustainedSingleAircraftClosure && closureEligible)
+            if (enableSustainedSingleAircraftClosure && closureTarget is not null && ReferenceEquals(load.Route, closureTarget))
             {
                 // Real, permanent closure - see SustainedSingleAircraftClosureThreshold's
                 // own doc comment for why this route, specifically, is

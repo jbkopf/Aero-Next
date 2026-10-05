@@ -48,15 +48,19 @@ public class FullGameRunnerCampaignTests
     [Fact]
     public void SweepConfiguredCampaign_BankruptAirlineStaysOut_ForTheRestOfTheGame()
     {
-        // Hard difficulty, seed 3: a Papeete-based airline goes bankrupt early
-        // (quarter 13) and the game runs on long afterwards, so every later
+        // Hard difficulty, seed 165: an airline goes bankrupt at quarter 6
+        // and the game runs on to quarter 114, so every later
         // quarter exercises the bankrupt-airline path and its invariant
         // checks (bankruptcy is sticky, routes and action cap stay frozen) -
         // Success would be false if any of them tripped. Bankruptcies became
         // rare enough (after the AI stopped putting oversized aircraft on thin
         // routes) that no Normal-difficulty seed in 1-100 had one early
         // enough to be followed by more play. Re-pick rather than weaken.
-        const int seed = 3;
+        // Re-picked again (3 -> 165) when sustained-loss closure stopped
+        // ignoring losing streaks that began before the mid-game: Distress
+        // now closes a dead starting route, and seed 3's Papeete airline
+        // survives. Only 1 Hard seed in 41-200 qualified.
+        const int seed = 165;
         var result = FullGameRunner.Run(seed, seed, seed + 500_000, 244, SweepSeats(seed), Cities, Fleet, Growth,
             difficulty: GameDifficulty.Hard, tradeRestrictions: Restrictions);
 
