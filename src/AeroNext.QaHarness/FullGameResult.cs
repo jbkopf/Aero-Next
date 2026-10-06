@@ -60,7 +60,13 @@ public sealed record FullGameResult(
     // RouteOrders with refuelling stops (docs/MULTI_STOP_ROUTES_DESIGN.md)
     // applied across every airline this game - opening a multi-stop route
     // or adding an aircraft to one. Same purpose as TypeSwapsApplied.
-    int MultiStopRouteOrdersApplied = 0)
+    int MultiStopRouteOrdersApplied = 0,
+    // Mid/late-game airline-quarters (quarter 41 on) run by each of the
+    // two selectable strategies - lets a sweep show the strategy mix
+    // (AiToolkit.IsNetworkInTrouble decides it). Distress quarters are
+    // counted under neither.
+    int NetworkOptimizerQuarters = 0,
+    int BalancedGrowthQuarters = 0)
 {
     public bool Success => Violations.Count == 0;
 }

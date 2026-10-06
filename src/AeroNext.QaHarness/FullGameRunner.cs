@@ -132,6 +132,8 @@ public static class FullGameRunner
         var negotiationBidCountFirst20QByName = names.ToDictionary(n => n, n => 0);
         var typeSwapsApplied = 0;
         var multiStopRouteOrdersApplied = 0;
+        var networkOptimizerQuarters = 0;
+        var balancedGrowthQuarters = 0;
         var routeCampaignsApplied = 0;
         var networkCampaignsApplied = 0;
 
@@ -405,6 +407,15 @@ public static class FullGameRunner
                     currentStrategyByName[name] = normalStrategy;
                     var activeStrategy = strategyContext.InDistress ? DistressStrategy.Instance : normalStrategy;
                     orders = activeStrategy.DecideOrders(strategyContext);
+
+                    if (activeStrategy is NetworkOptimizerStrategy)
+                    {
+                        networkOptimizerQuarters++;
+                    }
+                    else if (activeStrategy is BalancedGrowthStrategy)
+                    {
+                        balancedGrowthQuarters++;
+                    }
                 }
 
                 // M18's guaranteed quarter-1 route is exempt from slot
@@ -655,6 +666,6 @@ public static class FullGameRunner
             finalCash, bankruptcyQuarter, homeRegionByName, startingCityIdByName, winner, winQuarter, finalRanking,
             winnerRegionsDominated, lastEligibleNames.Count,
             negotiationSpendCentsFirst20QByName, negotiationBidCountFirst20QByName, typeSwapsApplied,
-            routeCampaignsApplied, networkCampaignsApplied, multiStopRouteOrdersApplied);
+            routeCampaignsApplied, networkCampaignsApplied, multiStopRouteOrdersApplied, networkOptimizerQuarters, balancedGrowthQuarters);
     }
 }

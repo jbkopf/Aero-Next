@@ -645,4 +645,41 @@ public class NetworkOptimizerStrategyTests
         Assert.Equal(small, adjust.AircraftType);
         Assert.Empty(orders.OfType<CloseRouteOrder>());
     }
+
+    // --- Trouble threshold (AiToolkit.TroubleRatioThreshold) ---
+
+    private static (StrategyContext Context, int Routes) NetworkWithLosingRoutes(int losing, int total)
+    {
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 50);
+        var aircraft = new AircraftType("t", "Test", Seats: 5, RangeKm: 20_000);
+        var destinations = Enumerable.Range(1, total).Select(i => MakeCity($"d{i:00}", Region.NorthAmerica, i * 0.5, i * 0.5, 50)).ToList();
+        var routes = destinations.Select(d => new Route(home, d, aircraft, AircraftCount: 1)).ToList();
+        var history = routes.Take(losing).ToDictionary(r => QuarterEngine.NormalizedPairKey(r.Origin, r.Destination), _ => new AiRouteHistory(null, null, ConsecutiveUnprofitableQuarters: 2));
+        var context = MakeContext(routes, destinations.Prepend(home).ToList(), new[] { aircraft }, Region.NorthAmerica, routeHistoryByPair: history);
+
+        return (context, total);
+    }
+
+    [Fact]
+    public void Suitability_OneLosingRouteInThirty_IsBelowTheThreshold_BalancedGrowthKeepsIt()
+    {
+        // 1 in 30 (3.3%) is below TroubleRatioThreshold (5%): one bad route
+        // in a big, healthy network doesn't stop its growth for a year.
+        var (context, _) = NetworkWithLosingRoutes(losing: 1, total: 30);
+
+        Assert.False(AiToolkit.IsNetworkInTrouble(context));
+        Assert.Equal(0.0, Strategy.Suitability(context));
+        Assert.Equal(1.0, new BalancedGrowthStrategy().Suitability(context));
+    }
+
+    [Fact]
+    public void Suitability_TwoLosingRoutesInThirty_ClearsTheThreshold_NetworkOptimizerTakesOver()
+    {
+        // 2 in 30 (6.7%) clears it.
+        var (context, _) = NetworkWithLosingRoutes(losing: 2, total: 30);
+
+        Assert.True(AiToolkit.IsNetworkInTrouble(context));
+        Assert.Equal(2.0 / 30, Strategy.Suitability(context), precision: 9);
+        Assert.Equal(0.0, new BalancedGrowthStrategy().Suitability(context));
+    }
 }

@@ -199,6 +199,33 @@ public static class AiToolkit
     /// <summary>See NetworkTroubleRatio's own doc comment - originally NetworkOptimizerStrategy's own constant of the same name and meaning, moved alongside it.</summary>
     private const int MinimumSustainedUnprofitableQuarters = 2;
 
+    /// <summary>
+    /// (Proposed, tunable) - the NetworkTroubleRatio at which a network
+    /// counts as in trouble for the mid/late-game strategy pick
+    /// (IsNetworkInTrouble). Tuned 2026-10-06 on 300 Hard games per value:
+    /// with any losing route counting, NetworkOptimizerStrategy ran 15.6%
+    /// of mid/late airline-quarters, usually for one losing route out of
+    /// ~30 in a rich network; 5% -> 5.2%, 10% -> 1.1%, 15% -> 0.2%.
+    /// Bankruptcies, win timing, win share and cash stayed within noise
+    /// at every value (confirmed for 5% and 10% on a second seed range).
+    /// 5% drops the one-route-in-a-big-network trigger while still handing
+    /// a genuinely struggling network over; higher values all but retire
+    /// the strategy for no measurable gain.
+    /// </summary>
+    public const double TroubleRatioThreshold = 0.05;
+
+    /// <summary>
+    /// Whether the network is in enough trouble for the mid/late-game pick
+    /// to hand it to NetworkOptimizerStrategy: at least
+    /// TroubleRatioThreshold of its routes losing money in a sustained way.
+    /// </summary>
+    public static bool IsNetworkInTrouble(StrategyContext context)
+    {
+        var ratio = NetworkTroubleRatio(context);
+
+        return ratio > 0.0 && ratio >= TroubleRatioThreshold;
+    }
+
     public static double NetworkTroubleRatio(StrategyContext context)
     {
         var routes = context.CurrentRoutes;

@@ -1777,7 +1777,16 @@ ranges, before and after) and wins spread more evenly. Full numbers:
        (unverified whether they pay). Resolved 2026-10-05: losing streaks
        that began before the mid-game now count toward closure, paced at
        one closure per airline per quarter (see `BASELINE_AI_ROADMAP.md`,
-       M58 follow-up round 2) - games with a bankruptcy 9/8 -> 5/2;
+       M58 follow-up round 2) - games with a bankruptcy 9/8 -> 5/2.
+       Trouble is now proportional (2026-10-06): Network Optimizer takes
+       over only when at least 5% of routes are losing money in a
+       sustained way (`AiToolkit.TroubleRatioThreshold`). With proactive
+       swaps on it had climbed back to 15.6% of mid/late airline-quarters,
+       mostly rich airlines with one losing route of ~30; 5% -> 5.2%.
+       Tuned across 0/5/10/15/20% on 300 Hard games each (5% and 10%
+       confirmed on a second seed range): outcomes within noise at every
+       value, so the lowest bar that drops the one-route trigger was
+       kept. The QA harness now reports the mid/late strategy mix;
      - held chokepoint slots stranded by a strategy switch: an airline
        wins a stop under Rapid Expansion or Balanced Growth, then spends
        the mid/late game in Network Optimizer, which never opens

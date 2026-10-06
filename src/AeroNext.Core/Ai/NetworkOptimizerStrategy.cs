@@ -217,7 +217,7 @@ public sealed class NetworkOptimizerStrategy : IAiStrategy
     /// zero means BalancedGrowthStrategy wins instead) - a guaranteed
     /// non-overlapping partition, not a hoped-for one.
     /// </summary>
-    public double Suitability(StrategyContext context) => AiToolkit.NetworkTroubleRatio(context);
+    public double Suitability(StrategyContext context) => AiToolkit.IsNetworkInTrouble(context) ? AiToolkit.NetworkTroubleRatio(context) : 0.0;
 
     public IReadOnlyList<QuarterOrder> DecideOrders(StrategyContext context)
     {

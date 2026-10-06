@@ -973,6 +973,25 @@ public class AiToolkitTests
     }
 
     [Fact]
+    public void ApplyManagementToolkit_ReactiveSwapCandidate_ButNoActionLeft_FallsBackToTheFareCut()
+    {
+        // A losing route with a better idle type ready - but the strategy
+        // already spent the whole action budget. The swap can't go out, so
+        // the route still gets the free fare cut rather than nothing.
+        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
+        var route = new Route(a, b, BigAircraft, AircraftCount: 1);
+        var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, Aircraft, quantity: 1, FleetOwnershipMode.Owned);
+        var context = MakeContext(new[] { a, b }, a, routes: new[] { route }, eraTypes: new[] { BigAircraft, Aircraft }, fleet: fleet, actionCap: 3);
+        var orders = new System.Collections.Generic.List<QuarterOrder>();
+
+        AiToolkit.ApplyManagementToolkit(context, orders, new System.Collections.Generic.HashSet<int>(), spentBeforeToolkit: 3, enableReactiveTypeSwap: true);
+
+        Assert.Empty(orders.OfType<AdjustRouteOrder>());
+        Assert.Single(orders.OfType<SetFareOrder>());
+    }
+
+    [Fact]
     public void EvaluateTypeSwapCandidate_Reactive_GrosslyOversizedIncumbent_PicksTheBetterIdleType()
     {
         var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);

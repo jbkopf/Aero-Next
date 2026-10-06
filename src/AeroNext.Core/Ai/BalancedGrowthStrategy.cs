@@ -170,7 +170,7 @@ public sealed class BalancedGrowthStrategy : IAiStrategy
 
     public IReadOnlySet<GameEra> ApplicableEras { get; } = new HashSet<GameEra> { GameEra.MidGame, GameEra.LateGame };
 
-    public double Suitability(StrategyContext context) => AiToolkit.NetworkTroubleRatio(context) > 0.0 ? 0.0 : 1.0;
+    public double Suitability(StrategyContext context) => AiToolkit.IsNetworkInTrouble(context) ? 0.0 : 1.0;
 
     public IReadOnlyList<QuarterOrder> DecideOrders(StrategyContext context)
     {

@@ -123,6 +123,10 @@ Console.WriteLine($"  {wonOutright.Count}/{cleanResults.Count} clean games had a
 Console.WriteLine($"  AI activity: {results.Sum(r => r.TypeSwapsApplied)} type swaps, " +
     $"{results.Sum(r => r.RouteCampaignsApplied)} route marketing campaigns, {results.Sum(r => r.NetworkCampaignsApplied)} network marketing campaigns, " +
     $"{results.Sum(r => r.MultiStopRouteOrdersApplied)} multi-stop route orders");
+var midLateQuarters = results.Sum(r => r.NetworkOptimizerQuarters + r.BalancedGrowthQuarters);
+Console.WriteLine($"  Mid/late-game strategy mix: Network Optimizer {results.Sum(r => r.NetworkOptimizerQuarters)} airline-quarters, " +
+    $"Balanced Growth {results.Sum(r => r.BalancedGrowthQuarters)}" +
+    (midLateQuarters > 0 ? $" ({100.0 * results.Sum(r => r.NetworkOptimizerQuarters) / midLateQuarters:N1}% Network Optimizer)" : ""));
 
 if (hardFailures.Count > 0)
 {
