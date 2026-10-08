@@ -133,6 +133,8 @@ public static class FullGameRunner
         var typeSwapsApplied = 0;
         var multiStopRouteOrdersApplied = 0;
         var networkOptimizerQuarters = 0;
+        long routeQuarters = 0;
+        long contestedRouteQuarters = 0;
         var balancedGrowthQuarters = 0;
         var routeCampaignsApplied = 0;
         var networkCampaignsApplied = 0;
@@ -343,6 +345,8 @@ public static class FullGameRunner
                     var rivalCountByServedRoute = routesAtQuarterStart[name].ToDictionary(
                         r => QuarterEngine.NormalizedPairKey(r.Origin, r.Destination),
                         r => servingAirlineNamesByPairKey[QuarterEngine.NormalizedPairKey(r.Origin, r.Destination)].Count - 1);
+                    routeQuarters += rivalCountByServedRoute.Count;
+                    contestedRouteQuarters += rivalCountByServedRoute.Values.Count(v => v > 0);
 
                     // BalancedGrowthStrategy follow-up: the global
                     // counterparts - every pair/region *any* airline
@@ -666,6 +670,7 @@ public static class FullGameRunner
             finalCash, bankruptcyQuarter, homeRegionByName, startingCityIdByName, winner, winQuarter, finalRanking,
             winnerRegionsDominated, lastEligibleNames.Count,
             negotiationSpendCentsFirst20QByName, negotiationBidCountFirst20QByName, typeSwapsApplied,
-            routeCampaignsApplied, networkCampaignsApplied, multiStopRouteOrdersApplied, networkOptimizerQuarters, balancedGrowthQuarters);
+            routeCampaignsApplied, networkCampaignsApplied, multiStopRouteOrdersApplied, networkOptimizerQuarters, balancedGrowthQuarters,
+            routeQuarters, contestedRouteQuarters);
     }
 }

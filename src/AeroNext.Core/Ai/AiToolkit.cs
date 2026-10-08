@@ -275,6 +275,33 @@ public static class AiToolkit
     public static readonly Money ProfitabilityFloor = Money.Zero;
 
     /// <summary>
+    /// (Proposed, tunable) - how much the AI prefers a market a rival
+    /// already flies, among new-route candidates that are all profitable
+    /// (2026-10-08). A candidate with a rival on its pair ranks as if its
+    /// estimated profit were (1 + ContestAppetite) times higher. It never
+    /// changes whether a route counts as profitable - only which profitable
+    /// route the AI picks - so it can't push the AI into losing routes.
+    ///
+    /// CLAUDE.md's area-control pillar made deliberate: an old region-rival
+    /// term in EstimatedRealProfit produced this behavior by accident.
+    /// Tuned on 300 Hard games per value (seed 1): contested route-quarters
+    /// 4.4% at 0, 8.0% at 0.5 (the old accidental level), 11.2% at 1, 14.9%
+    /// at 2; bankruptcies unchanged at every value; more appetite brings
+    /// slightly faster wins, thinner margins and more NetworkOptimizerStrategy
+    /// time (contested routes turn unprofitable more often). 1.0 chosen by
+    /// the user, to be revisited as other changes land.
+    /// </summary>
+    public const double ContestAppetite = 1.0;
+
+    /// <summary>How a profitable new-route candidate ranks: its estimated profit, raised by ContestAppetite when a rival already flies the pair.</summary>
+    public static double RankingScore(StrategyContext context, PairDemand pair, Money estimatedProfit)
+    {
+        var contested = (context.RivalPresenceByPairKey?.GetValueOrDefault(QuarterEngine.NormalizedPairKey(pair.Origin, pair.Destination)) ?? 0) > 0;
+
+        return estimatedProfit.Cents * (contested ? 1 + ContestAppetite : 1.0);
+    }
+
+    /// <summary>
     /// The real cost accounting behind FindMostProfitablePair, for one
     /// specific (pair, aircraft) combination: FareCalculator.EstimatedProfit
     /// (real operating cost, M12, plus this aircraft's own prorated
@@ -306,22 +333,18 @@ public static class AiToolkit
     /// reverted attempts were not.
     /// </summary>
     /// <param name="stops">Refuelling stops the route would make (docs/MULTI_STOP_ROUTES_DESIGN.md) - its seats and costs cover every leg; demand stays the pair's.</param>
-    /// <param name="includeRegionRivals">
-    /// Whether rivals anywhere in the destination region also divide the
-    /// pair's demand (the default, for a pair this airline is weighing
-    /// entering). Type-swap evaluation passes false: for a route the
-    /// airline already flies, only rivals on the same pair actually share
-    /// its passengers. Traced on 40 Hard games, the region term cut the
-    /// estimate 2-4x on routes with no rival on the pair at all (86% of
-    /// swaps) - often below what a full route was really carrying - and a
-    /// negative estimate turned the proactive swap bar negative.
-    /// </param>
-    public static Money EstimatedRealProfit(StrategyContext context, PairDemand pair, AircraftType aircraft, bool requiresLease, StopList stops = default, bool includeRegionRivals = true)
+    public static Money EstimatedRealProfit(StrategyContext context, PairDemand pair, AircraftType aircraft, bool requiresLease, StopList stops = default)
     {
         var hypotheticalRoute = new Route(pair.Origin, pair.Destination, aircraft, AircraftCount: 1, Stops: stops);
         var pairKey = QuarterEngine.NormalizedPairKey(pair.Origin, pair.Destination);
-        var rivalPresence = (context.RivalPresenceByPairKey?.GetValueOrDefault(pairKey) ?? 0)
-            + (includeRegionRivals ? context.RivalPresenceByRegion?.GetValueOrDefault(pair.Destination.Region) ?? 0 : 0);
+        // Only rivals on this pair share its passengers (2026-10-08). It used
+        // to divide by rival airlines anywhere in the destination region
+        // too - wrong as a prediction (traced on 100 Hard games, new routes
+        // with no rival on the pair carried 2x+ the estimate in 22% of
+        // cases), but it diluted the penalty for a real rival on the pair,
+        // so the AI happily entered contested markets. That's now an
+        // explicit preference, ContestAppetite, applied to ranking only.
+        var rivalPresence = context.RivalPresenceByPairKey?.GetValueOrDefault(pairKey) ?? 0;
         var assumedCaptured = pair.PassengersPerQuarter / (rivalPresence + 1);
         var carried = Math.Min(assumedCaptured, hypotheticalRoute.SeatsPerQuarter);
 
@@ -366,14 +389,20 @@ public static class AiToolkit
             return null;
         }
 
-        var best = candidates
-            .OrderByDescending(c => c.Profit.Cents)
+        var profitable = candidates.Where(c => c.Profit >= ProfitabilityFloor).ToList();
+
+        if (profitable.Count == 0)
+        {
+            return null;
+        }
+
+        return profitable
+            .OrderByDescending(c => RankingScore(context, c.Pair, c.Profit))
+            .ThenByDescending(c => c.Profit.Cents)
             .ThenBy(c => c.Pair.Origin.Id, StringComparer.Ordinal)
             .ThenBy(c => c.Pair.Destination.Id, StringComparer.Ordinal)
             .ThenBy(c => c.Aircraft.Id, StringComparer.Ordinal)
             .First();
-
-        return best.Profit >= ProfitabilityFloor ? best : null;
     }
 
     /// <summary>
@@ -466,7 +495,8 @@ public static class AiToolkit
             .Where(c => stopFilter is null || c.Stops.All(stopFilter))
             .Select(c => (Candidate: c, Needed: NeededStop(c.Stops)))
             .Where(x => x.Needed is not null)
-            .OrderByDescending(x => x.Candidate.Profit.Cents)
+            .OrderByDescending(x => RankingScore(context, x.Candidate.Pair, x.Candidate.Profit))
+            .ThenByDescending(x => x.Candidate.Profit.Cents)
             .ThenBy(x => x.Candidate.Pair.Origin.Id, StringComparer.Ordinal)
             .ThenBy(x => x.Candidate.Pair.Destination.Id, StringComparer.Ordinal)
             .ThenBy(x => x.Candidate.Aircraft.Id, StringComparer.Ordinal)
@@ -630,7 +660,7 @@ public static class AiToolkit
         StrategyContext context, RouteLoad load, IReadOnlySet<int> reservedUnitIds, bool isReactive, bool allowLeaseOrBuy = true)
     {
         var pair = context.DemandModel.ForPair(load.Route.Origin, load.Route.Destination);
-        var currentProfit = EstimatedRealProfit(context, pair, load.Route.Aircraft, requiresLease: false, load.Route.Stops, includeRegionRivals: false);
+        var currentProfit = EstimatedRealProfit(context, pair, load.Route.Aircraft, requiresLease: false, load.Route.Stops);
 
         // The proactive bar is a fraction of current profit, so it only
         // means something when that's positive. The caller checks the
@@ -662,7 +692,7 @@ public static class AiToolkit
             .Select(type =>
             {
                 var usesIdleUnit = idleTypeIds.Contains(type.Id);
-                var profit = EstimatedRealProfit(context, pair, type, requiresLease: !usesIdleUnit, SwapStops(load.Route, type)!.Value, includeRegionRivals: false);
+                var profit = EstimatedRealProfit(context, pair, type, requiresLease: !usesIdleUnit, SwapStops(load.Route, type)!.Value);
                 return (Type: type, Profit: profit, UsesIdleUnit: usesIdleUnit);
             })
             .OrderByDescending(c => c.Profit.Cents)

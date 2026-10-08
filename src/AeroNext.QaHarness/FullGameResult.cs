@@ -66,7 +66,12 @@ public sealed record FullGameResult(
     // (AiToolkit.IsNetworkInTrouble decides it). Distress quarters are
     // counted under neither.
     int NetworkOptimizerQuarters = 0,
-    int BalancedGrowthQuarters = 0)
+    int BalancedGrowthQuarters = 0,
+    // Route-quarters (from quarter 2, every airline) and how many of them
+    // had a rival flying the same pair - the area-control pillar check
+    // (CLAUDE.md), the share docs/OPEN_WORK.md item 5 tracks.
+    long RouteQuarters = 0,
+    long ContestedRouteQuarters = 0)
 {
     public bool Success => Violations.Count == 0;
 }

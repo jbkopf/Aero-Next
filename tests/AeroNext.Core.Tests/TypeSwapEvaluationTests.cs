@@ -90,8 +90,10 @@ public class TypeSwapEvaluationTests
     }
 
     [Fact]
-    public void EstimatedRealProfit_IncludeRegionRivalsFalse_IgnoresThem()
+    public void EstimatedRealProfit_RegionRivals_NeverChangeTheEstimate()
     {
+        // Only rivals on the pair share its passengers (2026-10-08) - rival
+        // airlines elsewhere in the region don't.
         var type = Sized("t", 0.45);
         var route = new Route(A, B, type, 1);
         var crowded = MakeContext(route, type, regionRivals: new Dictionary<Region, int> { [Region.Europe] = 3 });
@@ -99,8 +101,6 @@ public class TypeSwapEvaluationTests
         var pair = DemandModel.ForPair(A, B);
 
         Assert.Equal(AiToolkit.EstimatedRealProfit(empty, pair, type, requiresLease: false),
-            AiToolkit.EstimatedRealProfit(crowded, pair, type, requiresLease: false, includeRegionRivals: false));
-        Assert.True(AiToolkit.EstimatedRealProfit(crowded, pair, type, requiresLease: false)
-            < AiToolkit.EstimatedRealProfit(crowded, pair, type, requiresLease: false, includeRegionRivals: false));
+            AiToolkit.EstimatedRealProfit(crowded, pair, type, requiresLease: false));
     }
 }

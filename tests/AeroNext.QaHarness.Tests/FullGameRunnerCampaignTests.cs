@@ -94,6 +94,14 @@ public class FullGameRunnerCampaignTests
 
         Assert.True(result.Success, string.Join("; ", result.Violations.Select(v => $"Q{v.Quarter} {v.AirlineName}: {v.Description}")));
         Assert.True(result.TypeSwapsApplied > 0, "Expected this seed's game to apply at least one aircraft type swap.");
+
+        // The sweep summary's strategy-mix and contested-route counters are
+        // populated by the same real campaign: this game runs well into the
+        // mid-game, so both mid/late strategies' quarters and route-quarters
+        // get counted, and contested ones can't exceed the total.
+        Assert.True(result.NetworkOptimizerQuarters + result.BalancedGrowthQuarters > 0);
+        Assert.True(result.RouteQuarters > 0);
+        Assert.InRange(result.ContestedRouteQuarters, 0, result.RouteQuarters);
     }
 
     [Fact]

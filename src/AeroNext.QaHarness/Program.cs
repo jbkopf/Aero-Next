@@ -123,6 +123,9 @@ Console.WriteLine($"  {wonOutright.Count}/{cleanResults.Count} clean games had a
 Console.WriteLine($"  AI activity: {results.Sum(r => r.TypeSwapsApplied)} type swaps, " +
     $"{results.Sum(r => r.RouteCampaignsApplied)} route marketing campaigns, {results.Sum(r => r.NetworkCampaignsApplied)} network marketing campaigns, " +
     $"{results.Sum(r => r.MultiStopRouteOrdersApplied)} multi-stop route orders");
+var allRouteQuarters = results.Sum(r => r.RouteQuarters);
+Console.WriteLine($"  Contested route-quarters: {results.Sum(r => r.ContestedRouteQuarters)} of {allRouteQuarters}" +
+    (allRouteQuarters > 0 ? $" ({100.0 * results.Sum(r => r.ContestedRouteQuarters) / allRouteQuarters:N2}%)" : ""));
 var midLateQuarters = results.Sum(r => r.NetworkOptimizerQuarters + r.BalancedGrowthQuarters);
 Console.WriteLine($"  Mid/late-game strategy mix: Network Optimizer {results.Sum(r => r.NetworkOptimizerQuarters)} airline-quarters, " +
     $"Balanced Growth {results.Sum(r => r.BalancedGrowthQuarters)}" +

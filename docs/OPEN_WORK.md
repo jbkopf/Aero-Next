@@ -1794,8 +1794,25 @@ ranges, before and after) and wins spread more evenly. Full numbers:
        idle-contest fix, 79% of it Network Optimizer). Options: let it
        use slots it already holds, relinquish unused slots, or leave
        them to the idle-contest bid;
-     - the AI's contested-route estimate still splits demand evenly
-       instead of using journey cost;
+     - *AI contested-route estimates (2026-10-08):* traced on 100 Hard
+       games, new routes almost always fill (median load factor 1.00,
+       66% of estimates simply capped at one aircraft's seats), and
+       contest at opening is rare (3.7%), so the even split among pair
+       rivals was close enough. The real error was the region term:
+       demand also divided by rival airlines anywhere in the destination
+       region, so 22% of routes with no rival on the pair carried 2x+
+       the estimate. Removing it made the estimate honest but cut
+       contested route-quarters 8.0% -> 4.4% - the wrong term had been
+       diluting the penalty for a real rival, so the AI entered
+       contested markets readily. That's now an explicit preference,
+       `AiToolkit.ContestAppetite`, applied to ranking only (never to
+       whether a route counts as profitable). Tuned 0/0.5/1/2: contested
+       4.4/8.0/11.2/14.9%, bankruptcies unchanged throughout; 1.0 chosen,
+       to revisit as other changes land. Honest estimates also cut
+       multi-stop route orders ~20% at every appetite. A full fare-and-
+       journey-time share model was judged not worth it while contest at
+       opening stays rare. The QA harness now reports contested
+       route-quarters;
      - Pacific chokepoints (Honolulu, Wake, Anchorage) are barely used.
 6. **Some eligible starting cities are dead ends** (found 2026-09-28).
    Any non-gateway city in a home region can be a start
