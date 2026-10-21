@@ -1787,6 +1787,23 @@ ranges, before and after) and wins spread more evenly. Full numbers:
        confirmed on a second seed range): outcomes within noise at every
        value, so the lowest bar that drops the one-route trigger was
        kept. The QA harness now reports the mid/late strategy mix;
+     - *Stranded stop slots re-checked (2026-10-21):* the assumption
+       that fewer Network Optimizer airlines would leave fewer unused
+       chokepoint slots didn't hold - 622 holdings on 60 Hard games (448
+       before), now mostly with Balanced Growth. Traced: 71% of usable
+       routes through held stops were ruled out by region rules
+       (Balanced Growth reached its 4-region target before the stop bid
+       won; Network Optimizer's home-region rule), 26% legitimately
+       outranked (winners ~2x better). The stranding came from bids
+       racing for the same last region: 336 of Balanced Growth's 751
+       new-region bids went out when pending bids already covered the
+       gap. Balanced Growth now counts the regions its pending
+       negotiations aim at before bidding for a new one
+       (`AiToolkit.RegionsPursuedByPendingNegotiations`): those bids 336
+       -> 68, bids past the target 227 -> 86; 2x300 Hard outcomes within
+       noise. Still open: a "finish what you started" exception (use a
+       held stop's route despite region rules), and endpoint blocking
+       (54% of unused-slot time) - neither done;
      - held chokepoint slots stranded by a strategy switch: an airline
        wins a stop under Rapid Expansion or Balanced Growth, then spends
        the mid/late game in Network Optimizer, which never opens

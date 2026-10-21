@@ -675,4 +675,71 @@ public class BalancedGrowthStrategyTests
         var adjust = Assert.Single(orders.OfType<AdjustRouteOrder>());
         Assert.Equal(Small, adjust.AircraftType);
     }
+
+    // --- Pending bids count toward the region target (2026-10-21) ---
+
+    /// <summary>
+    /// A North American home with two European gateways (the bigger one,
+    /// eu-big, plus eu-small) and one East Asian gateway, all big enough to
+    /// fly a profitable nonstop route to. Enough actions that the route
+    /// cases never crowd out the bid.
+    /// </summary>
+    private static (StrategyContext Context, City EuBig, City EuSmall, City Asia) PendingBidFixture(int target, params string[] pendingIds)
+    {
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
+        var euBig = MakeCity("eu-big", Region.Europe, 10, 10, 100, isGateway: true);
+        var euSmall = MakeCity("eu-small", Region.Europe, 11, 11, 90, isGateway: true);
+        var asia = MakeCity("asia", Region.EastAsia, 12, 12, 80, isGateway: true);
+        var context = MakeContext(new[] { home, euBig, euSmall, asia }, home, availableCash: Money.FromDollars(1_000_000_000),
+                eraTypes: new[] { Small }, actionCap: 6, targetRegionCountOverride: target)
+            with { PendingNegotiationCityIds = pendingIds.ToHashSet() };
+
+        return (context, euBig, euSmall, asia);
+    }
+
+    [Fact]
+    public void RegionsPursuedByPendingNegotiations_CountsAPendingBidsUntouchedRegion()
+    {
+        var (withPending, _, _, _) = PendingBidFixture(target: 3, "eu-small");
+        var (none, _, _, _) = PendingBidFixture(target: 3);
+
+        Assert.Equal(new[] { Region.Europe }, AiToolkit.RegionsPursuedByPendingNegotiations(withPending, new HashSet<int>(), new HashSet<string> { "home" }, new(), new()));
+        Assert.Empty(AiToolkit.RegionsPursuedByPendingNegotiations(none, new HashSet<int>(), new HashSet<string> { "home" }, new(), new()));
+    }
+
+    [Fact]
+    public void DecideOrders_PendingBidAlreadyCoversTheLastRegion_NoFurtherNewRegionBid()
+    {
+        // Target 2: home (North America) plus the region the pending
+        // European bid is aiming at already make 2 - no bid for East Asia,
+        // or for the other European gateway.
+        var (context, _, _, _) = PendingBidFixture(target: 2, "eu-small");
+
+        var orders = Strategy.DecideOrders(context);
+
+        Assert.Empty(orders.OfType<NegotiationOrder>());
+    }
+
+    [Fact]
+    public void DecideOrders_StillShortWithPendingBids_BidsForARegionNotAlreadyPursued()
+    {
+        // Target 3: home + Europe (pending) is 2, so one more region is
+        // wanted - and it has to be a new one. Without counting the pending
+        // bid, the biggest unserved gateway (eu-big, Europe) would win.
+        var (context, _, _, asia) = PendingBidFixture(target: 3, "eu-small");
+
+        var orders = Strategy.DecideOrders(context);
+
+        Assert.Equal(asia.Id, Assert.Single(orders.OfType<NegotiationOrder>()).TargetCity.Id);
+    }
+
+    [Fact]
+    public void DecideOrders_NoPendingBids_StillBidsForTheBiggestNewRegionGateway()
+    {
+        var (context, euBig, _, _) = PendingBidFixture(target: 3);
+
+        var orders = Strategy.DecideOrders(context);
+
+        Assert.Equal(euBig.Id, Assert.Single(orders.OfType<NegotiationOrder>()).TargetCity.Id);
+    }
 }

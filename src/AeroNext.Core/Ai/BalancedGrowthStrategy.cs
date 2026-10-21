@@ -249,7 +249,6 @@ public sealed class BalancedGrowthStrategy : IAiStrategy
             AiToolkit.TryProposeCandidate(context, best, validOriginCityIds, orders, reservedUnitIds, slotsReservedByCity, citySpendReservedByCity, ref spent);
         }
 
-        var newRegionGateway = FindBestUnservedGateway(context, c => !touchedRegions.Contains(c.Region)) ?? AiToolkit.FindBestIdleContestableGateway(context);
 
         // Case 2: within regions already touched, real profit again.
         // Win-condition-awareness follow-up: tries a touched-but-not-yet-led
@@ -279,11 +278,27 @@ public sealed class BalancedGrowthStrategy : IAiStrategy
         // comes before any other gateway - reaching a new region while
         // expanding, else within touched ones, the same split as the two
         // cases above.
-        var expanding = touchedRegions.Count < targetRegionCount;
+        //
+        // Pending bids count (2026-10-21): a new-region bid only goes out
+        // while the regions touched plus the regions pending negotiations
+        // already aim at are still short of the target - and then for a
+        // region not already being pursued. Otherwise the bid stays within
+        // touched regions, as it does once the target is reached. Before,
+        // bids for the same last region raced in parallel, and whichever
+        // won second was stranded (see
+        // AiToolkit.RegionsPursuedByPendingNegotiations).
+        var pursuedRegions = touchedRegions.Count < targetRegionCount
+            ? AiToolkit.RegionsPursuedByPendingNegotiations(context, reservedUnitIds, validOriginCityIds, slotsReservedByCity, citySpendReservedByCity)
+            : new HashSet<Region>();
+        var bidForNewRegion = touchedRegions.Count + pursuedRegions.Count < targetRegionCount;
+        var spokenFor = touchedRegions.Union(pursuedRegions).ToHashSet();
         var plannedStop = AiToolkit.FindStopNeededByBestMultiStopPlan(context, reservedUnitIds, validOriginCityIds,
-            expanding ? p => TouchesUntouchedRegion(p, touchedRegions) : p => BothEndpointsTouched(p, touchedRegions),
+            bidForNewRegion ? p => TouchesUntouchedRegion(p, spokenFor) : p => BothEndpointsTouched(p, touchedRegions),
             slotsReservedByCity, citySpendReservedByCity);
-        AiToolkit.NegotiateOrBorrow(context, plannedStop ?? (expanding ? newRegionGateway : withinRegionGateway), orders, ref spent);
+        var newRegionGateway = bidForNewRegion
+            ? FindBestUnservedGateway(context, c => !spokenFor.Contains(c.Region)) ?? AiToolkit.FindBestIdleContestableGateway(context)
+            : null;
+        AiToolkit.NegotiateOrBorrow(context, plannedStop ?? (bidForNewRegion ? newRegionGateway : withinRegionGateway), orders, ref spent);
 
         // Low priority, same placement as RapidExpansionStrategy - this
         // is a growth-focused strategy, not a fix-what's-broken one

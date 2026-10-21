@@ -505,6 +505,66 @@ public static class AiToolkit
     }
 
     /// <summary>
+    /// The untouched regions this airline's still-pending negotiations are
+    /// already aiming at (2026-10-21) - what a strategy counts before
+    /// starting yet another bid for a new region. A pending bid at a
+    /// gateway in an untouched region with a profitable nonstop route counts
+    /// as pursuing that region; a pending bid at a refuelling stop counts
+    /// the untouched endpoint regions of the most profitable multi-stop
+    /// route through it. Traced on 60 Hard games before this was counted,
+    /// 22% of BalancedGrowthStrategy's new-region bids pushed the regions
+    /// it was pursuing past its target - and the stop slots those bids won
+    /// were the ones stranded once another path reached the target first.
+    /// </summary>
+    public static IReadOnlySet<Region> RegionsPursuedByPendingNegotiations(
+        StrategyContext context, IReadOnlySet<int> reservedUnitIds, IReadOnlySet<string> validOriginCityIds,
+        Dictionary<string, int> slotsReservedByCity, Dictionary<string, int> citySpendReservedByCity)
+    {
+        var pursued = new HashSet<Region>();
+        var pending = context.PendingNegotiationCityIds;
+
+        if (pending is null || pending.Count == 0)
+        {
+            return pursued;
+        }
+
+        var touched = TouchedRegions(context);
+        var pendingCities = context.AllCities
+            .Where(c => pending.Contains(c.Id))
+            .OrderBy(c => c.Id, StringComparer.Ordinal)
+            .ToList();
+
+        foreach (var city in pendingCities.Where(c => !touched.Contains(c.Region) && HasProfitableNonstopRouteTo(context, c)))
+        {
+            pursued.Add(city.Region);
+        }
+
+        var throughPendingStop = ProfitCandidates(context, reservedUnitIds, validOriginCityIds,
+                p => !touched.Contains(p.Origin.Region) || !touched.Contains(p.Destination.Region),
+                slotsReservedByCity, citySpendReservedByCity, requireStopSlots: false)
+            .Where(c => !c.Stops.IsEmpty && c.Profit >= ProfitabilityFloor)
+            .ToList();
+
+        foreach (var stop in pendingCities)
+        {
+            var best = throughPendingStop
+                .Where(c => c.Stops.Any(s => s.Id == stop.Id))
+                .OrderByDescending(c => c.Profit.Cents)
+                .ThenBy(c => c.Pair.Origin.Id, StringComparer.Ordinal)
+                .ThenBy(c => c.Pair.Destination.Id, StringComparer.Ordinal)
+                .Select(c => c.Pair)
+                .FirstOrDefault();
+
+            if (best is not null)
+            {
+                pursued.UnionWith(new[] { best.Origin.Region, best.Destination.Region }.Where(r => !touched.Contains(r)));
+            }
+        }
+
+        return pursued;
+    }
+
+    /// <summary>
     /// Whether some idle or acquirable type could fly a profitable nonstop
     /// route (EvaluateCandidate) between this gateway and a city the
     /// airline can originate from. Gateway bids that aren't for a planned
