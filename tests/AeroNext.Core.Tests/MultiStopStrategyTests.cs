@@ -144,6 +144,19 @@ public class MultiStopStrategyTests
     }
 
     [Fact]
+    public void RegionsPursuedByPendingNegotiations_APendingStopBid_CountsTheRegionItsRouteWouldReach()
+    {
+        // The stop itself is too thin for any route of its own, so it only
+        // counts through the multi-stop route it enables - home (Europe) to
+        // the far city in North America.
+        var context = MakeContext(Abroad, stopSlotHeld: false, pending: new HashSet<string> { Abroad.Stop.Id });
+
+        var pursued = AiToolkit.RegionsPursuedByPendingNegotiations(context, new HashSet<int>(), Abroad.HomeOnly, new(), new());
+
+        Assert.Equal(new[] { Region.NorthAmerica }, pursued);
+    }
+
+    [Fact]
     public void OrientStops_ReversesTheStopsWhenTheRouteStartsAtTheOtherEnd()
     {
         var second = new City("st2", "ST2", Region.NorthAmerica, 0, 45, 1, true, 2);
