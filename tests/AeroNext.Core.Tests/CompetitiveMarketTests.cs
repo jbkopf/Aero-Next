@@ -605,4 +605,75 @@ public class CompetitiveMarketTests
 
         Assert.True(combined.TotalCarried(solo) > fareOnly.TotalCarried(solo));
     }
+
+    // --- Seat return (docs/CONNECTING_PASSENGERS_DESIGN.md) ---
+
+    /// <summary>
+    /// Hub carrier H flies a-hub (too small for everyone) and hub-b, so its
+    /// own plan shares a-hub between local a-hub passengers and the a-b
+    /// connection. Rival R flies a-b nonstop with far more seats, so H's
+    /// connection loses most of a-b.
+    /// </summary>
+    private static (Airline Hub, Airline Rival, Route AHub, City A, City HubCity, CompetitiveMarketResult Result) ConnectionLosesToANonstop()
+    {
+        var demandModel = new GravityDemandModel();
+        var a = new City("a", "A", Region.EastAsia, 0, 0, 100, false, null);
+        var hub = new City("hub", "HUB", Region.EastAsia, 0, 8, 100, false, null);
+        var b = new City("b", "B", Region.EastAsia, 0, 16, 100, false, null);
+        var aHub = new Route(a, hub, new AircraftType("small", "Small", Seats: 20), 1);
+        var hubB = new Route(hub, b, new AircraftType("big", "Big", Seats: 2000), 1);
+        var hubCarrier = new Airline("H", new[] { aHub, hubB });
+        var rival = new Airline("R", new[] { new Route(a, b, new AircraftType("huge", "Huge", Seats: 5000), 4) });
+
+        return (hubCarrier, rival, aHub, a, hub, CompetitiveMarket.Resolve(new[] { hubCarrier, rival }, new[] { a, hub, b }, demandModel));
+    }
+
+    [Fact]
+    public void Resolve_SeatsHeldForAConnectionThatLostItsPair_GoBackToLocalPassengers()
+    {
+        var (hubCarrier, _, aHub, a, hub, result) = ConnectionLosesToANonstop();
+        var plan = NetworkPlanner.Plan(hubCarrier.Routes, new[] { a, hub, result.Pairs.Single(p => p.Destination.Id == "b" && p.Origin.Id == "a").Destination }, new GravityDemandModel());
+        var plannedLocal = plan.Itineraries.Single(i => i.Itinerary.Origin.Id == "a" && i.Itinerary.Destination.Id == "hub").PassengersCarried;
+        var local = result.Pairs.Single(p => p.Origin.Id == "a" && p.Destination.Id == "hub").CarriedByAirline[hubCarrier];
+        var usage = result.RouteUsage.Single(u => u.Airline == hubCarrier && u.Route == aHub);
+
+        Assert.True(plannedLocal < aHub.SeatsPerQuarter); // the plan held seats for the connection
+        Assert.True(local > plannedLocal);                 // the market gave them back to local passengers
+        Assert.Equal(aHub.SeatsPerQuarter, usage.SeatsUsed); // so the leg flies full
+    }
+
+    [Fact]
+    public void Resolve_SeatReturn_NeverExceedsDemand_AndLeavesRivalsAlone()
+    {
+        var (hubCarrier, rival, _, _, _, result) = ConnectionLosesToANonstop();
+
+        Assert.All(result.Pairs, p => Assert.True(p.CarriedByAirline.Values.Sum() <= p.DemandPassengers));
+        Assert.All(result.RouteUsage, u => Assert.True(u.SeatsUsed <= u.SeatsPerQuarter));
+
+        // The rival's own carriage matches a market without seat return's
+        // reach: it serves only a-b, where it already took its contested
+        // share - nothing it carried came from another airline's seats.
+        var rivalAB = result.Pairs.Single(p => p.Origin.Id == "a" && p.Destination.Id == "b").CarriedByAirline[rival];
+        Assert.Equal(rivalAB, result.RouteUsage.Single(u => u.Airline == rival).SeatsUsed);
+    }
+
+    [Fact]
+    public void Resolve_SeatReturn_ALeftoverTooSmallToSplit_StaysUnassigned()
+    {
+        // Three identical airlines on a pair with demand 4: the contest
+        // gives each 1 (4/3 rounded), leaving 1 unserved, and a third of
+        // a passenger each rounds to nobody - no airline gains a fractional
+        // or phantom passenger.
+        var a = MakeCity("a", 0, 0, 1);
+        var b = MakeCity("b", 0, 10, 1);
+        var demandModel = new GravityDemandModel(scale: 4 * Math.Pow(GreatCircle.DistanceKm(a, b), 2));
+        var aircraft = new AircraftType("t", "Test", Seats: 1000);
+        var airlines = new[] { "X", "Y", "Z" }.Select(n => new Airline(n, new[] { new Route(a, b, aircraft, 1) })).ToArray();
+
+        var result = CompetitiveMarket.Resolve(airlines, new[] { a, b }, demandModel);
+
+        var pair = result.Pairs.Single();
+        Assert.Equal(4, pair.DemandPassengers);
+        Assert.All(airlines, airline => Assert.Equal(1, pair.CarriedByAirline[airline]));
+    }
 }
