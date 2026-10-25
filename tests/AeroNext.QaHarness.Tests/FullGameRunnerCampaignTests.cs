@@ -88,8 +88,11 @@ public class FullGameRunnerCampaignTests
         // swaps) when contested routes stopped counting as network
         // trouble (AiToolkit.NetworkTroubleRatio), which moved most
         // late-game airlines from NetworkOptimizerStrategy to
-        // BalancedGrowthStrategy.
-        const int seed = 16;
+        // BalancedGrowthStrategy. Re-picked again (16 -> 2, 24 swaps) when
+        // the demand model's ground-competition distance
+        // (GravityDemandModel.ShippedGroundCompetitionDistanceKm) cut
+        // short-haul demand.
+        const int seed = 2;
         var result = Run(SweepSeats(seed), seed, quarters: 244);
 
         Assert.True(result.Success, string.Join("; ", result.Violations.Select(v => $"Q{v.Quarter} {v.AirlineName}: {v.Description}")));

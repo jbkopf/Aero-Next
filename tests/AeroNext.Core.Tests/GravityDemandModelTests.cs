@@ -12,14 +12,15 @@ public class GravityDemandModelTests
         new(id, id.ToUpperInvariant(), region, lat, lon, weight, false, null);
 
     [Fact]
-    public void AustralAsiaTunedIntraRegionMultipliers_IsTheShippedM65Value()
+    public void ShippedIntraRegionMultipliers_IsTheShippedM65Value()
     {
         // Locks the real, shipped tuning constant every real per-quarter
         // GravityDemandModel construction site passes explicitly
         // (FullGameRunner.cs, AeroNext.Sim/Program.cs) - see this
         // constant's own doc comment for the evidence.
-        Assert.Equal(1.5, GravityDemandModel.AustralAsiaTunedIntraRegionMultipliers[Region.AustralAsia]);
-        Assert.Single(GravityDemandModel.AustralAsiaTunedIntraRegionMultipliers);
+        Assert.Equal(1.5, GravityDemandModel.ShippedIntraRegionMultipliers[Region.AustralAsia]);
+        Assert.Equal(0.5, GravityDemandModel.ShippedIntraRegionMultipliers[Region.Europe]); // Europe damping
+        Assert.Equal(2, GravityDemandModel.ShippedIntraRegionMultipliers.Count);
     }
 
     [Fact]
@@ -1186,5 +1187,70 @@ public class GravityDemandModelTests
         var yqxTer = model.ForPair(byId["yqx"], byId["ter"]);
 
         Assert.True(jfkLhr.PassengersPerQuarter > yqxTer.PassengersPerQuarter * 100);
+    }
+
+    // --- Ground-competition distance (docs/DEMAND_WEIGHT_CALIBRATION_DESIGN.md step 1) ---
+
+    [Fact]
+    public void GroundCompetitionDistance_PricesACloserPairAsIfItWereThatFar_ButReportsItsRealDistance()
+    {
+        // ~333km apart: the formula prices it at 800km, but the pair still
+        // reports its real distance.
+        var origin = MakeCity("origin", 0, 0, 50);
+        var near = MakeCity("near", 0, 3, 50);
+        var model = new GravityDemandModel(groundCompetitionDistanceKm: 800);
+        var unfloored = new GravityDemandModel();
+
+        var pair = model.ForPair(origin, near);
+
+        Assert.Equal(unfloored.ForPair(origin, near).DistanceKm, pair.DistanceKm, precision: 9);
+        Assert.InRange(pair.DistanceKm, 330, 340);
+        var expected = (long)Math.Round(7.5e6 * 50 * 50 / (800.0 * 800.0), MidpointRounding.AwayFromZero);
+        Assert.Equal(expected, pair.PassengersPerQuarter);
+    }
+
+    [Fact]
+    public void GroundCompetitionDistance_LeavesAPairBeyondItUnchanged()
+    {
+        var origin = MakeCity("origin", 0, 0, 50);
+        var far = MakeCity("far", 0, 20, 50); // ~2,200km
+
+        Assert.Equal(
+            new GravityDemandModel().ForPair(origin, far).PassengersPerQuarter,
+            new GravityDemandModel(groundCompetitionDistanceKm: 800).ForPair(origin, far).PassengersPerQuarter);
+    }
+
+    [Fact]
+    public void GroundCompetitionDistance_NeverGoesBelowTheOld100kmFloor()
+    {
+        var origin = MakeCity("origin", 0, 0, 50);
+        var sameSpot = MakeCity("same", 0, 0.1, 50); // ~11km
+
+        Assert.Equal(
+            new GravityDemandModel().ForPair(origin, sameSpot).PassengersPerQuarter,
+            new GravityDemandModel(groundCompetitionDistanceKm: 10).ForPair(origin, sameSpot).PassengersPerQuarter);
+    }
+
+    [Fact]
+    public void RealDataset_GroundCompetitionDistance_PullsEuropesHubsTowardTheirRealShare()
+    {
+        // Munich and Frankfurt sat at ~4x their real 2015 share of hub
+        // traffic with the 100km floor, almost all of it from sub-800km
+        // European pairs; Atlanta at ~0.5x. The shipped distance must
+        // narrow that gap from both sides.
+        var cities = CityCatalog.LoadFile(Path.Combine(AppContext.BaseDirectory, "data", "cities.json"));
+        double ShareOf(GravityDemandModel model, string cityId)
+        {
+            var pairs = model.AllPairs(cities);
+            var total = pairs.Sum(p => (double)p.PassengersPerQuarter);
+            return pairs.Where(p => p.Origin.Id == cityId || p.Destination.Id == cityId).Sum(p => (double)p.PassengersPerQuarter) / total;
+        }
+
+        var before = new GravityDemandModel(enableHubDemandBonus: true);
+        var after = new GravityDemandModel(enableHubDemandBonus: true, groundCompetitionDistanceKm: GravityDemandModel.ShippedGroundCompetitionDistanceKm);
+
+        Assert.True(ShareOf(after, "muc") < ShareOf(before, "muc") * 0.8);
+        Assert.True(ShareOf(after, "fra") < ShareOf(before, "fra") * 0.8);
+        Assert.True(ShareOf(after, "atl") > ShareOf(before, "atl") * 1.2);
     }
 }

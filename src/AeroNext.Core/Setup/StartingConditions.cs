@@ -320,7 +320,7 @@ public static class StartingConditionsResolver
     /// resolve <c>historical_events.json</c>'s authored, city/region-scoped
     /// 1955 demand suppression (e.g. Shanghai's Maoist-era "closed economy"
     /// entry, a real 0.3x multiplier), and
-    /// <see cref="GravityDemandModel.AustralAsiaTunedIntraRegionMultipliers"/>
+    /// <see cref="GravityDemandModel.ShippedIntraRegionMultipliers"/>
     /// is the real shipped baseline every quarter applies regardless of any
     /// QA-harness tuning. Before this, every method here built a bare
     /// <c>new GravityDemandModel(enableHubDemandBonus: true)</c> with no
@@ -335,7 +335,8 @@ public static class StartingConditionsResolver
     /// </summary>
     private static GravityDemandModel Quarter1DemandModel(IReadOnlyList<DemandGrowthPoint> growthSchedule) =>
         new(schedule: growthSchedule, year: Timeline.StartYear, enableHubDemandBonus: true,
-            intraRegionMultipliers: GravityDemandModel.AustralAsiaTunedIntraRegionMultipliers);
+            intraRegionMultipliers: GravityDemandModel.ShippedIntraRegionMultipliers,
+            groundCompetitionDistanceKm: GravityDemandModel.ShippedGroundCompetitionDistanceKm);
 
     private static Money StartingCashFor(AirlineSeat seat, IReadOnlyList<City> allCities) =>
         Money.FromDollars((long)Math.Round(
