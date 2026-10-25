@@ -73,7 +73,8 @@ public static class FullGameRunner
         IReadOnlyList<AirlineSeat> seats,
         IReadOnlyList<City> cities, IReadOnlyList<AircraftType> fleetCatalog, IReadOnlyList<DemandGrowthPoint> growthSchedule,
         ExperimentTuning? tuning = null, GameDifficulty difficulty = GameDifficulty.Normal,
-        IReadOnlyList<TradeRestriction>? tradeRestrictions = null)
+        IReadOnlyList<TradeRestriction>? tradeRestrictions = null,
+        IReadOnlyDictionary<string, HubCapacityProfile>? hubProfiles = null)
     {
         tuning ??= ExperimentTuning.Baseline;
         var regionCounts = DifficultySettings.RegionCounts(difficulty);
@@ -174,7 +175,7 @@ public static class FullGameRunner
         // computed once, here, before any quarter runs.
         var capacityBoard = CityCapacityBoard.Initialize(cities, new GravityDemandModel(
             schedule: growthSchedule, year: Timeline.StartYear, enableHubDemandBonus: true,
-            intraRegionMultipliers: tuning.IntraRegionDemandMultipliers));
+            intraRegionMultipliers: tuning.IntraRegionDemandMultipliers), hubProfiles);
         var dominanceState = RegionalDominanceState.Empty;
         string? winner = null;
         int? winQuarter = null;
@@ -232,8 +233,10 @@ public static class FullGameRunner
             // (a no-op most quarters) - depends only on demand, not on
             // any order placed this quarter, so it's resolved before the
             // per-airline loop and is visible to every airline's own
-            // decisions the same quarter it lands.
-            capacityBoard = capacityBoard.AdvanceQuarter(q, cities, yearDemandModel);
+            // decisions the same quarter it lands. Hub demand coverage
+            // sizes profiled hubs from the seats flown entering this quarter.
+            capacityBoard = capacityBoard.AdvanceQuarter(q, cities, yearDemandModel,
+                CityCapacityBoard.SeatsPerAircraftByCity(names.SelectMany(n => routes[n]), cities));
 
             // M45: which gateways currently carry idle-expired, contestable
             // inventory - computed once per quarter from state entering it

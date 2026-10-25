@@ -1,3 +1,4 @@
+using AeroNext.Core.Airlines;
 using AeroNext.Core.World;
 
 namespace AeroNext.Core.Negotiations;
@@ -25,10 +26,29 @@ namespace AeroNext.Core.Negotiations;
 /// stated intent this round: real airports don't add gates in proportion
 /// to a percentage change alone, and a small city shouldn't accumulate
 /// capacity it has no real use for.
+///
+/// Hub growth profiles (2026-10-23, docs/HUB_CAPACITY_GROWTH_DESIGN.md):
+/// the rule above caps every city at double its starting capacity, which
+/// the biggest hubs reach by ~1975 while their demand keeps growing to
+/// 5-190x. A major non-gateway hub with a profile (HubCapacityProfile, from
+/// its real traffic history) gets whichever is higher - the rule above or
+/// its profile - re-evaluated every year, from quarter 1 (a hub already
+/// big in 1955 starts above its authored capacity). Gateways stay on the
+/// rule alone: their gates are meant to be scarce. With no profiles, every
+/// city behaves exactly as before.
+///
+/// Hub demand coverage (2026-10-24, docs/HUB_CAPACITY_GROWTH_DESIGN.md):
+/// even with profiles, hub demand ran 4-35x the seats flown there, so most
+/// of it could never be competed for. A profiled hub's capacity also never
+/// falls below the aircraft needed to fly <see cref="HubDemandCoverage"/>
+/// of its current demand, at the seats its own flights average
+/// (<see cref="SeatsPerAircraftByCity"/>) - re-evaluated every quarter
+/// when the caller supplies those averages, a ratchet like the rest.
 /// </summary>
 public sealed record CityCapacityBoard(
     IReadOnlyDictionary<string, long> BaselineDemandByCity,
-    IReadOnlyDictionary<string, int> CapacityBonusByCity)
+    IReadOnlyDictionary<string, int> CapacityBonusByCity,
+    IReadOnlyDictionary<string, HubCapacityProfile>? HubProfiles = null)
 {
     /// <summary>(Proposed, tunable) — how often, in quarters, capacity is re-evaluated. 20 = every 5 years, matching the real pace of a terminal/runway expansion project, not a continuous dial.</summary>
     public const int ExpansionPeriodQuarters = 20;
@@ -38,6 +58,9 @@ public sealed record CityCapacityBoard(
 
     /// <summary>(Proposed, tunable) — the starting capacity at which BaseGrowthIncrementFraction applies unchanged. A city smaller than this needs more relative growth per slot; a city larger than this needs less.</summary>
     public const int ReferenceBaseCapacity = 2;
+
+    /// <summary>(Proposed, tunable) - the share of a profiled hub's demand its capacity must always be able to fly.</summary>
+    public const double HubDemandCoverage = 0.8;
 
     /// <summary>
     /// This city's own growth schedule — the ascending list of
@@ -79,10 +102,79 @@ public sealed record CityCapacityBoard(
     /// reference point every later check measures growth against. Zero
     /// bonus everywhere; nothing has expanded yet.
     /// </summary>
-    public static CityCapacityBoard Initialize(IReadOnlyList<City> cities, GravityDemandModel campaignStartDemandModel) =>
+    /// <param name="hubProfiles">Growth profiles for major hubs; a profiled non-gateway city starts at its profile's 1955 capacity if that's above its authored one.</param>
+    public static CityCapacityBoard Initialize(IReadOnlyList<City> cities, GravityDemandModel campaignStartDemandModel,
+        IReadOnlyDictionary<string, HubCapacityProfile>? hubProfiles = null) =>
         new(
             TotalDemandByCity(cities, campaignStartDemandModel),
-            cities.ToDictionary(c => c.Id, _ => 0, StringComparer.Ordinal));
+            cities.ToDictionary(c => c.Id, c => ProfileBonus(c, hubProfiles, Timeline.StartYear), StringComparer.Ordinal),
+            hubProfiles);
+
+    /// <summary>
+    /// The bonus a city's growth profile gives it in a year: its profile's
+    /// capacity above its starting capacity, or 0 - for a gateway, a city
+    /// with no profile, or a year the profile hasn't outgrown the start yet.
+    /// </summary>
+    public static int ProfileBonus(City city, IReadOnlyDictionary<string, HubCapacityProfile>? hubProfiles, int year)
+    {
+        if (city.IsGateway || hubProfiles is null || !hubProfiles.TryGetValue(city.Id, out var profile))
+        {
+            return 0;
+        }
+
+        var startingCapacity = city.GateCapacity ?? city.AutoCapacity ?? 0;
+
+        return Math.Max(0, profile.CapacityIn(year) - startingCapacity);
+    }
+
+    /// <summary>
+    /// The bonus a profiled hub needs so its capacity can fly
+    /// <see cref="HubDemandCoverage"/> of its demand at seatsPerAircraft
+    /// seats per aircraft per quarter, or 0 - for a gateway, a city with no
+    /// profile, or no seat average to go on.
+    /// </summary>
+    public static int DemandCoverageBonus(City city, IReadOnlyDictionary<string, HubCapacityProfile>? hubProfiles, long cityDemand, double seatsPerAircraft)
+    {
+        if (city.IsGateway || hubProfiles is null || !hubProfiles.ContainsKey(city.Id) || seatsPerAircraft <= 0)
+        {
+            return 0;
+        }
+
+        var startingCapacity = city.GateCapacity ?? city.AutoCapacity ?? 0;
+        var requiredCapacity = (int)Math.Ceiling(HubDemandCoverage * cityDemand / seatsPerAircraft);
+
+        return Math.Max(0, requiredCapacity - startingCapacity);
+    }
+
+    /// <summary>
+    /// Average seats per aircraft per quarter on the routes that start or end
+    /// at each city (an aircraft only passing through as a refuelling stop
+    /// carries none of that city's demand), falling back to the average
+    /// across every route for a city nobody serves yet. Empty when there
+    /// are no routes at all.
+    /// </summary>
+    public static IReadOnlyDictionary<string, double> SeatsPerAircraftByCity(IEnumerable<Route> routes, IReadOnlyList<City> cities)
+    {
+        var allRoutes = routes.ToList();
+        var totalAircraft = allRoutes.Sum(r => (long)r.AircraftCount);
+
+        if (totalAircraft == 0)
+        {
+            return new Dictionary<string, double>(StringComparer.Ordinal);
+        }
+
+        var networkAverage = (double)allRoutes.Sum(r => r.SeatsPerQuarter) / totalAircraft;
+
+        return cities.ToDictionary(
+            c => c.Id,
+            c =>
+            {
+                var serving = allRoutes.Where(r => r.Origin.Id == c.Id || r.Destination.Id == c.Id).ToList();
+                var aircraft = serving.Sum(r => (long)r.AircraftCount);
+                return aircraft == 0 ? networkAverage : (double)serving.Sum(r => r.SeatsPerQuarter) / aircraft;
+            },
+            StringComparer.Ordinal);
+    }
 
     /// <summary>
     /// A no-op (returns this board unchanged) unless quarterNumber lands
@@ -100,28 +192,60 @@ public sealed record CityCapacityBoard(
     /// earns anything — a zero baseline would make every breakpoint
     /// read as trivially crossed, which is never the intent.
     /// </summary>
-    public CityCapacityBoard AdvanceQuarter(int quarterNumber, IReadOnlyList<City> cities, GravityDemandModel demandModel)
+    /// <param name="seatsPerAircraftByCity">Each city's <see cref="SeatsPerAircraftByCity"/> entering this quarter; when given, profiled hubs also get <see cref="DemandCoverageBonus"/>.</param>
+    public CityCapacityBoard AdvanceQuarter(int quarterNumber, IReadOnlyList<City> cities, GravityDemandModel demandModel,
+        IReadOnlyDictionary<string, double>? seatsPerAircraftByCity = null)
     {
-        if (quarterNumber % ExpansionPeriodQuarters != 0)
+        var onCadence = quarterNumber % ExpansionPeriodQuarters == 0;
+        var hasProfiles = HubProfiles is { Count: > 0 };
+
+        if (!onCadence && !hasProfiles)
         {
             return this;
         }
 
-        var currentDemandByCity = TotalDemandByCity(cities, demandModel);
         var bonus = new Dictionary<string, int>(CapacityBonusByCity);
 
-        foreach (var city in cities)
+        if (onCadence)
         {
-            var baseline = BaselineDemandByCity.GetValueOrDefault(city.Id);
+            var currentDemandByCity = TotalDemandByCity(cities, demandModel);
 
-            if (baseline <= 0)
+            foreach (var city in cities)
             {
-                continue;
+                var baseline = BaselineDemandByCity.GetValueOrDefault(city.Id);
+
+                if (baseline <= 0)
+                {
+                    continue;
+                }
+
+                var earnedBonus = GrowthBreakpoints(city).Count(breakpoint => currentDemandByCity.GetValueOrDefault(city.Id) >= baseline * breakpoint);
+
+                bonus[city.Id] = Math.Max(bonus.GetValueOrDefault(city.Id), earnedBonus);
+            }
+        }
+
+        // Hub growth profiles: re-evaluated every quarter against the
+        // current year, so a hub grows the year its real airport did.
+        if (hasProfiles)
+        {
+            var year = Timeline.YearForQuarter(quarterNumber);
+
+            foreach (var city in cities)
+            {
+                bonus[city.Id] = Math.Max(bonus.GetValueOrDefault(city.Id), ProfileBonus(city, HubProfiles, year));
             }
 
-            var earnedBonus = GrowthBreakpoints(city).Count(breakpoint => currentDemandByCity.GetValueOrDefault(city.Id) >= baseline * breakpoint);
+            if (seatsPerAircraftByCity is { Count: > 0 })
+            {
+                var currentDemandByCity = TotalDemandByCity(cities, demandModel);
 
-            bonus[city.Id] = Math.Max(bonus.GetValueOrDefault(city.Id), earnedBonus);
+                foreach (var city in cities)
+                {
+                    var coverage = DemandCoverageBonus(city, HubProfiles, currentDemandByCity[city.Id], seatsPerAircraftByCity.GetValueOrDefault(city.Id));
+                    bonus[city.Id] = Math.Max(bonus[city.Id], coverage);
+                }
+            }
         }
 
         return this with { CapacityBonusByCity = bonus };

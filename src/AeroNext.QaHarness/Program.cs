@@ -1,6 +1,7 @@
 using AeroNext.Core;
 using AeroNext.Core.Airlines;
 using AeroNext.Core.Competition;
+using AeroNext.Core.Negotiations;
 using AeroNext.Core.Setup;
 using AeroNext.Core.World;
 using AeroNext.QaHarness;
@@ -67,6 +68,7 @@ var cities = CityCatalog.LoadFile(Path.Combine(AppContext.BaseDirectory, "data",
 var fleetCatalog = AircraftCatalog.LoadFile(Path.Combine(AppContext.BaseDirectory, "data", "aircraft.json"));
 var growthSchedule = DemandGrowthCatalog.LoadCampaignSchedule(Path.Combine(AppContext.BaseDirectory, "data")); // M21: baseline curve + authored historical_events.json, merged
 var knownCityIds = cities.Select(c => c.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+var hubProfiles = HubTrafficHistoryCatalog.LoadFile(Path.Combine(AppContext.BaseDirectory, "data", "hub_traffic_history.json"), knownCityIds); // docs/HUB_CAPACITY_GROWTH_DESIGN.md
 var tradeRestrictions = TradeRestrictionCatalog.LoadFile(Path.Combine(AppContext.BaseDirectory, "data", "trade-restrictions.json"), knownCityIds); // geopolitical-aircraft-restrictions follow-up
 
 Console.WriteLine($"AeroNext QA harness: {games} games x {quarters} quarters, base seed {baseSeed}, difficulty {difficulty}{(unconstrainedRegions ? " [unconstrained regions: duplicates allowed]" : "")}");
@@ -87,7 +89,7 @@ for (var i = 0; i < games; i++)
             ? UnconstrainedSeatGenerator.Generate(configRng, cities)
             : GameSetup.CreateSeats(GameConfigGenerator.Generate(configRng, cities), cities, configRng, fillerWeightExponent: 0.0);
 
-        var result = FullGameRunner.Run(i, configSeed, campaignSeed, quarters, seats, cities, fleetCatalog, growthSchedule, difficulty: difficulty, tradeRestrictions: tradeRestrictions);
+        var result = FullGameRunner.Run(i, configSeed, campaignSeed, quarters, seats, cities, fleetCatalog, growthSchedule, difficulty: difficulty, tradeRestrictions: tradeRestrictions, hubProfiles: hubProfiles);
         results.Add(result);
 
         if (!result.Success)
