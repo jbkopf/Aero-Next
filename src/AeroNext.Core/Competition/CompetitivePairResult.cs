@@ -8,4 +8,6 @@ namespace AeroNext.Core.Competition;
 /// (nonstop or one-stop, per that airline's own network). An airline absent
 /// from CarriedByAirline doesn't serve this pair at all.
 /// </summary>
-public sealed record CompetitivePairResult(City Origin, City Destination, long DemandPassengers, IReadOnlyDictionary<Airline, long> CarriedByAirline);
+/// <param name="Offers">Every airline's offer on the pair this quarter - each airline whose network reaches it, whether or not it won passengers.</param>
+public sealed record CompetitivePairResult(City Origin, City Destination, long DemandPassengers, IReadOnlyDictionary<Airline, long> CarriedByAirline,
+    IReadOnlyList<PairOffer>? Offers = null);

@@ -196,7 +196,8 @@ public sealed record StrategyContext(
     int? TargetRegionCountOverride = null,
     IReadOnlyList<AircraftType>? PurchasableTypes = null,
     IReadOnlyList<AircraftType>? LeasableTypes = null,
-    IReadOnlyDictionary<(string OriginId, string DestinationId), long>? LastQuarterTurnedAwayByRoute = null)
+    IReadOnlyDictionary<(string OriginId, string DestinationId), long>? LastQuarterTurnedAwayByRoute = null,
+    IReadOnlyDictionary<(string OriginId, string DestinationId), IReadOnlyList<Competition.PairOffer>>? LastQuarterRivalOffersByPair = null)
 {
     /// <summary>Aircraft types this airline could newly purchase right now - PurchasableTypes when a real restricted list was computed, EraAvailableTypes otherwise.</summary>
     public IReadOnlyList<AircraftType> PurchasableOrEraTypes => PurchasableTypes ?? EraAvailableTypes;

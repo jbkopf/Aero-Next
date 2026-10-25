@@ -333,7 +333,8 @@ public static class AiToolkit
     /// reverted attempts were not.
     /// </summary>
     /// <param name="stops">Refuelling stops the route would make (docs/MULTI_STOP_ROUTES_DESIGN.md) - its seats and costs cover every leg; demand stays the pair's.</param>
-    public static Money EstimatedRealProfit(StrategyContext context, PairDemand pair, AircraftType aircraft, bool requiresLease, StopList stops = default)
+    /// <param name="connectingPassengers">Connecting passengers the route would also carry (ConnectingPassengersOpenedBy), sharing its seats with the pair's own; 0 for an existing route's estimate.</param>
+    public static Money EstimatedRealProfit(StrategyContext context, PairDemand pair, AircraftType aircraft, bool requiresLease, StopList stops = default, long connectingPassengers = 0)
     {
         var hypotheticalRoute = new Route(pair.Origin, pair.Destination, aircraft, AircraftCount: 1, Stops: stops);
         var pairKey = QuarterEngine.NormalizedPairKey(pair.Origin, pair.Destination);
@@ -344,11 +345,35 @@ public static class AiToolkit
         // cases), but it diluted the penalty for a real rival on the pair,
         // so the AI happily entered contested markets. That's now an
         // explicit preference, ContestAppetite, applied to ranking only.
-        var rivalPresence = context.RivalPresenceByPairKey?.GetValueOrDefault(pairKey) ?? 0;
-        var assumedCaptured = pair.PassengersPerQuarter / (rivalPresence + 1);
-        var carried = Math.Min(assumedCaptured, hypotheticalRoute.SeatsPerQuarter);
+        var nonstop = new Itinerary(pair.Origin, pair.Destination, ItineraryKind.Nonstop, new[] { hypotheticalRoute });
+        var assumedCaptured = CapturedPassengers(context, pair, pairKey, nonstop);
+        var carried = Math.Min(assumedCaptured + connectingPassengers, hypotheticalRoute.SeatsPerQuarter);
 
         return FareCalculator.EstimatedProfit(hypotheticalRoute, carried, includeLeaseFee: requiresLease);
+    }
+
+    /// <summary>
+    /// How many of a pair's passengers an offer over this itinerary would
+    /// capture (docs/CONNECTING_PASSENGERS_DESIGN.md). With last quarter's
+    /// rival offers on the pair (LastQuarterRivalOffersByPair), the market's
+    /// own contest share (CompetitiveMarket.ExpectedShare): the offer's
+    /// tightest-leg seats and journey cost - fare and time, connections
+    /// included - against theirs, so a slow, dear or roundabout offer
+    /// expects little against a direct rival. Without that record, an even
+    /// split with every rival flying the pair nonstop, as before.
+    /// </summary>
+    internal static long CapturedPassengers(StrategyContext context, PairDemand pair, (string, string) pairKey, Itinerary offer)
+    {
+        if (context.LastQuarterRivalOffersByPair is null)
+        {
+            var rivalPresence = context.RivalPresenceByPairKey?.GetValueOrDefault(pairKey) ?? 0;
+            return pair.PassengersPerQuarter / (rivalPresence + 1);
+        }
+
+        var rivals = context.LastQuarterRivalOffersByPair.GetValueOrDefault(pairKey) ?? Array.Empty<Competition.PairOffer>();
+        var share = Competition.CompetitiveMarket.ExpectedShare(offer.Legs.Min(l => l.SeatsPerQuarter), 1.0, Competition.JourneyCost.PerPassenger(offer), rivals);
+
+        return (long)Math.Floor(pair.PassengersPerQuarter * share);
     }
 
     /// <summary>Same real profit/floor treatment as FindMostProfitablePair, for a single already-identified (pair, aircraft) candidate - AiToolkit.FindBestUnservedPairTouchingWonSlot's own priority result specifically, which already picked its own aircraft type from this airline's own idle fleet.</summary>
@@ -356,7 +381,8 @@ public static class AiToolkit
         StrategyContext context, IReadOnlySet<int> reservedUnitIds, PairDemand pair, AircraftType aircraft)
     {
         var usesIdleUnit = context.OwnFleet.Idle.Any(u => u.Type.Id == aircraft.Id && !reservedUnitIds.Contains(u.Id));
-        var profit = EstimatedRealProfit(context, pair, aircraft, requiresLease: !usesIdleUnit);
+        var connecting = ConnectingPassengersOpenedBy(context, new Route(pair.Origin, pair.Destination, aircraft, 1), ConnectionNetwork.Of(context));
+        var profit = EstimatedRealProfit(context, pair, aircraft, requiresLease: !usesIdleUnit, connectingPassengers: connecting);
 
         return profit >= ProfitabilityFloor ? (pair, aircraft, profit, usesIdleUnit) : null;
     }
@@ -441,6 +467,7 @@ public static class AiToolkit
         var leaseTypeCandidates = context.LeasableOrEraTypes.Where(type => !idleTypeIds.Contains(type.Id));
         var typeCandidates = idleTypeCandidates.Concat(leaseTypeCandidates).ToList();
         var stopPaths = new StopPathFinder(context.AllCities);
+        var network = ConnectionNetwork.Of(context);
 
         return context.DemandModel.AllPairs(context.AllCities)
             .Where(p => !served.Contains((p.Origin.Id, p.Destination.Id)))
@@ -448,17 +475,138 @@ public static class AiToolkit
             .Where(p => validOriginCityIds.Contains(p.Origin.Id) || validOriginCityIds.Contains(p.Destination.Id))
             .Where(regionFilter)
             .Where(p => CanOpenNow(context, p, validOriginCityIds, slotsReservedByCity, citySpendReservedByCity))
-            .SelectMany(p => typeCandidates
-                .Select(type => (Type: type, Stops: stopPaths.ShortestStops(p.Origin, p.Destination, type.RangeKm)))
-                .Where(x => x.Stops is not null)
-                .Where(x => !requireStopSlots || x.Stops!.Value.IsEmpty || CanOpenNow(context, p, validOriginCityIds, slotsReservedByCity, citySpendReservedByCity, x.Stops!.Value))
-                .Select(x =>
-                {
-                    var usesIdleUnit = idleTypeIds.Contains(x.Type.Id);
-                    var profit = EstimatedRealProfit(context, p, x.Type, requiresLease: !usesIdleUnit, x.Stops!.Value);
-                    return (Pair: p, Aircraft: x.Type, Profit: profit, UsesIdleUnit: usesIdleUnit, Stops: x.Stops!.Value);
-                }))
+            .SelectMany(p => typeCandidates.Select(type => (Pair: p, Type: type)))
+            .Select(x => (x.Pair, x.Type, Stops: stopPaths.ShortestStops(x.Pair.Origin, x.Pair.Destination, x.Type.RangeKm)))
+            .Where(x => x.Stops is not null)
+            .Where(x => !requireStopSlots || x.Stops!.Value.IsEmpty || CanOpenNow(context, x.Pair, validOriginCityIds, slotsReservedByCity, citySpendReservedByCity, x.Stops!.Value))
+            .Select(x =>
+            {
+                var usesIdleUnit = idleTypeIds.Contains(x.Type.Id);
+                var connecting = ConnectingPassengersOpenedBy(context, new Route(x.Pair.Origin, x.Pair.Destination, x.Type, 1, Stops: x.Stops!.Value), network);
+                var profit = EstimatedRealProfit(context, x.Pair, x.Type, requiresLease: !usesIdleUnit, x.Stops!.Value, connecting);
+                return (Pair: x.Pair, Aircraft: x.Type, Profit: profit, UsesIdleUnit: usesIdleUnit, Stops: x.Stops!.Value);
+            })
             .ToList();
+    }
+
+    /// <summary>
+    /// Connecting passengers (docs/CONNECTING_PASSENGERS_DESIGN.md): the
+    /// one-stop passengers a new route would carry on top of its own pair -
+    /// trips it would newly connect through one of its endpoints. A city S
+    /// this airline already flies to from one endpoint gets an S-to-other-
+    /// endpoint itinerary through it; only pairs the airline can't serve
+    /// today (no nonstop, no existing one-stop) count, since a pair it
+    /// already connects would mostly just change hubs. Each pair's demand is
+    /// competed for as CapturedPassengers prices it - a one-stop journey over
+    /// the existing leg and newRoute against rivals' offers on that pair, so
+    /// a long detour wins little against a direct rival - then cut to the
+    /// share NetworkPlanner.Allocate would give it on the
+    /// existing leg - that leg's seats over everyone who wanted it last
+    /// quarter (carried plus turned away) plus this newcomer. The total
+    /// counts at ConnectingEstimateFactor.
+    /// </summary>
+    /// <param name="newRoute">The candidate route, with the aircraft and stops it would fly - its seats, fare and speed shape how well each connection competes.</param>
+    public static long ConnectingPassengersOpenedBy(StrategyContext context, Route newRoute, ConnectionNetwork network)
+    {
+        var total = 0L;
+
+        foreach (var (endpoint, other) in new[] { (newRoute.Origin, newRoute.Destination), (newRoute.Destination, newRoute.Origin) })
+        {
+            foreach (var (neighbor, leg) in network.NeighborsOf(endpoint.Id))
+            {
+                if (neighbor.Id == other.Id || network.Serves(neighbor.Id, other.Id))
+                {
+                    continue;
+                }
+
+                var key = QuarterEngine.NormalizedPairKey(neighbor, other);
+                var connection = new Itinerary(neighbor, other, ItineraryKind.OneStop, new[] { leg, newRoute });
+                var demand = CapturedPassengers(context, context.DemandModel.ForPair(neighbor, other), key, connection);
+                var legKey = QuarterEngine.NormalizedPairKey(leg.Origin, leg.Destination);
+                var wanted = (context.LastQuarterSeatsCarriedByRoute?.GetValueOrDefault(legKey) ?? leg.SeatsPerQuarter)
+                    + (context.LastQuarterTurnedAwayByRoute?.GetValueOrDefault(legKey) ?? 0);
+                var share = Math.Min(1.0, (double)leg.SeatsPerQuarter / Math.Max(1, wanted + demand));
+
+                total += (long)Math.Floor(demand * share);
+            }
+        }
+
+        return (long)Math.Floor(total * ConnectingEstimateFactor);
+    }
+
+    /// <summary>
+    /// (Proposed, tunable) - how much of ConnectingPassengersOpenedBy's raw
+    /// figure a new-route estimate counts. Each estimate assumes it's the
+    /// only newcomer on its feeder legs, but connections through one hub
+    /// share them, so the more a route leans on connections the more it
+    /// falls short (traced on 10 Hard games: actual load 0.81x the estimate
+    /// where connections were 75%+ of it). Picking the best of many such
+    /// estimates turns that into losers: new routes losing money two
+    /// quarters in were 13.7% with no connection value, 29.7% counting it
+    /// in full, 20.1% at 0.5, 19.5% at 0.25 - 0.5 keeps most of the
+    /// connecting traffic for little of the extra risk.
+    /// </summary>
+    public const double ConnectingEstimateFactor = 0.5;
+
+    /// <summary>An airline's network as ConnectingPassengersOpenedBy reads it: each city's own routes, and every pair it already serves nonstop or with one connection.</summary>
+    public sealed class ConnectionNetwork
+    {
+        private readonly IReadOnlyDictionary<string, List<(City Neighbor, Route Leg)>> _neighbors;
+        private readonly HashSet<(string, string)> _served;
+
+        private ConnectionNetwork(IReadOnlyDictionary<string, List<(City Neighbor, Route Leg)>> neighbors, HashSet<(string, string)> served)
+        {
+            _neighbors = neighbors;
+            _served = served;
+        }
+
+        public static ConnectionNetwork Of(StrategyContext context)
+        {
+            var neighbors = new Dictionary<string, List<(City Neighbor, Route Leg)>>(StringComparer.Ordinal);
+
+            foreach (var route in context.CurrentRoutes.OrderBy(r => r.Origin.Id, StringComparer.Ordinal).ThenBy(r => r.Destination.Id, StringComparer.Ordinal))
+            {
+                Add(route.Origin.Id, route.Destination, route);
+                Add(route.Destination.Id, route.Origin, route);
+            }
+
+            var served = new HashSet<(string, string)>();
+            foreach (var list in neighbors.Values)
+            {
+                foreach (var (a, _) in list)
+                {
+                    foreach (var (b, _) in list)
+                    {
+                        served.Add((a.Id, b.Id));
+                    }
+                }
+            }
+
+            foreach (var (cityId, list) in neighbors)
+            {
+                foreach (var (n, _) in list)
+                {
+                    served.Add((cityId, n.Id));
+                }
+            }
+
+            return new ConnectionNetwork(neighbors, served);
+
+            void Add(string cityId, City neighbor, Route leg)
+            {
+                if (!neighbors.TryGetValue(cityId, out var list))
+                {
+                    neighbors[cityId] = list = new List<(City, Route)>();
+                }
+
+                list.Add((neighbor, leg));
+            }
+        }
+
+        public IReadOnlyList<(City Neighbor, Route Leg)> NeighborsOf(string cityId) =>
+            _neighbors.TryGetValue(cityId, out var list) ? list : Array.Empty<(City, Route)>();
+
+        public bool Serves(string a, string b) => _served.Contains((a, b));
     }
 
     /// <summary>

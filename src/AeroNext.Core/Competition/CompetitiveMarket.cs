@@ -149,7 +149,13 @@ public static class CompetitiveMarket
                 }
             }
 
-            pairResults.Add(new CompetitivePairResult(origin, destination, demand, carriedByAirline));
+            var offers = airlines
+                .Select(a => (Airline: a, Load: FindPair(monopolyPlans[a], origin.Id, destination.Id)))
+                .Where(x => x.Load is not null && x.Load.Itinerary.Kind != ItineraryKind.Unserved && x.Load.Itinerary.Legs.Min(l => l.SeatsPerQuarter) > 0)
+                .Select(x => new PairOffer(x.Airline.Name, x.Load!.Itinerary.Legs.Min(l => l.SeatsPerQuarter), x.Airline.Quality, JourneyCost.PerPassenger(x.Load.Itinerary)))
+                .ToList();
+
+            pairResults.Add(new CompetitivePairResult(origin, destination, demand, carriedByAirline, offers));
             effectiveDemandByPair.Add(effectiveDemand);
 
             foreach (var (airline, carried) in carriedByAirline)
@@ -174,6 +180,28 @@ public static class CompetitiveMarket
             .ToList();
 
         return new CompetitiveMarketResult(pairResults, routeUsage);
+    }
+
+    /// <summary>
+    /// The share of a pair's passengers an offer would win against rivals'
+    /// offers - the contest's own weighting (seats on the tightest leg x
+    /// Quality x JourneyMultiplier against the cheapest journey on offer),
+    /// shared so the AI's route estimates price competition the way the
+    /// market does (docs/CONNECTING_PASSENGERS_DESIGN.md). 1.0 with no
+    /// rivals. Ignores marketing boosts and rivals' capacity ceilings.
+    /// </summary>
+    public static double ExpectedShare(long ownSeats, double ownQuality, Money ownJourneyCost, IReadOnlyList<PairOffer> rivals)
+    {
+        if (rivals.Count == 0)
+        {
+            return 1.0;
+        }
+
+        var cheapest = new Money(Math.Min(ownJourneyCost.Cents, rivals.Min(r => r.JourneyCost.Cents)));
+        var own = ownSeats * ownQuality * JourneyMultiplier(ownJourneyCost, cheapest);
+        var total = own + rivals.Sum(r => r.Seats * r.Quality * JourneyMultiplier(r.JourneyCost, cheapest));
+
+        return total <= 0 ? 0.0 : own / total;
     }
 
     /// <summary>M47: Quality, boosted by this airline's own active marketing campaign on this specific pair, if any — a route campaign's boost, else a network campaign's smaller one, else unboosted. Contested pairs only — see ApplyDemandAdjustment for the uncontested-pair mechanism.</summary>

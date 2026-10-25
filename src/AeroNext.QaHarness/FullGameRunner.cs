@@ -151,6 +151,9 @@ public static class FullGameRunner
         // route's turned-away passengers, local and connecting, for next
         // quarter's AiToolkit.MarginalProfitOfAnotherAircraft.
         var lastQuarterTurnedAwayByRouteByName = names.ToDictionary(n => n, n => (IReadOnlyDictionary<(string, string), long>)new Dictionary<(string, string), long>());
+        // Every pair's rival offers last quarter (all airlines but this
+        // one), for AiToolkit's competitive share estimates.
+        var lastQuarterRivalOffersByName = names.ToDictionary(n => n, _ => (IReadOnlyDictionary<(string, string), IReadOnlyList<PairOffer>>)new Dictionary<(string, string), IReadOnlyList<PairOffer>>());
 
         // M55: each airline's own real memory of its own routes' recent
         // past - the missing piece M43 and M54 each separately diagnosed
@@ -389,6 +392,7 @@ public static class FullGameRunner
                         RivalCountByServedRoute: rivalCountByServedRoute,
                         LastQuarterSeatsCarriedByRoute: lastQuarterSeatsCarriedByRouteByName[name],
                         LastQuarterTurnedAwayByRoute: lastQuarterTurnedAwayByRouteByName[name],
+                        LastQuarterRivalOffersByPair: lastQuarterRivalOffersByName[name],
                         QuarterNumber: q,
                         RouteHistoryByPair: routeHistoryByAirlineName[name],
                         InDistress: finances[name].InDistress,
@@ -577,6 +581,11 @@ public static class FullGameRunner
             // matters going forward, not a stale profit streak.
             foreach (var airline in league)
             {
+                lastQuarterRivalOffersByName[airline.Name] = market.Pairs
+                    .Select(p => (Key: QuarterEngine.NormalizedPairKey(p.Origin, p.Destination), Rivals: (IReadOnlyList<PairOffer>)(p.Offers ?? Array.Empty<PairOffer>()).Where(o => o.AirlineName != airline.Name).ToList()))
+                    .Where(x => x.Rivals.Count > 0)
+                    .ToDictionary(x => x.Key, x => x.Rivals);
+
                 var usageByPair = market.RouteUsage
                     .Where(u => u.Airline == airline)
                     .ToDictionary(u => QuarterEngine.NormalizedPairKey(u.Route.Origin, u.Route.Destination), u => u);
