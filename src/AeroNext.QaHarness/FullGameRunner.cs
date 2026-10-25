@@ -147,6 +147,10 @@ public static class FullGameRunner
         // airline's own quarter-1 route is the M18 guaranteed one anyway
         // (no strategy consults this that early).
         var lastQuarterSeatsCarriedByRouteByName = names.ToDictionary(n => n, n => (IReadOnlyDictionary<(string, string), long>)new Dictionary<(string, string), long>());
+        // Connecting passengers (docs/CONNECTING_PASSENGERS_DESIGN.md): each
+        // route's turned-away passengers, local and connecting, for next
+        // quarter's AiToolkit.MarginalProfitOfAnotherAircraft.
+        var lastQuarterTurnedAwayByRouteByName = names.ToDictionary(n => n, n => (IReadOnlyDictionary<(string, string), long>)new Dictionary<(string, string), long>());
 
         // M55: each airline's own real memory of its own routes' recent
         // past - the missing piece M43 and M54 each separately diagnosed
@@ -384,6 +388,7 @@ public static class FullGameRunner
                         IdleContestableSlotsByCity: idleContestableSlotsByCity,
                         RivalCountByServedRoute: rivalCountByServedRoute,
                         LastQuarterSeatsCarriedByRoute: lastQuarterSeatsCarriedByRouteByName[name],
+                        LastQuarterTurnedAwayByRoute: lastQuarterTurnedAwayByRouteByName[name],
                         QuarterNumber: q,
                         RouteHistoryByPair: routeHistoryByAirlineName[name],
                         InDistress: finances[name].InDistress,
@@ -577,6 +582,7 @@ public static class FullGameRunner
                     .ToDictionary(u => QuarterEngine.NormalizedPairKey(u.Route.Origin, u.Route.Destination), u => u);
 
                 lastQuarterSeatsCarriedByRouteByName[airline.Name] = usageByPair.ToDictionary(kv => kv.Key, kv => kv.Value.SeatsUsed);
+                lastQuarterTurnedAwayByRouteByName[airline.Name] = usageByPair.ToDictionary(kv => kv.Key, kv => kv.Value.TurnedAway);
 
                 foreach (var (pairKey, usage) in usageByPair)
                 {

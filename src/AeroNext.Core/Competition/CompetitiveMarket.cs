@@ -156,8 +156,9 @@ public static class CompetitiveMarket
             }
         }
 
+        var turnedAwayByAirline = monopolyPlans.ToDictionary(kv => kv.Key, kv => kv.Value.RouteUsage.ToDictionary(u => u.Route, u => u.TurnedAway));
         var routeUsage = airlines
-            .SelectMany(a => a.Routes.Select(r => new CompetitiveRouteUsage(a, r, r.SeatsPerQuarter, routeSeatsUsed.GetValueOrDefault((a, r)))))
+            .SelectMany(a => a.Routes.Select(r => new CompetitiveRouteUsage(a, r, r.SeatsPerQuarter, routeSeatsUsed.GetValueOrDefault((a, r)), turnedAwayByAirline[a].GetValueOrDefault(r))))
             .OrderBy(u => u.Airline.Name, StringComparer.Ordinal)
             .ThenBy(u => u.Route.Origin.Id, StringComparer.Ordinal)
             .ThenBy(u => u.Route.Destination.Id, StringComparer.Ordinal)

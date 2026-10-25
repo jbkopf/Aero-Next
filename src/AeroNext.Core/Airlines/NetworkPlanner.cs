@@ -8,10 +8,10 @@ namespace AeroNext.Core.Airlines;
 /// milestone that tests whether hub-and-spoke value emerges from itinerary
 /// search over the gravity demand, or has to be hardcoded.
 ///
-/// Nonstop demand claims its own route's capacity first, since that market
-/// is the reason the route exists. Leftover capacity on each leg is then
-/// shared by one-stop itineraries, largest markets first, so two itineraries
-/// through the same hub leg compete for what nonstop traffic didn't use.
+/// A full route's seats are shared among every itinerary using it, nonstop
+/// and one-stop alike, in proportion to demand (docs/CONNECTING_PASSENGERS_DESIGN.md;
+/// see Allocate). Until then nonstop demand claimed every seat first and
+/// connections only got the leftovers.
 ///
 /// M62: hub selection (FindBestHub) was pure shortest-total-great-circle-
 /// detour until this milestone — now ranks by an "effective detour" that
@@ -237,49 +237,111 @@ public static class NetworkPlanner
         return best;
     }
 
+    /// <summary>
+    /// Connecting passengers (docs/CONNECTING_PASSENGERS_DESIGN.md): when more
+    /// people want a route than it has seats, every itinerary using it -
+    /// nonstop or one-stop - gets a share of its seats in proportion to its
+    /// demand. A one-stop itinerary needs a seat on both legs, so it gets
+    /// the smaller of its two legs' shares. Seats that leaves empty (a
+    /// connection held back by its other leg) are then filled in the old
+    /// priority order - nonstop first, then one-stop by demand, largest
+    /// first - so a route is never left emptier than demand allows.
+    ///
+    /// Before this, nonstop demand claimed every seat first and connections
+    /// only got what was left; with nonstop demand running ~2x seats, a
+    /// 20-game trace found connections carried 0-2% of their demand at
+    /// every hub. TurnedAway records, per route, the passengers still
+    /// unseated for whom that route was the binding leg.
+    /// </summary>
     private static NetworkPlan Allocate(IReadOnlyList<Route> routes, List<Itinerary> itineraries, GravityDemandModel demandModel)
     {
-        var remainingCapacity = routes.ToDictionary(r => r, r => r.SeatsPerQuarter);
-        var loads = new List<ItineraryLoad>();
-
-        var nonstop = itineraries.Where(i => i.Kind == ItineraryKind.Nonstop);
-        var oneStop = itineraries
-            .Where(i => i.Kind == ItineraryKind.OneStop)
+        var served = itineraries
+            .Where(i => i.Kind != ItineraryKind.Unserved)
             .Select(i => (Itinerary: i, Demand: demandModel.ForPair(i.Origin, i.Destination).PassengersPerQuarter))
-            .OrderByDescending(x => x.Demand)
-            .ThenBy(x => x.Itinerary.Origin.Id, StringComparer.Ordinal)
-            .ThenBy(x => x.Itinerary.Destination.Id, StringComparer.Ordinal);
-        var unserved = itineraries.Where(i => i.Kind == ItineraryKind.Unserved);
+            .ToList();
 
-        foreach (var itinerary in nonstop)
+        var demandByRoute = routes.ToDictionary(r => r, _ => 0L);
+        foreach (var (itinerary, demand) in served)
         {
-            var demand = demandModel.ForPair(itinerary.Origin, itinerary.Destination).PassengersPerQuarter;
-            var leg = itinerary.Legs[0];
-            var carried = Math.Min(demand, remainingCapacity[leg]);
-            remainingCapacity[leg] -= carried;
-            loads.Add(new ItineraryLoad(itinerary, demand, carried));
+            foreach (var leg in itinerary.Legs)
+            {
+                demandByRoute[leg] += demand;
+            }
         }
 
-        foreach (var (itinerary, demand) in oneStop)
+        // Each route's share fraction: 1 when it has room for everyone.
+        var shareByRoute = routes.ToDictionary(
+            r => r,
+            r => demandByRoute[r] <= r.SeatsPerQuarter ? 1.0 : (double)r.SeatsPerQuarter / demandByRoute[r]);
+
+        var remainingCapacity = routes.ToDictionary(r => r, r => r.SeatsPerQuarter);
+        var carried = new long[served.Count];
+
+        for (var k = 0; k < served.Count; k++)
         {
-            var legOne = itinerary.Legs[0];
-            var legTwo = itinerary.Legs[1];
-            var carried = Math.Min(demand, Math.Min(remainingCapacity[legOne], remainingCapacity[legTwo]));
-            remainingCapacity[legOne] -= carried;
-            remainingCapacity[legTwo] -= carried;
-            loads.Add(new ItineraryLoad(itinerary, demand, carried));
+            var (itinerary, demand) = served[k];
+            carried[k] = (long)Math.Floor(demand * itinerary.Legs.Min(leg => shareByRoute[leg]));
+
+            foreach (var leg in itinerary.Legs)
+            {
+                remainingCapacity[leg] -= carried[k];
+            }
         }
 
-        foreach (var itinerary in unserved)
+        // Fill what the shares left empty, in the old priority order.
+        var fillOrder = Enumerable.Range(0, served.Count)
+            .OrderBy(k => served[k].Itinerary.Kind == ItineraryKind.Nonstop ? 0 : 1)
+            .ThenByDescending(k => served[k].Itinerary.Kind == ItineraryKind.Nonstop ? 0 : served[k].Demand)
+            .ThenBy(k => served[k].Itinerary.Origin.Id, StringComparer.Ordinal)
+            .ThenBy(k => served[k].Itinerary.Destination.Id, StringComparer.Ordinal);
+
+        foreach (var k in fillOrder)
         {
-            var demand = demandModel.ForPair(itinerary.Origin, itinerary.Destination).PassengersPerQuarter;
-            loads.Add(new ItineraryLoad(itinerary, demand, 0));
+            var (itinerary, demand) = served[k];
+            var extra = Math.Min(demand - carried[k], itinerary.Legs.Min(leg => remainingCapacity[leg]));
+
+            if (extra <= 0)
+            {
+                continue;
+            }
+
+            carried[k] += extra;
+            foreach (var leg in itinerary.Legs)
+            {
+                remainingCapacity[leg] -= extra;
+            }
+        }
+
+        // Whoever is still unseated was turned away by their tightest leg.
+        var turnedAwayByRoute = routes.ToDictionary(r => r, _ => 0L);
+        for (var k = 0; k < served.Count; k++)
+        {
+            var (itinerary, demand) = served[k];
+            if (demand > carried[k])
+            {
+                var binding = itinerary.Legs.OrderBy(leg => remainingCapacity[leg]).ThenBy(leg => shareByRoute[leg]).First();
+                turnedAwayByRoute[binding] += demand - carried[k];
+            }
+        }
+
+        var loads = new List<ItineraryLoad>();
+        var servedIndex = 0;
+        foreach (var itinerary in itineraries)
+        {
+            if (itinerary.Kind == ItineraryKind.Unserved)
+            {
+                loads.Add(new ItineraryLoad(itinerary, demandModel.ForPair(itinerary.Origin, itinerary.Destination).PassengersPerQuarter, 0));
+                continue;
+            }
+
+            loads.Add(new ItineraryLoad(itinerary, served[servedIndex].Demand, carried[servedIndex]));
+            servedIndex++;
         }
 
         var routeUsage = routes
             .OrderBy(r => r.Origin.Id, StringComparer.Ordinal)
             .ThenBy(r => r.Destination.Id, StringComparer.Ordinal)
-            .Select(r => new RouteCapacityUsage(r, r.SeatsPerQuarter, r.SeatsPerQuarter - remainingCapacity[r]))
+            .Select(r => new RouteCapacityUsage(r, r.SeatsPerQuarter, r.SeatsPerQuarter - remainingCapacity[r], turnedAwayByRoute[r]))
             .ToList();
 
         return new NetworkPlan(loads, routeUsage);

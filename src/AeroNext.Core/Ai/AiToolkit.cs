@@ -1299,26 +1299,34 @@ public static class AiToolkit
     /// The estimated quarterly profit one more aircraft would add to an
     /// existing route: the extra passengers it would carry, at the route's
     /// own fare, less that aircraft's own operating and salary cost (and a
-    /// lease fee when requiresLease). Demand follows EstimatedRealProfit's
-    /// assumption - an even split of the pair with every rival on it - but
-    /// never below what the route already carries, and only for a route
-    /// that's full: one with empty seats (from rivals or thin demand) gains
-    /// nothing from more. Extra passengers are whatever the added seats can
-    /// take beyond today's real load. A route with no unmet demand gains no
-    /// passengers, so the aircraft's cost makes this negative.
+    /// lease fee when requiresLease). Only a full route gains passengers:
+    /// one with empty seats (from rivals or thin demand) gains nothing from
+    /// more.
+    ///
+    /// The extra passengers are the ones this route turned away last
+    /// quarter (LastQuarterTurnedAwayByRoute - local passengers and
+    /// connecting ones for whom this leg was the full one, so a hub leg's
+    /// overflow connections count; docs/CONNECTING_PASSENGERS_DESIGN.md),
+    /// split evenly with every rival on the pair as EstimatedRealProfit
+    /// assumes, up to the added seats. Without that record (a caller that
+    /// never supplied it) it falls back to the pair's own local demand the
+    /// same way. A route with no unmet demand gains no passengers, so the
+    /// aircraft's cost makes this negative.
     /// </summary>
     public static Money MarginalProfitOfAnotherAircraft(StrategyContext context, Route route, bool requiresLease)
     {
         var pair = context.DemandModel.ForPair(route.Origin, route.Destination);
         var currentCarried = BestAvailableCarried(route, Math.Min(pair.PassengersPerQuarter, route.SeatsPerQuarter), context);
-        var rivalPresence = context.RivalPresenceByPairKey?.GetValueOrDefault(QuarterEngine.NormalizedPairKey(route.Origin, route.Destination)) ?? 0;
-        // A route not filling the seats it has isn't short of seats - its
-        // real load already shows what it can capture.
-        var assumedCaptured = currentCarried < route.SeatsPerQuarter
-            ? currentCarried
-            : Math.Max(currentCarried, pair.PassengersPerQuarter / (rivalPresence + 1));
-        var grown = route with { AircraftCount = route.AircraftCount + 1 };
-        var extraCarried = Math.Max(0, Math.Min(assumedCaptured, grown.SeatsPerQuarter) - currentCarried);
+        var pairKey = QuarterEngine.NormalizedPairKey(route.Origin, route.Destination);
+        var rivalPresence = context.RivalPresenceByPairKey?.GetValueOrDefault(pairKey) ?? 0;
+        var addedSeats = (route with { AircraftCount = route.AircraftCount + 1 }).SeatsPerQuarter - route.SeatsPerQuarter;
+
+        var unmet = currentCarried < route.SeatsPerQuarter
+            ? 0
+            : context.LastQuarterTurnedAwayByRoute is { } turnedAway
+                ? turnedAway.GetValueOrDefault(pairKey) / (rivalPresence + 1)
+                : Math.Max(0, pair.PassengersPerQuarter / (rivalPresence + 1) - currentCarried);
+        var extraCarried = Math.Min(unmet, addedSeats);
 
         return FareCalculator.EstimatedProfit(route with { AircraftCount = 1 }, extraCarried, includeLeaseFee: requiresLease);
     }

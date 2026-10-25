@@ -168,4 +168,30 @@ public class GrowExistingRouteTests
         Assert.True(AiToolkit.MarginalProfitOfAnotherAircraft(context, route, requiresLease: false).Cents < 0);
         Assert.True(AiToolkit.MarginalProfitOfAnotherAircraft(context with { LastQuarterSeatsCarriedByRoute = null }, route, requiresLease: false).Cents > 0);
     }
+
+    [Fact]
+    public void MarginalProfit_CountsWhatTheRouteTurnedAway_ConnectionsIncluded_SplitWithRivals()
+    {
+        // home-near is full. With nothing turned away an extra aircraft
+        // carries no one; with a full plane's worth of passengers turned
+        // away (connections included) it pays; a rival on the pair halves
+        // what it can expect.
+        var route = new Route(Home, Near, X, 1);
+        var key = QuarterEngine.NormalizedPairKey(Home, Near);
+        var full = Context(new[] { route }, Fleet(new[] { route })) with
+        {
+            LastQuarterSeatsCarriedByRoute = new Dictionary<(string, string), long> { [key] = route.SeatsPerQuarter },
+        };
+        Money Gain(long turnedAway, int rivals = 0) => AiToolkit.MarginalProfitOfAnotherAircraft(full with
+        {
+            LastQuarterTurnedAwayByRoute = new Dictionary<(string, string), long> { [key] = turnedAway },
+            RivalPresenceByPairKey = new Dictionary<(string, string), int> { [key] = rivals },
+        }, route, requiresLease: false);
+
+        var oneAircraft = route.SeatsPerQuarter;
+        Assert.True(Gain(0).Cents < 0);
+        Assert.True(Gain(oneAircraft).Cents > 0);
+        Assert.Equal(Gain(oneAircraft * 10), Gain(oneAircraft)); // never more than the added seats
+        Assert.Equal(Gain(oneAircraft / 2), Gain(oneAircraft, rivals: 1));
+    }
 }
