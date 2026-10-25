@@ -1296,6 +1296,119 @@ public static class AiToolkit
     }
 
     /// <summary>
+    /// The estimated quarterly profit one more aircraft would add to an
+    /// existing route: the extra passengers it would carry, at the route's
+    /// own fare, less that aircraft's own operating and salary cost (and a
+    /// lease fee when requiresLease). Demand follows EstimatedRealProfit's
+    /// assumption - an even split of the pair with every rival on it - but
+    /// never below what the route already carries, and only for a route
+    /// that's full: one with empty seats (from rivals or thin demand) gains
+    /// nothing from more. Extra passengers are whatever the added seats can
+    /// take beyond today's real load. A route with no unmet demand gains no
+    /// passengers, so the aircraft's cost makes this negative.
+    /// </summary>
+    public static Money MarginalProfitOfAnotherAircraft(StrategyContext context, Route route, bool requiresLease)
+    {
+        var pair = context.DemandModel.ForPair(route.Origin, route.Destination);
+        var currentCarried = BestAvailableCarried(route, Math.Min(pair.PassengersPerQuarter, route.SeatsPerQuarter), context);
+        var rivalPresence = context.RivalPresenceByPairKey?.GetValueOrDefault(QuarterEngine.NormalizedPairKey(route.Origin, route.Destination)) ?? 0;
+        // A route not filling the seats it has isn't short of seats - its
+        // real load already shows what it can capture.
+        var assumedCaptured = currentCarried < route.SeatsPerQuarter
+            ? currentCarried
+            : Math.Max(currentCarried, pair.PassengersPerQuarter / (rivalPresence + 1));
+        var grown = route with { AircraftCount = route.AircraftCount + 1 };
+        var extraCarried = Math.Max(0, Math.Min(assumedCaptured, grown.SeatsPerQuarter) - currentCarried);
+
+        return FareCalculator.EstimatedProfit(route with { AircraftCount = 1 }, extraCarried, includeLeaseFee: requiresLease);
+    }
+
+    /// <summary>
+    /// Shared "grow an existing route" step (Balanced Growth, Network
+    /// Optimizer, Rapid Expansion), 2026-10-24. Idle aircraft come first:
+    /// among routes that can take another aircraft right now (a free slot at
+    /// every endpoint and stop, not shrunk within GrowthCooldownQuarters),
+    /// those flying a type this airline has idle are ranked by
+    /// MarginalProfitOfAnotherAircraft, and the best profitable one gets an
+    /// idle unit. Only when no idle unit has a profitable home is a new
+    /// aircraft bought - or, when buying isn't comfortably affordable,
+    /// leased (its fee counted) - for the best profitable route.
+    /// regionsNotYetLed keeps the win-condition tier FindBestPerformingRoute
+    /// had: a route touching a region not yet led ranks first.
+    ///
+    /// Replaces each strategy's single-candidate pick, which ranked routes
+    /// by load factor - nearly every route sits at 100%, so the alphabetical
+    /// tie-break chose - and did nothing whenever that one route was
+    /// slot-blocked. Traced on 10 Hard games: 83% of grow decisions did
+    /// nothing while 26 of an airline's 46 routes could take another
+    /// aircraft and ~10 aircraft sat idle.
+    /// </summary>
+    /// <param name="cashComfortMultiplier">How many times an aircraft's price the airline must hold before buying one outright - each strategy's own existing threshold.</param>
+    public static void GrowExistingRoute(
+        StrategyContext context, List<QuarterOrder> orders, ref int spent,
+        HashSet<int> reservedUnitIds, Dictionary<string, int> slotsReservedByCity, Dictionary<string, int> citySpendReservedByCity,
+        int cashComfortMultiplier, IReadOnlySet<Region>? regionsNotYetLed = null)
+    {
+        if (spent + 1 > context.ActionCap)
+        {
+            return;
+        }
+
+        var excluded = RecentlyShrunkPairKeys(context, GrowthCooldownQuarters);
+        var growable = context.CurrentRoutes
+            .Where(r => !excluded.Contains(QuarterEngine.NormalizedPairKey(r.Origin, r.Destination))
+                && BaselineAi.HasSlotAtEveryGateway(r.Origin, r.Destination, context.AvailableSlotsByCity, slotsReservedByCity, r.Stops)
+                && HasRoomAtEveryCity(r.Origin, r.Destination, context.CityWideSlotsRemaining, citySpendReservedByCity))
+            .ToList();
+
+        Route? Best(IEnumerable<Route> candidates, bool requiresLease) => candidates
+            .Select(r => (Route: r, Gain: MarginalProfitOfAnotherAircraft(context, r, requiresLease)))
+            .Where(x => x.Gain.Cents > 0)
+            .OrderByDescending(x => regionsNotYetLed is not null && (regionsNotYetLed.Contains(x.Route.Origin.Region) || regionsNotYetLed.Contains(x.Route.Destination.Region)))
+            .ThenByDescending(x => x.Gain.Cents)
+            .ThenBy(x => x.Route.Origin.Id, StringComparer.Ordinal)
+            .ThenBy(x => x.Route.Destination.Id, StringComparer.Ordinal)
+            .Select(x => x.Route)
+            .FirstOrDefault();
+
+        var idleUnits = context.OwnFleet.Idle.Where(u => !reservedUnitIds.Contains(u.Id)).OrderBy(u => u.Id).ToList();
+        var forIdle = Best(growable.Where(r => idleUnits.Any(u => u.Type.Id == r.Aircraft.Id)), requiresLease: false);
+
+        if (forIdle is not null)
+        {
+            orders.Add(new RouteOrder(forIdle.Origin, forIdle.Destination, forIdle.Aircraft, forIdle.Stops));
+            reservedUnitIds.Add(idleUnits.First(u => u.Type.Id == forIdle.Aircraft.Id).Id);
+            BaselineAi.ReserveSlots(forIdle.Origin, forIdle.Destination, slotsReservedByCity, forIdle.Stops);
+            ReserveCityWideSlots(forIdle.Origin, forIdle.Destination, citySpendReservedByCity);
+            spent += 1;
+            return;
+        }
+
+        var toBuy = context.AvailableCash is null ? null : Best(growable.Where(r =>
+            (context.PurchasableTypes is null || context.PurchasableTypes.Contains(r.Aircraft))
+            && FinancialState.CanAfford(context.AvailableCash.Value, r.Aircraft.Cost * cashComfortMultiplier)), requiresLease: false);
+
+        if (toBuy is not null)
+        {
+            // Delivered idle; a later quarter's idle-first pass places it.
+            orders.Add(new AircraftOrder(toBuy.Aircraft, Quantity: 1));
+            spent += 1;
+            return;
+        }
+
+        var toLease = Best(growable.Where(r => context.LeasableTypes is null || context.LeasableTypes.Contains(r.Aircraft)), requiresLease: true);
+
+        if (toLease is not null)
+        {
+            // Leasing resolves next quarter (two-phase,
+            // docs/AIRCRAFT_ACQUISITION_ROADMAP.md) - 1 action, no paired
+            // RouteOrder; the unit shows up idle and is placed then.
+            orders.Add(new LeaseAircraftOrder(toLease.Aircraft, Quantity: 1));
+            spent += 1;
+        }
+    }
+
+    /// <summary>
     /// Marketing redesign (docs/OPEN_WORK.md, 2026-09-24): proposes the
     /// single marketing campaign - one route-targeted RouteMarketingOrder,
     /// or one NetworkMarketingOrder - with the largest estimated net gain

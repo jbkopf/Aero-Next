@@ -217,10 +217,13 @@ public class MultiStopAiTests
     {
         // One full, profitable multi-stop route, a spare aircraft of its type,
         // and a free slot at the stop: each growth step must ask for the
-        // same stops, or the engine rejects the order.
+        // same stops, or the engine rejects the order. Ten times the usual
+        // demand, so a second aircraft is clearly worth flying
+        // (AiToolkit.GrowExistingRoute only adds one when it pays).
         var route = new Route(Home, Far, Mid, 1, Stops: StopList.Of(Stop));
         var fleet = FleetLedger.Assign(IdleFleet(Mid, Mid), 1, "hom-far");
-        var context = MakeContext(new Dictionary<string, int> { ["stp"] = 1 }, fleet, new[] { route }) with { QuarterNumber = 60 };
+        var context = MakeContext(new Dictionary<string, int> { ["stp"] = 1 }, fleet, new[] { route })
+            with { QuarterNumber = 60, DemandModel = new GravityDemandModel(scale: 7.5e7) };
 
         foreach (IAiStrategy strategy in new IAiStrategy[] { new RapidExpansionStrategy(), new NetworkOptimizerStrategy(), new BalancedGrowthStrategy() })
         {

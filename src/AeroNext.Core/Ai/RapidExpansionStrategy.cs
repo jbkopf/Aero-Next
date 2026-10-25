@@ -222,8 +222,10 @@ public sealed class RapidExpansionStrategy : IAiStrategy
             }
         }
 
-        // 2. Grow the highest-demand existing route - runs second here,
-        // so it must exclude whatever step 1 already reserved. M55:
+        // 2. Grow an existing route (AiToolkit.GrowExistingRoute: idle
+        // aircraft first, buy or lease only when none has a profitable
+        // home) - runs second here, so it must exclude whatever step 1
+        // already reserved. M55:
         // also excludes any route shrunk within GrowthCooldownQuarters -
         // the real fix for the oscillation M43 traced (shrinking a route
         // mechanically raises its own load factor, so without this a
@@ -240,48 +242,9 @@ public sealed class RapidExpansionStrategy : IAiStrategy
         // this guard - a troubled network should spend its remaining
         // budget reaching a new region, not reactively topping up a
         // route that might not even be one.
-        var bestExisting = AiToolkit.NetworkTroubleRatio(context) <= 0.0
-            ? FindBestExistingRouteByDemand(context, AiToolkit.RecentlyShrunkPairKeys(context, AiToolkit.GrowthCooldownQuarters))
-            : null;
-        if (bestExisting is not null && spent + 1 <= context.ActionCap
-            && BaselineAi.HasSlotAtEveryGateway(bestExisting.Origin, bestExisting.Destination, context.AvailableSlotsByCity, slotsReservedByCity, bestExisting.Stops)
-            && AiToolkit.HasRoomAtEveryCity(bestExisting.Origin, bestExisting.Destination, context.CityWideSlotsRemaining, citySpendReservedByCity))
+        if (AiToolkit.NetworkTroubleRatio(context) <= 0.0)
         {
-            var idleUnit = context.OwnFleet.Idle
-                .Where(u => u.Type.Id == bestExisting.Aircraft.Id && !reservedUnitIds.Contains(u.Id))
-                .OrderBy(u => u.Id)
-                .FirstOrDefault();
-
-            if (idleUnit is not null)
-            {
-                orders.Add(new RouteOrder(bestExisting.Origin, bestExisting.Destination, bestExisting.Aircraft, bestExisting.Stops));
-                reservedUnitIds.Add(idleUnit.Id);
-                BaselineAi.ReserveSlots(bestExisting.Origin, bestExisting.Destination, slotsReservedByCity, bestExisting.Stops);
-                AiToolkit.ReserveCityWideSlots(bestExisting.Origin, bestExisting.Destination, citySpendReservedByCity);
-                spent += 1;
-            }
-            else if (context.AvailableCash is not null && FinancialState.CanAfford(context.AvailableCash.Value, ComfortableOrderCost(bestExisting.Aircraft))
-                && (context.PurchasableTypes is null || context.PurchasableTypes.Contains(bestExisting.Aircraft)))
-            {
-                orders.Add(new AircraftOrder(bestExisting.Aircraft, Quantity: 1));
-                spent += 1;
-            }
-            else if (context.LeasableTypes is null || context.LeasableTypes.Contains(bestExisting.Aircraft))
-            {
-                // Leasing resolves next quarter now (two-phase,
-                // docs/AIRCRAFT_ACQUISITION_ROADMAP.md) - submit it alone,
-                // 1 action, no paired RouteOrder. Once delivered it shows
-                // up idle and a later quarter's own re-evaluation picks it
-                // up via this same step's idleUnit branch above.
-                orders.Add(new LeaseAircraftOrder(bestExisting.Aircraft, Quantity: 1));
-                spent += 1;
-            }
-            // else: this route's own type is no longer legally
-            // purchasable or leasable for this home city right now
-            // (geopolitical-aircraft-restrictions follow-up,
-            // docs/AI_ACQUISITION_AWARENESS_GAPS_ROADMAP.md) - do nothing
-            // this quarter rather than submit an order QuarterEngine
-            // would reject anyway.
+            AiToolkit.GrowExistingRoute(context, orders, ref spent, reservedUnitIds, slotsReservedByCity, citySpendReservedByCity, CashComfortMultiplier);
         }
 
         // 3. Negotiate for the best gateway, cross-region-reachable ones
@@ -310,30 +273,6 @@ public sealed class RapidExpansionStrategy : IAiStrategy
     }
 
     private static Money ComfortableOrderCost(AircraftType type) => type.Cost * CashComfortMultiplier;
-
-    /// <summary>
-    /// Network-profitability follow-up: replaces
-    /// BaselineAi.FindBestPerformingRoute's own real, *observed*
-    /// load-factor ranking for this strategy specifically - the user's
-    /// own direct request to de-emphasize individual route profitability
-    /// for growth decisions, matching step 1's own demand-based ranking
-    /// (AiToolkit.EffectiveDemandScore) instead of a second, different
-    /// metric. Kept private here, not extracted to AiToolkit - no second
-    /// caller wants this shape yet. Same excludePairKeys contract
-    /// FindBestPerformingRoute already had (RecentlyShrunkPairKeys, M55's
-    /// own oscillation fix) - same safety, new metric.
-    /// </summary>
-    private static Route? FindBestExistingRouteByDemand(StrategyContext context, IReadOnlySet<(string, string)> excludePairKeys)
-    {
-        var shareByCityId = NetworkPlanner.ComputeRouteShareByCityId(context.CurrentRoutes);
-
-        return context.CurrentRoutes
-            .Where(r => !excludePairKeys.Contains(QuarterEngine.NormalizedPairKey(r.Origin, r.Destination)))
-            .OrderByDescending(r => AiToolkit.EffectiveDemandScore(context.DemandModel.ForPair(r.Origin, r.Destination), shareByCityId))
-            .ThenBy(r => r.Origin.Id, StringComparer.Ordinal)
-            .ThenBy(r => r.Destination.Id, StringComparer.Ordinal)
-            .FirstOrDefault();
-    }
 
     /// <summary>
     /// Mirrors BaselineAi.FindBestUnservedPairUsingIdleFleet's shape, but

@@ -184,3 +184,28 @@ at 0-1%. Because capacity now follows in-game demand, the over-weighted
 European hubs (and Dubai's scripted demand) get the most of it, which
 lines up with Europe's win surge.
 
+## Why the extra capacity goes unused (2026-10-24)
+
+Traced the AI's grow-an-existing-route step. It picked one route by load
+factor (alphabetical among the ~100%-full ties) and did nothing when that
+route was slot-blocked (83% of decisions), leaving ~10 aircraft idle.
+Replaced in all three growth strategies by `AiToolkit.GrowExistingRoute`
+(user rule: idle aircraft first onto a route where one more pays; buy or
+lease only when no idle aircraft has a profitable home), with
+`MarginalProfitOfAnotherAircraft` estimating the extra aircraft's profit.
+
+Result (2x300 Hard, seeds 1 / 301, vs the damped build): aircraft per
+route 1.01 -> 1.10, aircraft added to existing routes 0.02 -> 0.15-0.3 a
+quarter, idle aircraft 19.5 -> 17; wins at quarter 115 / 121 (was 132 /
+130); games with a bankruptcy 18 / 21 (was 14 / 11), South America's
+bankrupt seats 17 / 17 (was 11 / 7). Load factors stay 98-100% and
+connections ~0%.
+
+Why growth stays small: per route, the demand the AI would gain is
+modest. Full routes' demand is a median 1.45x their seats (p75 2.1x), so a
+second aircraft expects a median 26% load (p75 43%) against a 67%
+break-even load factor (fares sit at 1.15x default after the AI's own
+raises). The aggregate "demand is twice capacity" is spread across many
+routes in less-than-a-plane chunks. On a hub leg that leftover is what
+connecting passengers would fill - but the estimate ignores connecting
+demand and the allocator only gives connections leftover seats.

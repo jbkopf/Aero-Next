@@ -185,53 +185,11 @@ public sealed class BalancedGrowthStrategy : IAiStrategy
 
         // Reinforce what's already there first - the same "proven demand
         // beats an open bet" priority NetworkOptimizerStrategy's own step
-        // 2 already uses, real observed load factor rather than any
-        // estimate.
-        var bestExisting = BaselineAi.FindBestPerformingRoute(
-            context.CurrentRoutes, context.DemandModel,
-            excludePairKeys: AiToolkit.RecentlyShrunkPairKeys(context, AiToolkit.GrowthCooldownQuarters),
-            lastQuarterSeatsCarriedByRoute: context.LastQuarterSeatsCarriedByRoute,
-            regionsNotYetLed: AiToolkit.RegionsNotYetLed(context));
-        if (bestExisting is not null && spent + 1 <= context.ActionCap
-            && BaselineAi.HasSlotAtEveryGateway(bestExisting.Origin, bestExisting.Destination, context.AvailableSlotsByCity, slotsReservedByCity, bestExisting.Stops)
-            && AiToolkit.HasRoomAtEveryCity(bestExisting.Origin, bestExisting.Destination, context.CityWideSlotsRemaining, citySpendReservedByCity))
-        {
-            var idleUnit = context.OwnFleet.Idle
-                .Where(u => u.Type.Id == bestExisting.Aircraft.Id && !reservedUnitIds.Contains(u.Id))
-                .OrderBy(u => u.Id)
-                .FirstOrDefault();
-
-            if (idleUnit is not null)
-            {
-                orders.Add(new RouteOrder(bestExisting.Origin, bestExisting.Destination, bestExisting.Aircraft, bestExisting.Stops));
-                reservedUnitIds.Add(idleUnit.Id);
-                BaselineAi.ReserveSlots(bestExisting.Origin, bestExisting.Destination, slotsReservedByCity, bestExisting.Stops);
-                AiToolkit.ReserveCityWideSlots(bestExisting.Origin, bestExisting.Destination, citySpendReservedByCity);
-                spent += 1;
-            }
-            else if (context.AvailableCash is not null && FinancialState.CanAfford(context.AvailableCash.Value, BaselineAi.ComfortableOrderCost(bestExisting.Aircraft))
-                && (context.PurchasableTypes is null || context.PurchasableTypes.Contains(bestExisting.Aircraft)))
-            {
-                orders.Add(new AircraftOrder(bestExisting.Aircraft, Quantity: 1));
-                spent += 1;
-            }
-            else if (context.LeasableTypes is null || context.LeasableTypes.Contains(bestExisting.Aircraft))
-            {
-                // Leasing resolves next quarter now (two-phase,
-                // docs/AIRCRAFT_ACQUISITION_ROADMAP.md) - submit it alone,
-                // 1 action, no paired RouteOrder. Once delivered it shows
-                // up idle and a later quarter's own re-evaluation picks it
-                // up via this same step's idleUnit branch above.
-                orders.Add(new LeaseAircraftOrder(bestExisting.Aircraft, Quantity: 1));
-                spent += 1;
-            }
-            // else: this route's own type is no longer legally
-            // purchasable or leasable for this home city right now
-            // (geopolitical-aircraft-restrictions follow-up,
-            // docs/AI_ACQUISITION_AWARENESS_GAPS_ROADMAP.md) - do nothing
-            // this quarter rather than submit an order QuarterEngine would
-            // reject anyway.
-        }
+        // 2 uses: idle aircraft onto the existing route they'd earn most
+        // on, buying or leasing only when no idle one has a profitable
+        // home (AiToolkit.GrowExistingRoute).
+        AiToolkit.GrowExistingRoute(context, orders, ref spent, reservedUnitIds, slotsReservedByCity, citySpendReservedByCity,
+            BaselineAi.AircraftOrderCashComfortMultiplier, AiToolkit.RegionsNotYetLed(context));
 
         // Case 1: reach a region not yet touched, chosen by real profit.
         if (touchedRegions.Count < targetRegionCount && spent + 1 <= context.ActionCap)

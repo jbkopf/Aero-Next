@@ -581,7 +581,7 @@ public class RapidExpansionStrategyTests
     }
 
     [Fact]
-    public void DecideOrders_GrowExisting_PicksHigherDemandRoute_NotHigherLoadFactorOne()
+    public void DecideOrders_GrowExisting_SkipsAHalfEmptyRoute_EvenWithFarHigherDemand()
     {
         // Network-profitability follow-up: home-near is capacity-matched
         // to smallAircraft (100% load factor, real numbers verified via
@@ -590,8 +590,11 @@ public class RapidExpansionStrategyTests
         // higher-weight city with a bigger aircraft whose capacity
         // outstrips even its own much larger demand (69.21% load factor,
         // demand 971,770 - over 6x home-near's) - the old real-load-factor
-        // ranking would have picked home-near; the new demand-based one
-        // picks home-far instead. EraAvailableTypes empty and no idle
+        // ranking would have picked home-near; a demand-based one picked
+        // home-far. Growth now goes only where another aircraft pays
+        // (AiToolkit.GrowExistingRoute): home-far's seats are 31% empty, so
+        // more of them earn nothing (-$110.6M), while full home-near's
+        // extra aircraft earns $110.5k - home-near wins. EraAvailableTypes empty and no idle
         // fleet neutralize step 1 entirely (no idle unit, no fallback
         // aircraft to lease/order with), and no cash forces the lease
         // fallback - growing an existing route always leases the exact
@@ -618,7 +621,7 @@ public class RapidExpansionStrategyTests
 
         Assert.Empty(orders.OfType<RouteOrder>());
         var lease = Assert.Single(orders.OfType<LeaseAircraftOrder>());
-        Assert.Equal("big", lease.Type.Id); // home-far's own type, confirming it (not home-near) won
+        Assert.Equal("small", lease.Type.Id); // home-near's own type, confirming it (not home-far) won
     }
 
     [Fact]

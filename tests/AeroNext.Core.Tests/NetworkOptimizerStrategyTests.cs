@@ -354,16 +354,16 @@ public class NetworkOptimizerStrategyTests
     }
 
     [Fact]
-    public void DecideOrders_GrowExisting_AlreadyLeadsEverywhereTouched_UnchangedFromPlainLoadFactorRanking()
+    public void DecideOrders_GrowExisting_AlreadyLeadsEverywhereTouched_RanksByTheExtraAircraftsProfit()
     {
         // Win-condition-awareness follow-up, the degenerate/no-op case:
         // both regions already led means the region tier can never
-        // distinguish these two candidates, so the plain real-load-factor
-        // ranking decides - exactly today's pre-existing behavior,
-        // reproduced directly rather than only argued by inspection.
-        // Same fixture as the test above, just with EastAsia also marked
-        // led - highLf's own better load factor (100% vs. 93.34%) should
-        // now win. Distinct-but-identical types again, so the winner
+        // distinguish these two candidates, so the profit one more
+        // aircraft would add decides (AiToolkit.GrowExistingRoute). Same
+        // fixture as the test above, just with EastAsia also marked led.
+        // Both routes are full; lowLf's longer, cross-region pair carries
+        // the higher fare, so its extra aircraft earns more ($688k vs
+        // $431k a quarter) and wins. Distinct-but-identical types again, so the winner
         // stays observable via the leased type now that leasing no longer
         // produces a same-quarter RouteOrder (two-phase,
         // docs/AIRCRAFT_ACQUISITION_ROADMAP.md).
@@ -386,7 +386,7 @@ public class NetworkOptimizerStrategyTests
 
         Assert.Empty(orders.OfType<RouteOrder>());
         var lease = Assert.Single(orders.OfType<LeaseAircraftOrder>());
-        Assert.Equal("t-highlf", lease.Type.Id);
+        Assert.Equal("t-lowlf", lease.Type.Id);
     }
 
     [Fact]
@@ -399,10 +399,11 @@ public class NetworkOptimizerStrategyTests
         // under the old, solo-only ranking this is the unambiguous growth
         // winner. But its own real, competitively-resolved carried figure
         // (LastQuarterSeatsCarriedByRoute, set here to 10% of capacity)
-        // makes it a real loser (profit -$1,249,001.00). home-good has a
-        // lower solo load factor (93.34%, no real-data override - real
-        // equals solo) but is genuinely profitable (+$489,735.48) at that
-        // real figure. actionCap 2 lets the lease+route fallback (nothing
+        // makes it a real loser (profit -$1,249,001.00) with nine tenths
+        // of its seats empty, so another aircraft there earns nothing.
+        // home-good (weight 40, so its demand fills its seats - no
+        // real-data override, real equals solo) is full and profitable,
+        // so its extra aircraft pays. actionCap 2 lets the lease+route fallback (nothing
         // idle) fully claim the budget on whichever pair step 2 picks,
         // so no NegotiationOrder or step-3 new-pair order can appear
         // afterward regardless of what candidates exist elsewhere.
@@ -412,7 +413,7 @@ public class NetworkOptimizerStrategyTests
         // (two-phase, docs/AIRCRAFT_ACQUISITION_ROADMAP.md).
         var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
         var bad = MakeCity("bad", Region.NorthAmerica, 1, 1, 200);
-        var good = MakeCity("good", Region.NorthAmerica, 2, 2, 8);
+        var good = MakeCity("good", Region.NorthAmerica, 2, 2, 40);
         var cities = new[] { home, bad, good };
         var badAircraft = new AircraftType("t-bad", "Test", Seats: 100, RangeKm: 10_000, CruiseSpeedKmh: 900, CostPerAvailableSeatKm: 0.1);
         var goodAircraft = new AircraftType("t-good", "Test", Seats: 100, RangeKm: 10_000, CruiseSpeedKmh: 900, CostPerAvailableSeatKm: 0.1);
