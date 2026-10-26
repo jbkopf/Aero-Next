@@ -8,7 +8,7 @@ public class MoneyTests
     [Fact]
     public void FromDollars_ConvertsToCents()
     {
-        Assert.Equal(150, Money.FromDollars(1_500).Cents);
+        Assert.Equal(150_000, Money.FromDollars(1_500).Cents);
     }
 
     [Fact]
