@@ -69,6 +69,30 @@ namespace AeroNext.Core.Ai;
 /// regression (Europe/EastAsia bankruptcy both rose); see Suitability's
 /// own doc comment below for the full story. Reverted; this strategy's
 /// own selection stays plain CashRatio.
+///
+/// Aircraft fit (2026-09-27): once the new-route searches stopped choosing
+/// routes that couldn't be opened (AiToolkit.CanOpenNow), this strategy
+/// finally grew real networks - and its acquisition step exposed a flaw it
+/// had always had: for a new route with nothing idle, it bought or leased
+/// the *longest-range* type available, whatever the route's demand. Large,
+/// expensive long-range aircraft on thin routes lost money badly - one such
+/// route could flip a young network from profit to a loss it couldn't
+/// survive (traced directly: a single route added ~$9.5M/quarter operating
+/// cost for ~$0.6M revenue). Now every acquirable type proposes its own
+/// best route (each screened by its own range and load factor), and the
+/// aircraft acquired for the winning route is the type that flies it most
+/// profitably; nothing is acquired if none would. Under the default
+/// cost-plus-30% fare, "profitable" means the aircraft is at least ~77%
+/// full. A first cut that kept the longest-range type as the route picker
+/// cut bankrupt airlines 19 -> 2 on 100 Hard-difficulty games (the two left
+/// were Papeete starts, a known structurally weak start). A network-level
+/// brake (no expansion while the network loses money) was tried alongside
+/// it and measured as adding nothing, so it wasn't kept. The cross-type
+/// version, on 2x300 Hard games (seeds 1 and 301) against the same code
+/// without it: games with a bankruptcy 51/55 -> 15/21, bankrupt airlines
+/// 56/61 -> 20/24; SouthWestAsia 24/25 -> 4/1, SouthAmerica 14/14 -> 0/2,
+/// NorthAmerica 5/9 -> 0/4. AustralAsia (9/8 -> 10/12) didn't move - its
+/// early bankruptcies are the weak-start problem, not aircraft fit.
 /// </summary>
 public sealed class RapidExpansionStrategy : IAiStrategy
 {
@@ -109,6 +133,7 @@ public sealed class RapidExpansionStrategy : IAiStrategy
         var citySpendReservedByCity = new Dictionary<string, int>();
         var spent = 0;
         var validOriginCityIds = AiToolkit.ValidOriginCityIds(context);
+        var stopPaths = new StopPathFinder(context.AllCities);
 
         // 1. New pair first, cross-region preferred - the inversion from
         // BaselineAi's own order. A gateway already won but not yet built
@@ -123,18 +148,32 @@ public sealed class RapidExpansionStrategy : IAiStrategy
         if (spent + 1 <= context.ActionCap)
         {
             var idleTypes = context.OwnFleet.Idle.Where(u => !reservedUnitIds.Contains(u.Id)).Select(u => u.Type).Distinct().ToList();
-            var idleBest = AiToolkit.FindBestUnservedPairTouchingWonSlot(context, reservedUnitIds)
-                ?? FindBestUnservedPairCrossRegionFirstUsingIdleFleet(context, idleTypes, validOriginCityIds);
+            // Both searches only return routes that can be opened right now
+            // (AiToolkit.CanOpenNow), so no separate slot/capacity check here.
+            //
+            // Multi-stop routes (docs/MULTI_STOP_ROUTES_DESIGN.md, Phase 3):
+            // a won gateway's own best pair only goes ahead if it's
+            // profitable (AiToolkit.EvaluateCandidate, the same check
+            // BalancedGrowthStrategy already applied). A won refuelling
+            // stop like Gander has almost no demand of its own; flying a
+            // lone leg there was the single largest early-game loss
+            // (676 routes, $2.6B a quarter across 600 games). The slot now
+            // waits for a multi-stop route through it, which the search
+            // below finds once the slot is held.
+            var wonSlot = AiToolkit.FindBestUnservedPairTouchingWonSlot(context, reservedUnitIds, slotsReservedByCity, citySpendReservedByCity);
+            var profitableWonSlot = wonSlot is null ? null : AiToolkit.EvaluateCandidate(context, reservedUnitIds, wonSlot.Value.Pair, wonSlot.Value.Aircraft);
+            var idleBest = profitableWonSlot is not null
+                ? (profitableWonSlot.Value.Pair, profitableWonSlot.Value.Aircraft, StopList.Empty)
+                : FindBestUnservedPairCrossRegionFirstAcrossTypes(context, idleTypes, validOriginCityIds, slotsReservedByCity, citySpendReservedByCity, stopPaths);
 
-            if (idleBest is not null && AiToolkit.TryOrientFromValidOrigin(idleBest.Value.Pair, validOriginCityIds, out var origin, out var destination)
-                && BaselineAi.HasSlotAtEveryGateway(origin, destination, context.AvailableSlotsByCity, slotsReservedByCity)
-                && AiToolkit.HasRoomAtEveryCity(origin, destination, context.CityWideSlotsRemaining, citySpendReservedByCity))
+            if (idleBest is not null && AiToolkit.TryOrientFromValidOrigin(idleBest.Value.Pair, validOriginCityIds, out var origin, out var destination))
             {
                 var aircraft = idleBest.Value.Aircraft;
+                var stops = AiToolkit.OrientStops(idleBest.Value.Pair, origin, idleBest.Value.Stops);
                 var idleUnit = context.OwnFleet.Idle.Where(u => u.Type.Id == aircraft.Id && !reservedUnitIds.Contains(u.Id)).OrderBy(u => u.Id).First();
-                orders.Add(new RouteOrder(origin, destination, aircraft));
+                orders.Add(new RouteOrder(origin, destination, aircraft, stops));
                 reservedUnitIds.Add(idleUnit.Id);
-                BaselineAi.ReserveSlots(origin, destination, slotsReservedByCity);
+                BaselineAi.ReserveSlots(origin, destination, slotsReservedByCity, stops);
                 AiToolkit.ReserveCityWideSlots(origin, destination, citySpendReservedByCity);
                 spent += 1;
             }
@@ -143,12 +182,22 @@ public sealed class RapidExpansionStrategy : IAiStrategy
                 // Geopolitical-aircraft-restrictions follow-up: nothing
                 // idle, so this candidate will end up bought or leased -
                 // the union of both stays legal for either branch below.
-                var bestAircraft = context.PurchasableOrEraTypes.Union(context.LeasableOrEraTypes)
-                    .OrderByDescending(a => a.RangeKm)
-                    .ThenBy(a => a.Id, StringComparer.Ordinal)
-                    .FirstOrDefault();
+                var acquirableTypes = context.PurchasableOrEraTypes.Union(context.LeasableOrEraTypes).ToList();
 
-                var bestUnserved = bestAircraft is null ? null : FindBestUnservedPairCrossRegionFirst(context, bestAircraft, validOriginCityIds);
+                // Every acquirable type proposes its own best route (each
+                // screened by its own range and capacity fit, cross-region
+                // first), and the aircraft actually acquired for the winner
+                // is whichever type flies it most profitably - nothing is
+                // acquired if no type would make it profitable. Taking the
+                // longest-range type outright put large, expensive aircraft
+                // on thin routes, one of which could flip a young network
+                // into losses on its own (see the class doc comment's
+                // "Aircraft fit" section).
+                var bestUnserved = FindBestUnservedPairCrossRegionFirstAcrossTypes(context, acquirableTypes, validOriginCityIds, slotsReservedByCity, citySpendReservedByCity, stopPaths)?.Pair;
+                var bestAircraft = bestUnserved is null
+                    ? null
+                    : BestFittingProfitableType(bestUnserved, acquirableTypes, stopPaths,
+                        stops => AiToolkit.CanOpenNow(context, bestUnserved, validOriginCityIds, slotsReservedByCity, citySpendReservedByCity, stops));
                 var oriented = bestUnserved is not null && AiToolkit.TryOrientFromValidOrigin(bestUnserved, validOriginCityIds, out var newOrigin, out var newDestination)
                     ? (Origin: newOrigin, Destination: newDestination)
                     : ((City Origin, City Destination)?)null;
@@ -159,9 +208,7 @@ public sealed class RapidExpansionStrategy : IAiStrategy
                     orders.Add(new AircraftOrder(bestAircraft, Quantity: 1));
                     spent += 1;
                 }
-                else if (bestAircraft is not null && oriented is not null && spent + 1 <= context.ActionCap
-                    && BaselineAi.HasSlotAtEveryGateway(oriented.Value.Origin, oriented.Value.Destination, context.AvailableSlotsByCity, slotsReservedByCity)
-                    && AiToolkit.HasRoomAtEveryCity(oriented.Value.Origin, oriented.Value.Destination, context.CityWideSlotsRemaining, citySpendReservedByCity))
+                else if (bestAircraft is not null && oriented is not null && spent + 1 <= context.ActionCap)
                 {
                     // Leasing resolves next quarter now (two-phase,
                     // docs/AIRCRAFT_ACQUISITION_ROADMAP.md) - submit it
@@ -175,8 +222,10 @@ public sealed class RapidExpansionStrategy : IAiStrategy
             }
         }
 
-        // 2. Grow the highest-demand existing route - runs second here,
-        // so it must exclude whatever step 1 already reserved. M55:
+        // 2. Grow an existing route (AiToolkit.GrowExistingRoute: idle
+        // aircraft first, buy or lease only when none has a profitable
+        // home) - runs second here, so it must exclude whatever step 1
+        // already reserved. M55:
         // also excludes any route shrunk within GrowthCooldownQuarters -
         // the real fix for the oscillation M43 traced (shrinking a route
         // mechanically raises its own load factor, so without this a
@@ -193,48 +242,9 @@ public sealed class RapidExpansionStrategy : IAiStrategy
         // this guard - a troubled network should spend its remaining
         // budget reaching a new region, not reactively topping up a
         // route that might not even be one.
-        var bestExisting = AiToolkit.NetworkTroubleRatio(context) <= 0.0
-            ? FindBestExistingRouteByDemand(context, AiToolkit.RecentlyShrunkPairKeys(context, AiToolkit.GrowthCooldownQuarters))
-            : null;
-        if (bestExisting is not null && spent + 1 <= context.ActionCap
-            && BaselineAi.HasSlotAtEveryGateway(bestExisting.Origin, bestExisting.Destination, context.AvailableSlotsByCity, slotsReservedByCity)
-            && AiToolkit.HasRoomAtEveryCity(bestExisting.Origin, bestExisting.Destination, context.CityWideSlotsRemaining, citySpendReservedByCity))
+        if (AiToolkit.NetworkTroubleRatio(context) <= 0.0)
         {
-            var idleUnit = context.OwnFleet.Idle
-                .Where(u => u.Type.Id == bestExisting.Aircraft.Id && !reservedUnitIds.Contains(u.Id))
-                .OrderBy(u => u.Id)
-                .FirstOrDefault();
-
-            if (idleUnit is not null)
-            {
-                orders.Add(new RouteOrder(bestExisting.Origin, bestExisting.Destination, bestExisting.Aircraft));
-                reservedUnitIds.Add(idleUnit.Id);
-                BaselineAi.ReserveSlots(bestExisting.Origin, bestExisting.Destination, slotsReservedByCity);
-                AiToolkit.ReserveCityWideSlots(bestExisting.Origin, bestExisting.Destination, citySpendReservedByCity);
-                spent += 1;
-            }
-            else if (context.AvailableCash is not null && FinancialState.CanAfford(context.AvailableCash.Value, ComfortableOrderCost(bestExisting.Aircraft))
-                && (context.PurchasableTypes is null || context.PurchasableTypes.Contains(bestExisting.Aircraft)))
-            {
-                orders.Add(new AircraftOrder(bestExisting.Aircraft, Quantity: 1));
-                spent += 1;
-            }
-            else if (context.LeasableTypes is null || context.LeasableTypes.Contains(bestExisting.Aircraft))
-            {
-                // Leasing resolves next quarter now (two-phase,
-                // docs/AIRCRAFT_ACQUISITION_ROADMAP.md) - submit it alone,
-                // 1 action, no paired RouteOrder. Once delivered it shows
-                // up idle and a later quarter's own re-evaluation picks it
-                // up via this same step's idleUnit branch above.
-                orders.Add(new LeaseAircraftOrder(bestExisting.Aircraft, Quantity: 1));
-                spent += 1;
-            }
-            // else: this route's own type is no longer legally
-            // purchasable or leasable for this home city right now
-            // (geopolitical-aircraft-restrictions follow-up,
-            // docs/AI_ACQUISITION_AWARENESS_GAPS_ROADMAP.md) - do nothing
-            // this quarter rather than submit an order QuarterEngine
-            // would reject anyway.
+            AiToolkit.GrowExistingRoute(context, orders, ref spent, reservedUnitIds, slotsReservedByCity, citySpendReservedByCity, CashComfortMultiplier);
         }
 
         // 3. Negotiate for the best gateway, cross-region-reachable ones
@@ -242,7 +252,14 @@ public sealed class RapidExpansionStrategy : IAiStrategy
         // back to a gateway with idle-expired contestable inventory when
         // no fully-unserved one remains, so this strategy can actually
         // reach that mechanic rather than only a human bidding by hand.
-        var bestGateway = FindBestUnservedGatewayCrossRegionFirst(context) ?? AiToolkit.FindBestIdleContestableGateway(context);
+        //
+        // Multi-stop routes (docs/MULTI_STOP_ROUTES_DESIGN.md, Phase 3): a
+        // refuelling stop its best profitable multi-stop route still needs
+        // comes first - bidding on what a real plan uses, rather than on
+        // whichever reachable gateway is biggest.
+        var bestGateway = FindStopNeededByBestMultiStopPlan(context, validOriginCityIds, slotsReservedByCity, citySpendReservedByCity, stopPaths)
+            ?? FindBestUnservedGatewayCrossRegionFirst(context)
+            ?? AiToolkit.FindBestIdleContestableGateway(context);
         AiToolkit.NegotiateOrBorrow(context, bestGateway, orders, ref spent);
 
         // 4. A marketing campaign, if one is estimated to pay for itself
@@ -258,58 +275,28 @@ public sealed class RapidExpansionStrategy : IAiStrategy
     private static Money ComfortableOrderCost(AircraftType type) => type.Cost * CashComfortMultiplier;
 
     /// <summary>
-    /// Network-profitability follow-up: replaces
-    /// BaselineAi.FindBestPerformingRoute's own real, *observed*
-    /// load-factor ranking for this strategy specifically - the user's
-    /// own direct request to de-emphasize individual route profitability
-    /// for growth decisions, matching step 1's own demand-based ranking
-    /// (AiToolkit.EffectiveDemandScore) instead of a second, different
-    /// metric. Kept private here, not extracted to AiToolkit - no second
-    /// caller wants this shape yet. Same excludePairKeys contract
-    /// FindBestPerformingRoute already had (RecentlyShrunkPairKeys, M55's
-    /// own oscillation fix) - same safety, new metric.
-    /// </summary>
-    private static Route? FindBestExistingRouteByDemand(StrategyContext context, IReadOnlySet<(string, string)> excludePairKeys)
-    {
-        var shareByCityId = NetworkPlanner.ComputeRouteShareByCityId(context.CurrentRoutes);
-
-        return context.CurrentRoutes
-            .Where(r => !excludePairKeys.Contains(QuarterEngine.NormalizedPairKey(r.Origin, r.Destination)))
-            .OrderByDescending(r => AiToolkit.EffectiveDemandScore(context.DemandModel.ForPair(r.Origin, r.Destination), shareByCityId))
-            .ThenBy(r => r.Origin.Id, StringComparer.Ordinal)
-            .ThenBy(r => r.Destination.Id, StringComparer.Ordinal)
-            .FirstOrDefault();
-    }
-
-    /// <summary>
     /// Mirrors BaselineAi.FindBestUnservedPairUsingIdleFleet's shape, but
     /// cross-region candidates outrank intra-region ones before demand is
-    /// even compared. Capacity-mismatch follow-up (docs/OPEN_WORK.md):
-    /// each type's own candidate now comes from
+    /// even compared. Each type's own candidate comes from
     /// <see cref="FindBestUnservedPairCrossRegionFirst"/>, which screens
-    /// out any pair that type's own capacity can't come close to filling
-    /// - deliberately scoped to idle-fleet reuse only (this method's one
-    /// caller), not the buy-new path below: trying every era-available
-    /// type there too was tried and reverted after a real 300-game sweep
-    /// - it let the strategy successfully afford and open routes far more
-    /// often (a cheaper, better-fitting type clears
-    /// <see cref="FinancialState.CanAfford"/> more easily than the single
-    /// biggest-range type the buy-new path has always tried), compounding
-    /// into real over-expansion for a strategy with no route cap by
-    /// design - a different failure mode than the one this fix targets,
-    /// and this class already carries several other measured-and-reverted
-    /// attempts at changing this strategy's own growth pace (see the
-    /// class doc comment). Buying new stays exactly as narrow-search as
-    /// it always was; only which pair the single tried type is allowed to
-    /// propose changed.
+    /// out any pair that type's own capacity can't come close to filling.
+    /// Used for both idle-fleet reuse and the acquisition path. The
+    /// acquisition path once searched only with the longest-range type,
+    /// because a 2026 attempt to search every type there over-expanded;
+    /// that attempt predated <see cref="BestFittingProfitableType"/> and
+    /// AiToolkit.CanOpenNow, and the search across every type was
+    /// re-measured with both in place (see the class doc comment's
+    /// "Aircraft fit" section).
     /// </summary>
-    private static (PairDemand Pair, AircraftType Aircraft)? FindBestUnservedPairCrossRegionFirstUsingIdleFleet(
-        StrategyContext context, IReadOnlyList<AircraftType> idleTypes, IReadOnlySet<string> validOriginCityIds)
+    private static (PairDemand Pair, AircraftType Aircraft, StopList Stops)? FindBestUnservedPairCrossRegionFirstAcrossTypes(
+        StrategyContext context, IReadOnlyList<AircraftType> types, IReadOnlySet<string> validOriginCityIds,
+        Dictionary<string, int> slotsReservedByCity, Dictionary<string, int> citySpendReservedByCity, StopPathFinder stopPaths)
     {
-        var candidates = idleTypes
+        var candidates = types
             .Distinct()
-            .Select(type => (Pair: FindBestUnservedPairCrossRegionFirst(context, type, validOriginCityIds), Aircraft: type))
-            .Where(c => c.Pair is not null)
+            .Select(type => (Found: FindBestUnservedPairCrossRegionFirst(context, type, validOriginCityIds, slotsReservedByCity, citySpendReservedByCity, stopPaths), Aircraft: type))
+            .Where(c => c.Found is not null)
+            .Select(c => (Pair: c.Found!.Value.Pair, c.Aircraft, c.Found!.Value.Stops))
             .ToList();
 
         if (candidates.Count == 0)
@@ -319,15 +306,17 @@ public sealed class RapidExpansionStrategy : IAiStrategy
 
         var shareByCityId = NetworkPlanner.ComputeRouteShareByCityId(context.CurrentRoutes);
 
+        var heldStopIds = HeldUnusedSlotCityIds(context);
         var best = candidates
-            .OrderByDescending(c => IsCrossRegion(c.Pair!, context))
-            .ThenByDescending(c => AiToolkit.EffectiveDemandScore(c.Pair!, shareByCityId))
-            .ThenBy(c => c.Pair!.Origin.Id, StringComparer.Ordinal)
-            .ThenBy(c => c.Pair!.Destination.Id, StringComparer.Ordinal)
+            .OrderByDescending(c => UsesHeldStop(c.Stops, heldStopIds))
+            .ThenByDescending(c => IsCrossRegion(c.Pair, context))
+            .ThenByDescending(c => AiToolkit.EffectiveDemandScore(c.Pair, shareByCityId))
+            .ThenBy(c => c.Pair.Origin.Id, StringComparer.Ordinal)
+            .ThenBy(c => c.Pair.Destination.Id, StringComparer.Ordinal)
             .ThenBy(c => c.Aircraft.Id, StringComparer.Ordinal)
             .First();
 
-        return (best.Pair!, best.Aircraft);
+        return (best.Pair, best.Aircraft, best.Stops);
     }
 
     /// <summary>
@@ -366,8 +355,23 @@ public sealed class RapidExpansionStrategy : IAiStrategy
     /// requires <paramref name="aircraft"/>'s own load factor on the pair
     /// to clear <see cref="MinLoadFactorForNewPair"/> - see that constant's
     /// own doc comment.
+    ///
+    /// Multi-stop routes (docs/MULTI_STOP_ROUTES_DESIGN.md, Phase 3): a
+    /// pair this aircraft can't fly nonstop is still a candidate if a path
+    /// of refuelling stops reaches it (<see cref="StopPathFinder"/>), with
+    /// its seats and costs taken from the route as flown, stops included,
+    /// and a free slot needed at every stop. Unlike a nonstop candidate, a
+    /// multi-stop one must also be profitable on its own: it ties up a
+    /// scarce chokepoint slot, and an unprofitable route through one is
+    /// the very loss this replaces. A candidate through a stop the airline
+    /// already holds an unused slot at ranks first - the multi-stop
+    /// counterpart of "build out a won gateway before chasing a new one":
+    /// a held slot left idle for LandingRightsBoard.IdleExpiryThreshold
+    /// quarters becomes open to rivals.
     /// </summary>
-    private static PairDemand? FindBestUnservedPairCrossRegionFirst(StrategyContext context, AircraftType aircraft, IReadOnlySet<string> validOriginCityIds)
+    private static (PairDemand Pair, StopList Stops)? FindBestUnservedPairCrossRegionFirst(
+        StrategyContext context, AircraftType aircraft, IReadOnlySet<string> validOriginCityIds,
+        Dictionary<string, int> slotsReservedByCity, Dictionary<string, int> citySpendReservedByCity, StopPathFinder stopPaths)
     {
         var served = context.CurrentRoutes
             .SelectMany(r => new[] { (r.Origin.Id, r.Destination.Id), (r.Destination.Id, r.Origin.Id) })
@@ -378,17 +382,116 @@ public sealed class RapidExpansionStrategy : IAiStrategy
         // about) - recomputed per aircraft type tried here rather than
         // threaded through as a parameter, for a small, contained change.
         var shareByCityId = NetworkPlanner.ComputeRouteShareByCityId(context.CurrentRoutes);
+        var heldStopIds = HeldUnusedSlotCityIds(context);
+
+        var best = context.DemandModel.AllPairs(context.AllCities)
+            .Where(p => !served.Contains((p.Origin.Id, p.Destination.Id)))
+            .Where(p => !recentlyClosed.Contains(QuarterEngine.NormalizedPairKey(p.Origin, p.Destination)))
+            .Where(p => validOriginCityIds.Contains(p.Origin.Id) || validOriginCityIds.Contains(p.Destination.Id))
+            .Select(p => (Pair: p, Stops: stopPaths.ShortestStops(p.Origin, p.Destination, aircraft.RangeKm)))
+            .Where(c => c.Stops is not null)
+            .Select(c => (c.Pair, Stops: c.Stops!.Value, Route: new Route(c.Pair.Origin, c.Pair.Destination, aircraft, AircraftCount: 1, Stops: c.Stops!.Value)))
+            .Where(c => c.Pair.PassengersPerQuarter >= MinLoadFactorForNewPair * c.Route.SeatsPerQuarter)
+            .Where(c => c.Stops.IsEmpty || FareCalculator.EstimatedProfit(c.Route, Math.Min(c.Pair.PassengersPerQuarter, c.Route.SeatsPerQuarter)) >= Money.Zero)
+            .Where(c => AiToolkit.CanOpenNow(context, c.Pair, validOriginCityIds, slotsReservedByCity, citySpendReservedByCity, c.Stops))
+            .OrderByDescending(c => UsesHeldStop(c.Stops, heldStopIds))
+            .ThenByDescending(c => IsCrossRegion(c.Pair, context))
+            .ThenByDescending(c => AiToolkit.EffectiveDemandScore(c.Pair, shareByCityId))
+            .ThenBy(c => c.Pair.Origin.Id, StringComparer.Ordinal)
+            .ThenBy(c => c.Pair.Destination.Id, StringComparer.Ordinal)
+            .Select(c => ((PairDemand Pair, StopList Stops)?)(c.Pair, c.Stops))
+            .FirstOrDefault();
+
+        return best;
+    }
+
+    /// <summary>
+    /// Among <paramref name="types"/> that can reach <paramref name="pair"/>,
+    /// the one with the highest estimated operating profit on it - a single
+    /// aircraft carrying the pair's demand up to its own seats
+    /// (FareCalculator.EstimatedProfit) - or null if none would be
+    /// profitable. Deliberately a solo estimate with no rival adjustment,
+    /// matching this strategy's own demand-first ranking.
+    ///
+    /// Each type is priced over its own path (docs/MULTI_STOP_ROUTES_DESIGN.md):
+    /// nonstop if it can, otherwise through the stops it needs, and only if
+    /// <paramref name="canOpenWith"/> confirms the airline could open the
+    /// route with those stops right now.
+    /// </summary>
+    private static AircraftType? BestFittingProfitableType(PairDemand pair, IReadOnlyList<AircraftType> types, StopPathFinder stopPaths, Func<StopList, bool> canOpenWith) =>
+        types
+            .Select(type => (Type: type, Stops: stopPaths.ShortestStops(pair.Origin, pair.Destination, type.RangeKm)))
+            .Where(x => x.Stops is not null && canOpenWith(x.Stops.Value))
+            .Select(x =>
+            {
+                var route = new Route(pair.Origin, pair.Destination, x.Type, AircraftCount: 1, Stops: x.Stops!.Value);
+                return (x.Type, Profit: FareCalculator.EstimatedProfit(route, Math.Min(pair.PassengersPerQuarter, route.SeatsPerQuarter)));
+            })
+            .Where(x => x.Profit >= Money.Zero)
+            .OrderByDescending(x => x.Profit.Cents)
+            .ThenBy(x => x.Type.Id, StringComparer.Ordinal)
+            .Select(x => x.Type)
+            .FirstOrDefault();
+
+    /// <summary>Cities where this airline holds a slot no route uses yet.</summary>
+    private static IReadOnlySet<string> HeldUnusedSlotCityIds(StrategyContext context) =>
+        context.AvailableSlotsByCity is null
+            ? new HashSet<string>(StringComparer.Ordinal)
+            : context.AvailableSlotsByCity.Where(kv => kv.Value > 0).Select(kv => kv.Key).ToHashSet(StringComparer.Ordinal);
+
+    private static bool UsesHeldStop(StopList stops, IReadOnlySet<string> heldStopIds) =>
+        stops.Any(stop => heldStopIds.Contains(stop.Id));
+
+    /// <summary>
+    /// The refuelling stop this airline's best profitable multi-stop route
+    /// still needs a slot at (docs/MULTI_STOP_ROUTES_DESIGN.md, Phase 3) -
+    /// what step 3 bids on before anything else, so chokepoint bids follow
+    /// a real plan. A plan is any unserved pair, touching a valid origin,
+    /// that some idle or acquirable type can fly only with stops, passes
+    /// the same load-factor screen as step 1, is profitable over its whole
+    /// path, and whose endpoints the airline could open now. Plans rank by
+    /// estimated profit. A stop already being negotiated for is skipped,
+    /// so the airline doesn't wait on a bid it already placed. Null when no
+    /// plan needs a stop the airline lacks.
+    /// </summary>
+    private static City? FindStopNeededByBestMultiStopPlan(
+        StrategyContext context, IReadOnlySet<string> validOriginCityIds,
+        Dictionary<string, int> slotsReservedByCity, Dictionary<string, int> citySpendReservedByCity, StopPathFinder stopPaths)
+    {
+        var served = context.CurrentRoutes
+            .SelectMany(r => new[] { (r.Origin.Id, r.Destination.Id), (r.Destination.Id, r.Origin.Id) })
+            .ToHashSet();
+        var recentlyClosed = AiToolkit.RecentlyClosedPairKeys(context, AiToolkit.ReopenCooldownQuarters);
+        var alreadyPursued = AiToolkit.CitiesAlreadyPursuedForNegotiation(context);
+        var types = context.OwnFleet.Idle.Select(u => u.Type)
+            .Concat(context.PurchasableOrEraTypes)
+            .Concat(context.LeasableOrEraTypes)
+            .Distinct()
+            .ToList();
+
+        // Permissive mode (no slot data) never lacks a slot anywhere.
+        City? NeededStop(StopList stops) => context.AvailableSlotsByCity is null
+            ? null
+            : stops.FirstOrDefault(stop =>
+                !alreadyPursued.Contains(stop.Id)
+                && context.AvailableSlotsByCity.GetValueOrDefault(stop.Id) - slotsReservedByCity.GetValueOrDefault(stop.Id) <= 0);
 
         return context.DemandModel.AllPairs(context.AllCities)
             .Where(p => !served.Contains((p.Origin.Id, p.Destination.Id)))
             .Where(p => !recentlyClosed.Contains(QuarterEngine.NormalizedPairKey(p.Origin, p.Destination)))
-            .Where(p => p.DistanceKm <= aircraft.RangeKm)
             .Where(p => validOriginCityIds.Contains(p.Origin.Id) || validOriginCityIds.Contains(p.Destination.Id))
-            .Where(p => p.PassengersPerQuarter >= MinLoadFactorForNewPair * new Route(p.Origin, p.Destination, aircraft, AircraftCount: 1).SeatsPerQuarter)
-            .OrderByDescending(p => IsCrossRegion(p, context))
-            .ThenByDescending(p => AiToolkit.EffectiveDemandScore(p, shareByCityId))
-            .ThenBy(p => p.Origin.Id, StringComparer.Ordinal)
-            .ThenBy(p => p.Destination.Id, StringComparer.Ordinal)
+            .Where(p => AiToolkit.CanOpenNow(context, p, validOriginCityIds, slotsReservedByCity, citySpendReservedByCity))
+            .SelectMany(p => types.Select(type => (Pair: p, Type: type, Stops: stopPaths.ShortestStops(p.Origin, p.Destination, type.RangeKm))))
+            .Where(c => c.Stops is { IsEmpty: false })
+            .Select(c => (c.Pair, c.Type, Route: new Route(c.Pair.Origin, c.Pair.Destination, c.Type, AircraftCount: 1, Stops: c.Stops!.Value)))
+            .Where(c => c.Pair.PassengersPerQuarter >= MinLoadFactorForNewPair * c.Route.SeatsPerQuarter)
+            .Select(c => (c.Pair, c.Type, c.Route, Profit: FareCalculator.EstimatedProfit(c.Route, Math.Min(c.Pair.PassengersPerQuarter, c.Route.SeatsPerQuarter)), Needed: NeededStop(c.Route.Stops)))
+            .Where(c => c.Profit >= Money.Zero && c.Needed is not null)
+            .OrderByDescending(c => c.Profit.Cents)
+            .ThenBy(c => c.Pair.Origin.Id, StringComparer.Ordinal)
+            .ThenBy(c => c.Pair.Destination.Id, StringComparer.Ordinal)
+            .ThenBy(c => c.Type.Id, StringComparer.Ordinal)
+            .Select(c => c.Needed)
             .FirstOrDefault();
     }
 
@@ -412,6 +515,15 @@ public sealed class RapidExpansionStrategy : IAiStrategy
     /// — so this still tries the farthest *reachable* region ahead of a
     /// closer intra-region one, exactly as before, just never bids on a
     /// gateway the airline has no plausible way to use for years.
+    ///
+    /// Multi-stop routes (docs/MULTI_STOP_ROUTES_DESIGN.md, Phase 3): also
+    /// only a gateway the airline could fly a profitable nonstop route to
+    /// from its network (AiToolkit.HasProfitableNonstopRouteTo) - the
+    /// same check a won gateway's first route now has to pass. Measured
+    /// without it, refuelling stops were bid on simply because nothing
+    /// bigger was left in reach: every chokepoint slot in every game was
+    /// held by quarter 40, and 1,026 of 1,102 sat unused. A refuelling
+    /// stop is bid on through FindStopNeededByBestMultiStopPlan instead.
     /// </summary>
     private static City? FindBestUnservedGatewayCrossRegionFirst(StrategyContext context)
     {
@@ -424,6 +536,7 @@ public sealed class RapidExpansionStrategy : IAiStrategy
         return context.AllCities
             .Where(c => c.IsGateway && !touchedCityIds.Contains(c.Id) && !alreadyPursued.Contains(c.Id))
             .Where(c => AiToolkit.DistanceFromNetworkKm(context, c) <= maxRangeKm)
+            .Where(c => AiToolkit.HasProfitableNonstopRouteTo(context, c))
             .OrderByDescending(c => c.Region != context.HomeRegion)
             .ThenByDescending(c => c.DemandWeight)
             .ThenBy(c => c.Id, StringComparer.Ordinal)

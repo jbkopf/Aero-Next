@@ -237,6 +237,20 @@ public static class QuarterEngine
         // for a type ApplyRouteOrders then silently drops.
         var committedTypeByPair = new Dictionary<(string, string), AircraftType>();
 
+        // Multi-stop routes (docs/MULTI_STOP_ROUTES_DESIGN.md): the stop
+        // list a pair is committed to this quarter, seeded lazily from
+        // currentRoutes and updated as RouteOrders/AdjustRouteOrders are
+        // applied - the same reasoning as committedTypeByPair just above
+        // (every aircraft on a route flies the same stops), but checked in
+        // both fleet-aware and permissive mode, since it's new and has no
+        // permissive legacy behavior to preserve.
+        var committedStopsByPair = new Dictionary<(string, string), StopList>();
+
+        StopList? CommittedStops(City origin, City destination) =>
+            committedStopsByPair.TryGetValue((origin.Id, destination.Id), out var stops)
+                ? stops
+                : currentRoutes.FirstOrDefault(r => r.Origin.Id == origin.Id && r.Destination.Id == destination.Id)?.Stops;
+
         foreach (var order in orders)
         {
             // Aircraft-acquisition-limits follow-up: a non-positive
@@ -264,6 +278,28 @@ public static class QuarterEngine
             }
 
             if (order is AdjustRouteOrder swapRangeOrder && !swapRangeOrder.IsWithinRange)
+            {
+                rejected.Add(order);
+                continue;
+            }
+
+            if (order is RouteOrder stopsOrder && !RoutePath.AreValidStops(stopsOrder.Origin, stopsOrder.Stops, stopsOrder.Destination))
+            {
+                rejected.Add(order);
+                continue;
+            }
+
+            if (order is AdjustRouteOrder swapStopsOrder && !RoutePath.AreValidStops(swapStopsOrder.Origin, swapStopsOrder.Stops, swapStopsOrder.Destination))
+            {
+                rejected.Add(order);
+                continue;
+            }
+
+            // Growing a served pair must fly the stops it already flies -
+            // a different stop list is a different route shape, the same
+            // way a different type is (see the committedType check below).
+            if (order is RouteOrder growStopsOrder && CommittedStops(growStopsOrder.Origin, growStopsOrder.Destination) is { } committedStops
+                && committedStops != growStopsOrder.Stops)
             {
                 rejected.Add(order);
                 continue;
@@ -345,10 +381,25 @@ public static class QuarterEngine
 
             if (order is RouteOrder slotOrder && availableSlotsByCity is not null)
             {
-                var blockedAtAGateway = GatewayEndpoints(slotOrder).Any(city =>
+                var blockedAtAGateway = GatewayCities(slotOrder).Any(city =>
                     availableSlotsByCity.GetValueOrDefault(city.Id) - slotsSpentByCity.GetValueOrDefault(city.Id) <= 0);
 
                 if (blockedAtAGateway)
+                {
+                    rejected.Add(order);
+                    continue;
+                }
+            }
+
+            // A swap resets the route to 1 aircraft, so a city it already
+            // touched never needs a new slot - only a stop it didn't make
+            // before does.
+            if (order is AdjustRouteOrder swapSlotOrder && availableSlotsByCity is not null)
+            {
+                var blockedAtANewStop = NewStopsForSwap(swapSlotOrder, CommittedStops(swapSlotOrder.Origin, swapSlotOrder.Destination)).Any(city =>
+                    availableSlotsByCity.GetValueOrDefault(city.Id) - slotsSpentByCity.GetValueOrDefault(city.Id) <= 0);
+
+                if (blockedAtANewStop)
                 {
                     rejected.Add(order);
                     continue;
@@ -622,10 +673,28 @@ public static class QuarterEngine
 
             if (order is RouteOrder appliedSlotOrder && availableSlotsByCity is not null)
             {
-                foreach (var city in GatewayEndpoints(appliedSlotOrder))
+                foreach (var city in GatewayCities(appliedSlotOrder))
                 {
                     slotsSpentByCity[city.Id] = slotsSpentByCity.GetValueOrDefault(city.Id) + 1;
                 }
+            }
+
+            if (order is AdjustRouteOrder appliedSwapSlotOrder && availableSlotsByCity is not null)
+            {
+                foreach (var city in NewStopsForSwap(appliedSwapSlotOrder, CommittedStops(appliedSwapSlotOrder.Origin, appliedSwapSlotOrder.Destination)))
+                {
+                    slotsSpentByCity[city.Id] = slotsSpentByCity.GetValueOrDefault(city.Id) + 1;
+                }
+            }
+
+            if (order is RouteOrder appliedStopsOrder)
+            {
+                committedStopsByPair[(appliedStopsOrder.Origin.Id, appliedStopsOrder.Destination.Id)] = appliedStopsOrder.Stops;
+            }
+
+            if (order is AdjustRouteOrder appliedSwapStopsOrder)
+            {
+                committedStopsByPair[(appliedSwapStopsOrder.Origin.Id, appliedSwapStopsOrder.Destination.Id)] = appliedSwapStopsOrder.Stops;
             }
 
             if (order is RouteOrder appliedAutoSlotOrder && cityWideSlotsRemaining is not null)
@@ -762,7 +831,7 @@ public static class QuarterEngine
             if (order is RouteOrder routeOrder)
             {
                 var key = (routeOrder.Origin.Id, routeOrder.Destination.Id);
-                var sameTypeAlreadyThere = byKey.TryGetValue(key, out var existing) && existing.Aircraft.Id == routeOrder.Aircraft.Id;
+                var sameTypeAlreadyThere = byKey.TryGetValue(key, out var existing) && existing.Aircraft.Id == routeOrder.Aircraft.Id && existing.Stops == routeOrder.Stops;
                 var newCount = sameTypeAlreadyThere ? existing!.AircraftCount + 1 : 1;
 
                 // Preserve a customized fare (M34) when this is just
@@ -771,7 +840,7 @@ public static class QuarterEngine
                 // default (FareOverride: null).
                 var fareOverride = sameTypeAlreadyThere ? existing!.FareOverride : null;
 
-                byKey[key] = new Route(routeOrder.Origin, routeOrder.Destination, routeOrder.Aircraft, newCount, fareOverride);
+                byKey[key] = new Route(routeOrder.Origin, routeOrder.Destination, routeOrder.Aircraft, newCount, fareOverride, routeOrder.Stops);
             }
             else if (order is CloseRouteOrder closeOrder)
             {
@@ -803,7 +872,7 @@ public static class QuarterEngine
             else if (order is AdjustRouteOrder adjustOrder)
             {
                 var key = (adjustOrder.Origin.Id, adjustOrder.Destination.Id);
-                byKey[key] = new Route(adjustOrder.Origin, adjustOrder.Destination, adjustOrder.AircraftType, AircraftCount: 1, FareOverride: null);
+                byKey[key] = new Route(adjustOrder.Origin, adjustOrder.Destination, adjustOrder.AircraftType, AircraftCount: 1, FareOverride: null, adjustOrder.Stops);
             }
         }
 
@@ -818,9 +887,22 @@ public static class QuarterEngine
     /// <summary>String form of RouteKey — FleetUnit.AssignedRouteKey's format, settled here.</summary>
     private static string RouteKeyString(City origin, City destination) => $"{origin.Id}-{destination.Id}";
 
-    /// <summary>Which of a RouteOrder's two endpoints actually have gate scarcity modeled (M33) — a route occupies a slot at each one it touches.</summary>
-    private static IEnumerable<City> GatewayEndpoints(RouteOrder order) =>
-        new[] { order.Origin, order.Destination }.Where(c => c.GateCapacity is not null);
+    /// <summary>
+    /// Which cities a RouteOrder lands at that have gate scarcity modeled
+    /// (M33) — a route occupies a slot at each one it touches, endpoints
+    /// and stops alike (docs/MULTI_STOP_ROUTES_DESIGN.md).
+    /// </summary>
+    private static IEnumerable<City> GatewayCities(RouteOrder order) =>
+        RoutePath.Cities(order.Origin, order.Stops, order.Destination).Where(c => c.GateCapacity is not null);
+
+    /// <summary>
+    /// The gate-scarce stops an AdjustRouteOrder lands at that the route
+    /// didn't land at before - the only cities a swap needs a fresh slot
+    /// at, since the swap leaves the route at 1 aircraft. Endpoints never
+    /// change on a swap.
+    /// </summary>
+    private static IEnumerable<City> NewStopsForSwap(AdjustRouteOrder order, StopList? currentStops) =>
+        order.Stops.Where(stop => stop.GateCapacity is not null && (currentStops ?? StopList.Empty).All(current => current.Id != stop.Id));
 
     /// <summary>M45: the AutoCapacity-modeled sibling of GatewayEndpoints — mutually exclusive per-city, never both non-null.</summary>
     private static IEnumerable<City> AutoCapacityEndpoints(RouteOrder order) =>

@@ -2133,6 +2133,26 @@ understood, wasn't itself judged a problem to fix this round -
 
 ---
 
+### Follow-up (2026-10-05): full losing-streak credit, paced closures
+
+The closure rule above gave a losing streak zero credit whenever it began
+before the mid-game, to stop every airline closing its backlog at once.
+But a route's streak and the mid-game clock grow together, so a route
+already losing at quarter 41 could never close - and in the early game,
+where `DistressStrategy` also uses this rule, every streak counted as
+"older than the mid-game", so no dead route could close before quarter 41
+at all. Traced: 65% of the remaining `NetworkOptimizerStrategy` picks
+(after contested routes stopped counting as trouble) involved such a
+route.
+
+Now: the full streak counts (`AiToolkit.IsSustainedClosureEligible`), and
+`ApplyManagementToolkit` closes at most one such route per airline per
+quarter - its worst loser - so a backlog drains a route a quarter instead
+of all at once. 2x300 Hard: games with a bankruptcy 9/8 -> 5/2,
+AustralAsia bankruptcies 5/6 -> 1/0 (the Papeete/Guam/Saipan dead-end
+starts: Distress now closes the losing starting route), wins and win
+timing within noise.
+
 ## Bankruptcy conditions — a real borrowing lever for a slow cash bleed ✅
 
 **Origin:** the user's own direct request to "look at bankruptcy

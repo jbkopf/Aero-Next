@@ -1,0 +1,182 @@
+[
+  {
+    "cityId": "dxb",
+    "history": "Opened 1960 on a sand strip; paved runway 1965; Emirates founded 1985 and the Gulf stopover strategy takes off; Terminal 3 (2008) built for the A380 era. The defining Europe-Asia stopover of the long-haul jet age.",
+    "annualPassengersMillions": [{ "year": 1955, "value": 0.02 }, { "year": 1965, "value": 0.1 }, { "year": 1975, "value": 1.5 }, { "year": 1985, "value": 3.5 }, { "year": 1995, "value": 10 }, { "year": 2005, "value": 25 }, { "year": 2015, "value": 78 }]
+  },
+  {
+    "cityId": "pek",
+    "history": "Capital Airport opened 1958; closed economy until Deng's 1978 reforms; T1 1980, T2 1999, T3 2008 for the Olympics.",
+    "annualPassengersMillions": [{ "year": 1955, "value": 0.05 }, { "year": 1965, "value": 0.2 }, { "year": 1975, "value": 0.6 }, { "year": 1985, "value": 2 }, { "year": 1995, "value": 10 }, { "year": 2005, "value": 41 }, { "year": 2015, "value": 90 }]
+  },
+  {
+    "cityId": "pvg",
+    "history": "Hongqiao only until Pudong opened 1999; reform 1978, Pudong development from 1992, WTO 2001 - explosive growth.",
+    "annualPassengersMillions": [{ "year": 1955, "value": 0.05 }, { "year": 1965, "value": 0.2 }, { "year": 1975, "value": 0.5 }, { "year": 1985, "value": 2 }, { "year": 1995, "value": 9 }, { "year": 2005, "value": 41 }, { "year": 2015, "value": 99 }]
+  },
+  {
+    "cityId": "icn",
+    "history": "Gimpo through the boom years; 1988 Olympics; Incheon opened 2001 as a regional transfer hub.",
+    "annualPassengersMillions": [{ "year": 1955, "value": 0.05 }, { "year": 1965, "value": 0.4 }, { "year": 1975, "value": 3 }, { "year": 1985, "value": 9 }, { "year": 1995, "value": 28 }, { "year": 2005, "value": 45 }, { "year": 2015, "value": 72 }]
+  },
+  {
+    "cityId": "sin",
+    "history": "Paya Lebar until Changi opened 1981 (T2 1990, T3 2008); Singapore Airlines' hub strategy.",
+    "annualPassengersMillions": [{ "year": 1955, "value": 0.3 }, { "year": 1965, "value": 1 }, { "year": 1975, "value": 4 }, { "year": 1985, "value": 9 }, { "year": 1995, "value": 23 }, { "year": 2005, "value": 32 }, { "year": 2015, "value": 55 }]
+  },
+  {
+    "cityId": "ist",
+    "history": "Modest until the 2000s; Turkish Airlines' global transfer strategy and Sabiha Gokcen (2001) make it a top hub by 2015.",
+    "annualPassengersMillions": [{ "year": 1955, "value": 0.3 }, { "year": 1965, "value": 1 }, { "year": 1975, "value": 3 }, { "year": 1985, "value": 5 }, { "year": 1995, "value": 12 }, { "year": 2005, "value": 24 }, { "year": 2015, "value": 89 }]
+  },
+  {
+    "cityId": "del",
+    "history": "Palam; new international terminal 1986; liberalisation from 2003 and Terminal 3 (2010) drive a late surge.",
+    "annualPassengersMillions": [{ "year": 1955, "value": 0.2 }, { "year": 1965, "value": 0.8 }, { "year": 1975, "value": 2.5 }, { "year": 1985, "value": 5 }, { "year": 1995, "value": 10 }, { "year": 2005, "value": 16 }, { "year": 2015, "value": 48 }]
+  },
+  {
+    "cityId": "bom",
+    "history": "Santacruz/Sahar; steady growth, accelerating after 2003 liberalisation.",
+    "annualPassengersMillions": [{ "year": 1955, "value": 0.3 }, { "year": 1965, "value": 1 }, { "year": 1975, "value": 3 }, { "year": 1985, "value": 7 }, { "year": 1995, "value": 14 }, { "year": 2005, "value": 18 }, { "year": 2015, "value": 41 }]
+  },
+  {
+    "cityId": "bkk",
+    "history": "Don Mueang through the tourism boom; Suvarnabhumi opened 2006; Don Mueang reopened for low-cost carriers 2012.",
+    "annualPassengersMillions": [{ "year": 1955, "value": 0.2 }, { "year": 1965, "value": 1 }, { "year": 1975, "value": 4 }, { "year": 1985, "value": 10 }, { "year": 1995, "value": 25 }, { "year": 2005, "value": 39 }, { "year": 2015, "value": 83 }]
+  },
+  {
+    "cityId": "cgk",
+    "history": "Kemayoran until Soekarno-Hatta opened 1985; low-cost boom after 2000.",
+    "annualPassengersMillions": [{ "year": 1955, "value": 0.2 }, { "year": 1965, "value": 0.6 }, { "year": 1975, "value": 2.5 }, { "year": 1985, "value": 6 }, { "year": 1995, "value": 13 }, { "year": 2005, "value": 32 }, { "year": 2015, "value": 54 }]
+  },
+  {
+    "cityId": "mow",
+    "history": "Sheremetyevo 1959, Domodedovo 1964, Vnukovo; Soviet-era volume, collapse after 1991, strong recovery from 2000.",
+    "annualPassengersMillions": [{ "year": 1955, "value": 1 }, { "year": 1965, "value": 8 }, { "year": 1975, "value": 20 }, { "year": 1985, "value": 30 }, { "year": 1995, "value": 14 }, { "year": 2005, "value": 35 }, { "year": 2015, "value": 80 }]
+  },
+  {
+    "cityId": "atl",
+    "history": "Jet-age terminal 1961; Delta's hub; the midfield terminal (1980) made it the world's busiest airport.",
+    "annualPassengersMillions": [{ "year": 1955, "value": 2.5 }, { "year": 1965, "value": 7 }, { "year": 1975, "value": 23 }, { "year": 1985, "value": 40 }, { "year": 1995, "value": 58 }, { "year": 2005, "value": 86 }, { "year": 2015, "value": 101 }]
+  },
+  {
+    "cityId": "ord",
+    "history": "O'Hare opened commercially 1955 and was the world's busiest for decades; mature, runway-constrained.",
+    "annualPassengersMillions": [{ "year": 1955, "value": 9 }, { "year": 1965, "value": 26 }, { "year": 1975, "value": 42 }, { "year": 1985, "value": 55 }, { "year": 1995, "value": 77 }, { "year": 2005, "value": 94 }, { "year": 2015, "value": 99 }]
+  },
+  {
+    "cityId": "dfw",
+    "history": "Love Field until DFW opened 1974; American's mega-hub after deregulation (1978).",
+    "annualPassengersMillions": [{ "year": 1955, "value": 1.5 }, { "year": 1965, "value": 4 }, { "year": 1975, "value": 15 }, { "year": 1985, "value": 35 }, { "year": 1995, "value": 62 }, { "year": 2005, "value": 66 }, { "year": 2015, "value": 79 }]
+  },
+  {
+    "cityId": "cdg",
+    "history": "Orly through the 1960s; Charles de Gaulle opened 1974, Terminal 2 from 1982; Air France hub.",
+    "annualPassengersMillions": [{ "year": 1955, "value": 2 }, { "year": 1965, "value": 6 }, { "year": 1975, "value": 17 }, { "year": 1985, "value": 30 }, { "year": 1995, "value": 52 }, { "year": 2005, "value": 76 }, { "year": 2015, "value": 95 }]
+  },
+  {
+    "cityId": "fra",
+    "history": "Lufthansa's hub; Terminal 1 1972, Terminal 2 1994; runway-limited until 2011.",
+    "annualPassengersMillions": [{ "year": 1955, "value": 0.8 }, { "year": 1965, "value": 4 }, { "year": 1975, "value": 13 }, { "year": 1985, "value": 20 }, { "year": 1995, "value": 38 }, { "year": 2005, "value": 52 }, { "year": 2015, "value": 61 }]
+  },
+  {
+    "cityId": "muc",
+    "history": "Riem until the new airport opened 1992; Lufthansa's second hub.",
+    "annualPassengersMillions": [{ "year": 1955, "value": 0.3 }, { "year": 1965, "value": 1.5 }, { "year": 1975, "value": 4.5 }, { "year": 1985, "value": 8 }, { "year": 1995, "value": 15 }, { "year": 2005, "value": 28 }, { "year": 2015, "value": 41 }]
+  },
+  {
+    "cityId": "sfo",
+    "history": "Pacific gateway; new international terminal 2000; dip after the dot-com bust.",
+    "annualPassengersMillions": [{ "year": 1955, "value": 2.5 }, { "year": 1965, "value": 9 }, { "year": 1975, "value": 16 }, { "year": 1985, "value": 26 }, { "year": 1995, "value": 36 }, { "year": 2005, "value": 33 }, { "year": 2015, "value": 50 }]
+  },
+  {
+    "cityId": "mex",
+    "history": "Single constrained airport; steady growth.",
+    "annualPassengersMillions": [{ "year": 1955, "value": 0.8 }, { "year": 1965, "value": 3 }, { "year": 1975, "value": 8 }, { "year": 1985, "value": 13 }, { "year": 1995, "value": 15 }, { "year": 2005, "value": 24 }, { "year": 2015, "value": 38 }]
+  },
+  {
+    "cityId": "osa",
+    "history": "Itami through the 1970 Expo; Kansai opened 1994; mature thereafter.",
+    "annualPassengersMillions": [{ "year": 1955, "value": 0.3 }, { "year": 1965, "value": 4 }, { "year": 1975, "value": 13 }, { "year": 1985, "value": 17 }, { "year": 1995, "value": 33 }, { "year": 2005, "value": 35 }, { "year": 2015, "value": 39 }]
+  },
+  {
+    "cityId": "yyz",
+    "history": "Air Canada's hub; Terminal 1 rebuilt 2004.",
+    "annualPassengersMillions": [{ "year": 1955, "value": 0.8 }, { "year": 1965, "value": 3 }, { "year": 1975, "value": 10 }, { "year": 1985, "value": 15 }, { "year": 1995, "value": 20 }, { "year": 2005, "value": 30 }, { "year": 2015, "value": 41 }]
+  },
+  {
+    "cityId": "was",
+    "history": "National, Dulles (1962) and BWI combined.",
+    "annualPassengersMillions": [{ "year": 1955, "value": 4 }, { "year": 1965, "value": 10 }, { "year": 1975, "value": 17 }, { "year": 1985, "value": 30 }, { "year": 1995, "value": 40 }, { "year": 2005, "value": 58 }, { "year": 2015, "value": 69 }]
+  },
+  {
+    "cityId": "fco",
+    "history": "Fiumicino opened 1961; Alitalia's hub.",
+    "annualPassengersMillions": [{ "year": 1955, "value": 0.7 }, { "year": 1965, "value": 4 }, { "year": 1975, "value": 9 }, { "year": 1985, "value": 13 }, { "year": 1995, "value": 20 }, { "year": 2005, "value": 33 }, { "year": 2015, "value": 46 }]
+  },
+  {
+    "cityId": "mad",
+    "history": "Barajas; Terminal 4 (2006) for Iberia's Latin America hub.",
+    "annualPassengersMillions": [{ "year": 1955, "value": 0.4 }, { "year": 1965, "value": 2.5 }, { "year": 1975, "value": 8 }, { "year": 1985, "value": 11 }, { "year": 1995, "value": 19 }, { "year": 2005, "value": 42 }, { "year": 2015, "value": 47 }]
+  },
+  {
+    "cityId": "mil",
+    "history": "Linate, Malpensa (rebuilt 1998) and Bergamo combined.",
+    "annualPassengersMillions": [{ "year": 1955, "value": 0.4 }, { "year": 1965, "value": 2 }, { "year": 1975, "value": 5 }, { "year": 1985, "value": 8 }, { "year": 1995, "value": 14 }, { "year": 2005, "value": 31 }, { "year": 2015, "value": 40 }]
+  },
+  {
+    "cityId": "gig",
+    "history": "Galeao (new terminal 1977) and Santos Dumont; growth resumes after 2000.",
+    "annualPassengersMillions": [{ "year": 1955, "value": 1 }, { "year": 1965, "value": 2.5 }, { "year": 1975, "value": 6 }, { "year": 1985, "value": 8 }, { "year": 1995, "value": 9 }, { "year": 2005, "value": 13 }, { "year": 2015, "value": 26 }]
+  },
+  {
+    "cityId": "los",
+    "history": "Murtala Muhammed (1979); oil boom then long stagnation.",
+    "annualPassengersMillions": [{ "year": 1955, "value": 0.1 }, { "year": 1965, "value": 0.4 }, { "year": 1975, "value": 2 }, { "year": 1985, "value": 4 }, { "year": 1995, "value": 4 }, { "year": 2005, "value": 5 }, { "year": 2015, "value": 8 }]
+  },
+  {
+    "cityId": "jfk",
+    "history": "JFK, LaGuardia and Newark; mature and constrained since the 1970s.",
+    "annualPassengersMillions": [{ "year": 1955, "value": 15 }, { "year": 1965, "value": 33 }, { "year": 1975, "value": 45 }, { "year": 1985, "value": 70 }, { "year": 1995, "value": 77 }, { "year": 2005, "value": 104 }, { "year": 2015, "value": 125 }]
+  },
+  {
+    "cityId": "hnd",
+    "history": "Haneda, then Narita (1978) for international; Haneda reopens internationally 2010.",
+    "annualPassengersMillions": [{ "year": 1955, "value": 0.6 }, { "year": 1965, "value": 6 }, { "year": 1975, "value": 25 }, { "year": 1985, "value": 50 }, { "year": 1995, "value": 67 }, { "year": 2005, "value": 94 }, { "year": 2015, "value": 110 }]
+  },
+  {
+    "cityId": "lhr",
+    "history": "Heathrow plus Gatwick, Stansted and Luton; Heathrow runway-capped since the 1990s.",
+    "annualPassengersMillions": [{ "year": 1955, "value": 3 }, { "year": 1965, "value": 13 }, { "year": 1975, "value": 28 }, { "year": 1985, "value": 48 }, { "year": 1995, "value": 80 }, { "year": 2005, "value": 130 }, { "year": 2015, "value": 150 }]
+  },
+  {
+    "cityId": "ams",
+    "history": "Schiphol's 1967 terminal; KLM hub; fifth runway 2003.",
+    "annualPassengersMillions": [{ "year": 1955, "value": 0.8 }, { "year": 1965, "value": 3 }, { "year": 1975, "value": 9 }, { "year": 1985, "value": 13 }, { "year": 1995, "value": 25 }, { "year": 2005, "value": 44 }, { "year": 2015, "value": 58 }]
+  },
+  {
+    "cityId": "lax",
+    "history": "Jet-age 1961; expanded for the 1984 Olympics.",
+    "annualPassengersMillions": [{ "year": 1955, "value": 4 }, { "year": 1965, "value": 13 }, { "year": 1975, "value": 24 }, { "year": 1985, "value": 40 }, { "year": 1995, "value": 54 }, { "year": 2005, "value": 61 }, { "year": 2015, "value": 75 }]
+  },
+  {
+    "cityId": "hkg",
+    "history": "Kai Tak (runway extended 1958/1975) until Chek Lap Kok opened 1998.",
+    "annualPassengersMillions": [{ "year": 1955, "value": 0.2 }, { "year": 1965, "value": 1.5 }, { "year": 1975, "value": 4.5 }, { "year": 1985, "value": 9 }, { "year": 1995, "value": 27 }, { "year": 2005, "value": 41 }, { "year": 2015, "value": 68 }]
+  },
+  {
+    "cityId": "gru",
+    "history": "Congonhas, then Guarulhos (1985) and Viracopos; rapid growth after 2000.",
+    "annualPassengersMillions": [{ "year": 1955, "value": 1 }, { "year": 1965, "value": 2.5 }, { "year": 1975, "value": 6 }, { "year": 1985, "value": 10 }, { "year": 1995, "value": 13 }, { "year": 2005, "value": 33 }, { "year": 2015, "value": 63 }]
+  },
+  {
+    "cityId": "cai",
+    "history": "Steady regional growth; new Terminal 3 2009.",
+    "annualPassengersMillions": [{ "year": 1955, "value": 0.3 }, { "year": 1965, "value": 1 }, { "year": 1975, "value": 2.5 }, { "year": 1985, "value": 5 }, { "year": 1995, "value": 7 }, { "year": 2005, "value": 10 }, { "year": 2015, "value": 15 }]
+  },
+  {
+    "cityId": "syd",
+    "history": "Kingsford Smith; jet-age international terminal 1970.",
+    "annualPassengersMillions": [{ "year": 1955, "value": 0.6 }, { "year": 1965, "value": 2 }, { "year": 1975, "value": 5 }, { "year": 1985, "value": 9 }, { "year": 1995, "value": 17 }, { "year": 2005, "value": 26 }, { "year": 2015, "value": 39 }]
+  }
+]

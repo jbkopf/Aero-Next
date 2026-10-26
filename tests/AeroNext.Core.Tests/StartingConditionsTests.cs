@@ -19,7 +19,8 @@ public class StartingConditionsTests
     /// <summary>The exact demand model Quarter1DemandModel builds internally — real-data growth schedule works fine against synthetic test cities too (no matching id, so their city/region multipliers stay neutral).</summary>
     private static GravityDemandModel RealQuarter1DemandModel =>
         new(schedule: RealGrowthSchedule, year: Timeline.StartYear, enableHubDemandBonus: true,
-            intraRegionMultipliers: GravityDemandModel.AustralAsiaTunedIntraRegionMultipliers);
+            intraRegionMultipliers: GravityDemandModel.ShippedIntraRegionMultipliers,
+            groundCompetitionDistanceKm: GravityDemandModel.ShippedGroundCompetitionDistanceKm);
 
     [Fact]
     public void Resolve_EveryEligibleStartingCity_ProducesAcceptedQuarter1Route()
@@ -191,7 +192,12 @@ public class StartingConditionsTests
         // "thin" is alphabetically first with positive (but small) demand,
         // so the heuristic always lands there; "rich" is the real best pick.
         var home = new City("home", "HOME", Region.Europe, 0, 0, 40, false, null);
-        var thin = new City("aaa", "THIN", Region.Europe, 0, 3, 15, false, null); // alphabetically first; small but real positive profit
+        // Weight 172: both pairs sit inside the ground-competition distance
+        // (GravityDemandModel.ShippedGroundCompetitionDistanceKm), so the
+        // formula prices them at 800km, and Europe-to-Europe pairs are
+        // halved (GravityDemandModel.ShippedIntraRegionMultipliers) - 172
+        // keeps thin's demand where weight 15 put it at its real 333km.
+        var thin = new City("aaa", "THIN", Region.Europe, 0, 3, 172, false, null); // alphabetically first; small but real positive profit
         var rich = new City("zzz", "RICH", Region.Europe, 0, 2, 400, false, null);
         var aircraft = new AircraftType("ac", "AC", Seats: 100, RangeKm: 5000, ManufacturerRegion: Region.Europe, CostPerAvailableSeatKm: 0.1, CruiseSpeedKmh: 500);
         return (home, thin, rich, aircraft);

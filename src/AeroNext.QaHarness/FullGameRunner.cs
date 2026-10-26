@@ -73,7 +73,8 @@ public static class FullGameRunner
         IReadOnlyList<AirlineSeat> seats,
         IReadOnlyList<City> cities, IReadOnlyList<AircraftType> fleetCatalog, IReadOnlyList<DemandGrowthPoint> growthSchedule,
         ExperimentTuning? tuning = null, GameDifficulty difficulty = GameDifficulty.Normal,
-        IReadOnlyList<TradeRestriction>? tradeRestrictions = null)
+        IReadOnlyList<TradeRestriction>? tradeRestrictions = null,
+        IReadOnlyDictionary<string, HubCapacityProfile>? hubProfiles = null)
     {
         tuning ??= ExperimentTuning.Baseline;
         var regionCounts = DifficultySettings.RegionCounts(difficulty);
@@ -131,6 +132,11 @@ public static class FullGameRunner
         var negotiationSpendCentsFirst20QByName = names.ToDictionary(n => n, n => 0L);
         var negotiationBidCountFirst20QByName = names.ToDictionary(n => n, n => 0);
         var typeSwapsApplied = 0;
+        var multiStopRouteOrdersApplied = 0;
+        var networkOptimizerQuarters = 0;
+        long routeQuarters = 0;
+        long contestedRouteQuarters = 0;
+        var balancedGrowthQuarters = 0;
         var routeCampaignsApplied = 0;
         var networkCampaignsApplied = 0;
 
@@ -141,6 +147,13 @@ public static class FullGameRunner
         // airline's own quarter-1 route is the M18 guaranteed one anyway
         // (no strategy consults this that early).
         var lastQuarterSeatsCarriedByRouteByName = names.ToDictionary(n => n, n => (IReadOnlyDictionary<(string, string), long>)new Dictionary<(string, string), long>());
+        // Connecting passengers (docs/CONNECTING_PASSENGERS_DESIGN.md): each
+        // route's turned-away passengers, local and connecting, for next
+        // quarter's AiToolkit.MarginalProfitOfAnotherAircraft.
+        var lastQuarterTurnedAwayByRouteByName = names.ToDictionary(n => n, n => (IReadOnlyDictionary<(string, string), long>)new Dictionary<(string, string), long>());
+        // Every pair's rival offers last quarter (all airlines but this
+        // one), for AiToolkit's competitive share estimates.
+        var lastQuarterRivalOffersByName = names.ToDictionary(n => n, _ => (IReadOnlyDictionary<(string, string), IReadOnlyList<PairOffer>>)new Dictionary<(string, string), IReadOnlyList<PairOffer>>());
 
         // M55: each airline's own real memory of its own routes' recent
         // past - the missing piece M43 and M54 each separately diagnosed
@@ -169,7 +182,8 @@ public static class FullGameRunner
         // computed once, here, before any quarter runs.
         var capacityBoard = CityCapacityBoard.Initialize(cities, new GravityDemandModel(
             schedule: growthSchedule, year: Timeline.StartYear, enableHubDemandBonus: true,
-            intraRegionMultipliers: tuning.IntraRegionDemandMultipliers));
+            intraRegionMultipliers: tuning.IntraRegionDemandMultipliers,
+            groundCompetitionDistanceKm: GravityDemandModel.ShippedGroundCompetitionDistanceKm), hubProfiles);
         var dominanceState = RegionalDominanceState.Empty;
         string? winner = null;
         int? winQuarter = null;
@@ -182,7 +196,8 @@ public static class FullGameRunner
             var availableFleet = Timeline.AvailableAircraft(fleetCatalog, year);
             var yearDemandModel = new GravityDemandModel(
                 schedule: growthSchedule, year: year, enableHubDemandBonus: true,
-                intraRegionMultipliers: tuning.IntraRegionDemandMultipliers); // M20: model resolves global (and any region/city-scoped) growth itself
+                intraRegionMultipliers: tuning.IntraRegionDemandMultipliers,
+                groundCompetitionDistanceKm: GravityDemandModel.ShippedGroundCompetitionDistanceKm); // M20: model resolves global (and any region/city-scoped) growth itself
             var appliedOrdersByName = new Dictionary<string, IReadOnlyList<QuarterOrder>>();
             var retiredUnitsByName = new Dictionary<string, IReadOnlyList<FleetUnit>>();
 
@@ -227,8 +242,10 @@ public static class FullGameRunner
             // (a no-op most quarters) - depends only on demand, not on
             // any order placed this quarter, so it's resolved before the
             // per-airline loop and is visible to every airline's own
-            // decisions the same quarter it lands.
-            capacityBoard = capacityBoard.AdvanceQuarter(q, cities, yearDemandModel);
+            // decisions the same quarter it lands. Hub demand coverage
+            // sizes profiled hubs from the seats flown entering this quarter.
+            capacityBoard = capacityBoard.AdvanceQuarter(q, cities, yearDemandModel,
+                CityCapacityBoard.SeatsPerAircraftByCity(names.SelectMany(n => routes[n]), cities));
 
             // M45: which gateways currently carry idle-expired, contestable
             // inventory - computed once per quarter from state entering it
@@ -340,6 +357,8 @@ public static class FullGameRunner
                     var rivalCountByServedRoute = routesAtQuarterStart[name].ToDictionary(
                         r => QuarterEngine.NormalizedPairKey(r.Origin, r.Destination),
                         r => servingAirlineNamesByPairKey[QuarterEngine.NormalizedPairKey(r.Origin, r.Destination)].Count - 1);
+                    routeQuarters += rivalCountByServedRoute.Count;
+                    contestedRouteQuarters += rivalCountByServedRoute.Values.Count(v => v > 0);
 
                     // BalancedGrowthStrategy follow-up: the global
                     // counterparts - every pair/region *any* airline
@@ -372,6 +391,8 @@ public static class FullGameRunner
                         IdleContestableSlotsByCity: idleContestableSlotsByCity,
                         RivalCountByServedRoute: rivalCountByServedRoute,
                         LastQuarterSeatsCarriedByRoute: lastQuarterSeatsCarriedByRouteByName[name],
+                        LastQuarterTurnedAwayByRoute: lastQuarterTurnedAwayByRouteByName[name],
+                        LastQuarterRivalOffersByPair: lastQuarterRivalOffersByName[name],
                         QuarterNumber: q,
                         RouteHistoryByPair: routeHistoryByAirlineName[name],
                         InDistress: finances[name].InDistress,
@@ -404,6 +425,15 @@ public static class FullGameRunner
                     currentStrategyByName[name] = normalStrategy;
                     var activeStrategy = strategyContext.InDistress ? DistressStrategy.Instance : normalStrategy;
                     orders = activeStrategy.DecideOrders(strategyContext);
+
+                    if (activeStrategy is NetworkOptimizerStrategy)
+                    {
+                        networkOptimizerQuarters++;
+                    }
+                    else if (activeStrategy is BalancedGrowthStrategy)
+                    {
+                        balancedGrowthQuarters++;
+                    }
                 }
 
                 // M18's guaranteed quarter-1 route is exempt from slot
@@ -464,6 +494,8 @@ public static class FullGameRunner
                     routeHistoryByAirlineName[name][pairKey] = existingHistory with { LastTypeSwapQuarter = q };
                     typeSwapsApplied++;
                 }
+
+                multiStopRouteOrdersApplied += result.AppliedOrders.OfType<RouteOrder>().Count(o => !o.Stops.IsEmpty);
 
                 routes[name] = result.Routes;
                 caps[name] = result.ActionCap;
@@ -549,11 +581,17 @@ public static class FullGameRunner
             // matters going forward, not a stale profit streak.
             foreach (var airline in league)
             {
+                lastQuarterRivalOffersByName[airline.Name] = market.Pairs
+                    .Select(p => (Key: QuarterEngine.NormalizedPairKey(p.Origin, p.Destination), Rivals: (IReadOnlyList<PairOffer>)(p.Offers ?? Array.Empty<PairOffer>()).Where(o => o.AirlineName != airline.Name).ToList()))
+                    .Where(x => x.Rivals.Count > 0)
+                    .ToDictionary(x => x.Key, x => x.Rivals);
+
                 var usageByPair = market.RouteUsage
                     .Where(u => u.Airline == airline)
                     .ToDictionary(u => QuarterEngine.NormalizedPairKey(u.Route.Origin, u.Route.Destination), u => u);
 
                 lastQuarterSeatsCarriedByRouteByName[airline.Name] = usageByPair.ToDictionary(kv => kv.Key, kv => kv.Value.SeatsUsed);
+                lastQuarterTurnedAwayByRouteByName[airline.Name] = usageByPair.ToDictionary(kv => kv.Key, kv => kv.Value.TurnedAway);
 
                 foreach (var (pairKey, usage) in usageByPair)
                 {
@@ -652,6 +690,7 @@ public static class FullGameRunner
             finalCash, bankruptcyQuarter, homeRegionByName, startingCityIdByName, winner, winQuarter, finalRanking,
             winnerRegionsDominated, lastEligibleNames.Count,
             negotiationSpendCentsFirst20QByName, negotiationBidCountFirst20QByName, typeSwapsApplied,
-            routeCampaignsApplied, networkCampaignsApplied);
+            routeCampaignsApplied, networkCampaignsApplied, multiStopRouteOrdersApplied, networkOptimizerQuarters, balancedGrowthQuarters,
+            routeQuarters, contestedRouteQuarters);
     }
 }

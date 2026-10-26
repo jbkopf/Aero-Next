@@ -707,18 +707,13 @@ public class AiToolkitTests
     }
 
     [Fact]
-    public void ApplyManagementToolkit_EnabledClosure_RawStreakOlderThanMidGame_GetsZeroCredit_StillOnlyCuts()
+    public void ApplyManagementToolkit_EnabledClosure_StreakStartedBeforeMidGame_StillCloses()
     {
-        // The real bug this fixes: a route's raw ConsecutiveUnprofitableQuarters
-        // (20) clears the threshold on its own, but MidGame only just
-        // began 3 quarters ago (quarterNumber 43, 2 past GameEras.MidGameStartQuarter
-        // 41) - the streak necessarily includes pre-MidGame quarters, so
-        // it gets zero credit (not partial/capped credit - an earlier
-        // attempt at this exact fix used Math.Min-style capping instead,
-        // measured to still synchronize every long-backlog route onto the
-        // exact same calendar quarter, just delayed - see the class doc
-        // comment's own evidence chain) until it actually improves and
-        // goes bad again for real, entirely within MidGame.
+        // The streak (20) began before the mid-game (quarter 43, 3 quarters
+        // in). It used to get zero credit, and since the streak and the
+        // mid-game clock grow together, a route already losing at quarter
+        // 41 could never close. Full credit now; pacing (one closure per
+        // airline per quarter) keeps a backlog from closing all at once.
         var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
         var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
         var route = new Route(a, b, BigAircraft, AircraftCount: 1);
@@ -732,7 +727,34 @@ public class AiToolkitTests
 
         AiToolkit.ApplyManagementToolkit(context, orders, new System.Collections.Generic.HashSet<int>(), spentBeforeToolkit: 0, enableSustainedSingleAircraftClosure: true);
 
-        Assert.Empty(orders.OfType<CloseRouteOrder>());
+        Assert.Single(orders.OfType<CloseRouteOrder>());
+        Assert.Empty(orders.OfType<SetFareOrder>());
+    }
+
+    [Fact]
+    public void ApplyManagementToolkit_EnabledClosure_SeveralEligible_ClosesOnlyTheWorstLoserThisQuarter()
+    {
+        // Two eligible dead routes: only the bigger loser closes now; the
+        // other just gets its fare cut and waits for a later quarter.
+        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
+        var c = MakeCity("c", Region.NorthAmerica, 2, 2, 50);
+        var smallerLoss = new Route(a, b, BigAircraft, AircraftCount: 1);
+        var biggerLoss = new Route(a, c, BigAircraft, AircraftCount: 1);
+        var history = new System.Collections.Generic.Dictionary<(string, string), AiRouteHistory>
+        {
+            [QuarterEngine.NormalizedPairKey(a, b)] = new(LastShrunkQuarter: null, LastClosedQuarter: null, ConsecutiveUnprofitableQuarters: 20),
+            [QuarterEngine.NormalizedPairKey(a, c)] = new(LastShrunkQuarter: null, LastClosedQuarter: null, ConsecutiveUnprofitableQuarters: 20),
+        };
+        var context = MakeContext(new[] { a, b, c }, a, routes: new[] { smallerLoss, biggerLoss }, routeHistoryByPair: history, quarterNumber: 100);
+        var loss = (Route r) => FareCalculator.EstimatedProfit(r, RouteEvaluator.Evaluate(r, context.DemandModel).PassengersCarried);
+        var worse = loss(smallerLoss) < loss(biggerLoss) ? smallerLoss : biggerLoss;
+        var orders = new System.Collections.Generic.List<QuarterOrder>();
+
+        AiToolkit.ApplyManagementToolkit(context, orders, new System.Collections.Generic.HashSet<int>(), spentBeforeToolkit: 0, enableSustainedSingleAircraftClosure: true);
+
+        var closed = Assert.Single(orders.OfType<CloseRouteOrder>());
+        Assert.Equal(worse.Destination.Id, closed.Destination.Id);
         Assert.Single(orders.OfType<SetFareOrder>());
     }
 
@@ -948,6 +970,25 @@ public class AiToolkitTests
 
         Assert.Contains(QuarterEngine.NormalizedPairKey(a, b), result);
         Assert.DoesNotContain(QuarterEngine.NormalizedPairKey(c, d), result);
+    }
+
+    [Fact]
+    public void ApplyManagementToolkit_ReactiveSwapCandidate_ButNoActionLeft_FallsBackToTheFareCut()
+    {
+        // A losing route with a better idle type ready - but the strategy
+        // already spent the whole action budget. The swap can't go out, so
+        // the route still gets the free fare cut rather than nothing.
+        var a = MakeCity("a", Region.NorthAmerica, 0, 0, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
+        var route = new Route(a, b, BigAircraft, AircraftCount: 1);
+        var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, Aircraft, quantity: 1, FleetOwnershipMode.Owned);
+        var context = MakeContext(new[] { a, b }, a, routes: new[] { route }, eraTypes: new[] { BigAircraft, Aircraft }, fleet: fleet, actionCap: 3);
+        var orders = new System.Collections.Generic.List<QuarterOrder>();
+
+        AiToolkit.ApplyManagementToolkit(context, orders, new System.Collections.Generic.HashSet<int>(), spentBeforeToolkit: 3, enableReactiveTypeSwap: true);
+
+        Assert.Empty(orders.OfType<AdjustRouteOrder>());
+        Assert.Single(orders.OfType<SetFareOrder>());
     }
 
     [Fact]
@@ -1830,5 +1871,90 @@ public class AiToolkitTests
         Assert.True(oriented);
         Assert.Equal(b.Id, origin.Id);
         Assert.Equal(a.Id, destination.Id);
+    }
+
+    // --- CanOpenNow / new-route searches only consider routes that can be opened now ---
+
+    private static StrategyContext MakeOpenabilityContext(
+        IReadOnlyList<City> cities, City home, IReadOnlyDictionary<string, int>? availableSlots = null,
+        IReadOnlyDictionary<string, int>? cityWideSlotsRemaining = null, AirlineFleet? fleet = null) =>
+        new(Array.Empty<Route>(), 3, cities, DemandModel, new[] { Aircraft }, fleet ?? AirlineFleet.Empty, home.Region, home,
+            AvailableSlotsByCity: availableSlots, CityWideSlotsRemaining: cityWideSlotsRemaining);
+
+    private static bool CanOpen(StrategyContext context, City a, City b, Dictionary<string, int>? slotsReserved = null) =>
+        AiToolkit.CanOpenNow(context, new PairDemand(a, b, 150, 1_000), new HashSet<string> { context.HomeCity.Id },
+            slotsReserved ?? new Dictionary<string, int>(), new Dictionary<string, int>());
+
+    [Fact]
+    public void CanOpenNow_GatewayEndpointWithoutASlot_False()
+    {
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 50);
+        var gateway = MakeCity("gw", Region.NorthAmerica, 1, 1, 50, isGateway: true);
+
+        Assert.False(CanOpen(MakeOpenabilityContext(new[] { home, gateway }, home, availableSlots: new Dictionary<string, int>()), home, gateway));
+    }
+
+    [Fact]
+    public void CanOpenNow_GatewayEndpointWithASlot_True()
+    {
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 50);
+        var gateway = MakeCity("gw", Region.NorthAmerica, 1, 1, 50, isGateway: true);
+
+        Assert.True(CanOpen(MakeOpenabilityContext(new[] { home, gateway }, home, availableSlots: new Dictionary<string, int> { ["gw"] = 1 }), home, gateway));
+    }
+
+    [Fact]
+    public void CanOpenNow_OnlySlotAlreadyReservedEarlierThisQuarter_False()
+    {
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 50);
+        var gateway = MakeCity("gw", Region.NorthAmerica, 1, 1, 50, isGateway: true);
+        var context = MakeOpenabilityContext(new[] { home, gateway }, home, availableSlots: new Dictionary<string, int> { ["gw"] = 1 });
+
+        Assert.False(CanOpen(context, home, gateway, slotsReserved: new Dictionary<string, int> { ["gw"] = 1 }));
+    }
+
+    [Fact]
+    public void CanOpenNow_CityWithNoCapacityLeft_False()
+    {
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 50);
+        var full = MakeCity("full", Region.NorthAmerica, 1, 1, 50, autoCapacity: 5);
+
+        Assert.False(CanOpen(MakeOpenabilityContext(new[] { home, full }, home, cityWideSlotsRemaining: new Dictionary<string, int> { ["full"] = 0 }), home, full));
+    }
+
+    [Fact]
+    public void CanOpenNow_NeitherEndpointAValidOrigin_False()
+    {
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 50);
+        var a = MakeCity("a", Region.NorthAmerica, 1, 1, 50);
+        var b = MakeCity("b", Region.NorthAmerica, 2, 2, 50);
+
+        Assert.False(CanOpen(MakeOpenabilityContext(new[] { home, a, b }, home), a, b));
+    }
+
+    [Fact]
+    public void FindMostProfitablePair_TopPairHasNoGatewaySlot_ReturnsTheBestOpenableOneInstead()
+    {
+        // The heavier gateway pair is the most profitable, but the airline
+        // holds no slot there, so the search returns the best pair it can
+        // actually open. Control: holding a slot at the gateway, it wins.
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
+        var gateway = MakeCity("gw", Region.NorthAmerica, 1, 1, 100, isGateway: true);
+        var plain = MakeCity("plain", Region.NorthAmerica, -1, -1, 50);
+        var cities = new[] { home, gateway, plain };
+        var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, Aircraft, quantity: 1, FleetOwnershipMode.Owned);
+        var validOrigins = new HashSet<string> { home.Id };
+
+        var blocked = AiToolkit.FindMostProfitablePair(
+            MakeOpenabilityContext(cities, home, availableSlots: new Dictionary<string, int>(), fleet: fleet),
+            new HashSet<int>(), validOrigins, _ => true);
+        var control = AiToolkit.FindMostProfitablePair(
+            MakeOpenabilityContext(cities, home, availableSlots: new Dictionary<string, int> { ["gw"] = 1 }, fleet: fleet),
+            new HashSet<int>(), validOrigins, _ => true);
+
+        Assert.NotNull(blocked);
+        Assert.NotNull(control);
+        Assert.Contains("plain", new[] { blocked.Value.Pair.Origin.Id, blocked.Value.Pair.Destination.Id });
+        Assert.Contains("gw", new[] { control.Value.Pair.Origin.Id, control.Value.Pair.Destination.Id });
     }
 }

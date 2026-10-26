@@ -56,7 +56,22 @@ public sealed record FullGameResult(
     // Marketing campaigns (route-targeted and network-wide) applied across
     // every airline this game - same purpose as TypeSwapsApplied.
     int RouteCampaignsApplied = 0,
-    int NetworkCampaignsApplied = 0)
+    int NetworkCampaignsApplied = 0,
+    // RouteOrders with refuelling stops (docs/MULTI_STOP_ROUTES_DESIGN.md)
+    // applied across every airline this game - opening a multi-stop route
+    // or adding an aircraft to one. Same purpose as TypeSwapsApplied.
+    int MultiStopRouteOrdersApplied = 0,
+    // Mid/late-game airline-quarters (quarter 41 on) run by each of the
+    // two selectable strategies - lets a sweep show the strategy mix
+    // (AiToolkit.IsNetworkInTrouble decides it). Distress quarters are
+    // counted under neither.
+    int NetworkOptimizerQuarters = 0,
+    int BalancedGrowthQuarters = 0,
+    // Route-quarters (from quarter 2, every airline) and how many of them
+    // had a rival flying the same pair - the area-control pillar check
+    // (CLAUDE.md), the share docs/OPEN_WORK.md item 5 tracks.
+    long RouteQuarters = 0,
+    long ContestedRouteQuarters = 0)
 {
     public bool Success => Violations.Count == 0;
 }

@@ -137,9 +137,30 @@ public sealed class GravityDemandModel
     /// see docs/AUSTRALASIA_TUNING_EXPERIMENTS.md's Phase 2/3 results.
     /// Papeete stays unprofitable regardless (genuinely isolated, not
     /// under-demanded — nearest neighbor 3,492km at 185 pax/quarter).
+    ///
+    /// Europe 0.5 (2026-10-24, docs/DEMAND_WEIGHT_CALIBRATION_DESIGN.md):
+    /// Europe's dense cluster of nearby cities gave it ~42% of world demand
+    /// even after the ground-competition distance, putting its hubs at
+    /// 1.5-2.5x their real share and - once hub capacity followed demand -
+    /// doubling Europe's wins. Halving Europe-to-Europe pairs (Europe's
+    /// pairs with other regions untouched) is the balance damping chosen
+    /// over per-city calibration, which over-corrected toward history.
     /// </summary>
-    public static readonly IReadOnlyDictionary<Region, double> AustralAsiaTunedIntraRegionMultipliers =
-        new Dictionary<Region, double> { [Region.AustralAsia] = 1.5 };
+    public static readonly IReadOnlyDictionary<Region, double> ShippedIntraRegionMultipliers =
+        new Dictionary<Region, double> { [Region.AustralAsia] = 1.5, [Region.Europe] = 0.5 };
+
+    /// <summary>
+    /// Demand weights step 1 (docs/DEMAND_WEIGHT_CALIBRATION_DESIGN.md): the
+    /// shipped ground-competition distance every real per-quarter call site
+    /// passes to <c>groundCompetitionDistanceKm</c>, the same way they pass
+    /// <see cref="ShippedIntraRegionMultipliers"/>. Below this
+    /// distance most real trips go by rail or road, so air demand stops
+    /// growing as two cities get closer - the gravity formula treats any
+    /// closer pair as this far apart. Without it, 300km pairs like
+    /// Munich-Frankfurt carried 25x the demand of a 1,500km pair, putting
+    /// Europe's hubs at 3-4x their real share of hub traffic.
+    /// </summary>
+    public const double ShippedGroundCompetitionDistanceKm = 800.0;
 
     private const double DefaultScale = 7.5e6;
     private const double DefaultExponent = 2.0;
@@ -174,6 +195,9 @@ public sealed class GravityDemandModel
     /// </summary>
     private readonly IReadOnlyDictionary<Region, double> _intraRegionMultipliers;
 
+    /// <summary>The distance the gravity formula never goes below - see <see cref="ShippedGroundCompetitionDistanceKm"/>. Only the formula uses it; a pair's reported DistanceKm stays its real distance.</summary>
+    private readonly double _groundCompetitionDistanceKm;
+
     /// <summary>
     /// globalMultiplier is M13's historical growth knob — the campaign
     /// constructs a new model each year with the era's multiplier from
@@ -184,7 +208,8 @@ public sealed class GravityDemandModel
     /// today's exact flat-multiplier behavior. M63: enableHubDemandBonus
     /// defaults false, same "off is exactly old behavior" guarantee.
     /// intraRegionMultipliers (factor D) defaults null/empty, same
-    /// guarantee.
+    /// guarantee. groundCompetitionDistanceKm defaults to the old 100km
+    /// floor, same guarantee.
     /// </summary>
     public GravityDemandModel(
         double scale = DefaultScale,
@@ -194,7 +219,8 @@ public sealed class GravityDemandModel
         IReadOnlyList<DemandGrowthPoint>? schedule = null,
         int? year = null,
         bool enableHubDemandBonus = false,
-        IReadOnlyDictionary<Region, double>? intraRegionMultipliers = null)
+        IReadOnlyDictionary<Region, double>? intraRegionMultipliers = null,
+        double groundCompetitionDistanceKm = MinDistanceKm)
     {
         _scale = scale;
         _exponent = exponent;
@@ -202,6 +228,7 @@ public sealed class GravityDemandModel
         _globalMultiplier = globalMultiplier;
         _hubDemandBonusEnabled = enableHubDemandBonus;
         _intraRegionMultipliers = intraRegionMultipliers ?? new Dictionary<Region, double>();
+        _groundCompetitionDistanceKm = Math.Max(MinDistanceKm, groundCompetitionDistanceKm);
 
         if (schedule is null || year is null)
         {
@@ -238,7 +265,7 @@ public sealed class GravityDemandModel
     public PairDemand ForPair(City a, City b)
     {
         var distanceKm = Math.Max(MinDistanceKm, GreatCircle.DistanceKm(a, b));
-        var raw = _scale * (EffectiveWeight(a) * EffectiveWeight(b)) / Math.Pow(distanceKm, _exponent);
+        var raw = _scale * (EffectiveWeight(a) * EffectiveWeight(b)) / Math.Pow(Math.Max(_groundCompetitionDistanceKm, distanceKm), _exponent);
 
         if (a.Region != b.Region)
         {

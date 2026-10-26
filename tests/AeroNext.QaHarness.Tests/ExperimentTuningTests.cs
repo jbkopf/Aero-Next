@@ -162,9 +162,9 @@ public class ExperimentTuningTests
     // --- SouthAmerica's own factor D: intra-region demand multiplier ---
 
     [Fact]
-    public void IntraRegionDemandMultipliers_Baseline_IsExactlyTheShippedAustralAsiaMap()
+    public void IntraRegionDemandMultipliers_Baseline_IsExactlyTheShippedMap()
     {
-        Assert.Same(GravityDemandModel.AustralAsiaTunedIntraRegionMultipliers, ExperimentTuning.Baseline.IntraRegionDemandMultipliers);
+        Assert.Same(GravityDemandModel.ShippedIntraRegionMultipliers, ExperimentTuning.Baseline.IntraRegionDemandMultipliers);
     }
 
     [Fact]
@@ -173,15 +173,16 @@ public class ExperimentTuningTests
         var map = new ExperimentTuning { SouthAmericaIntraRegionDemandMultiplier = 1.5 }.IntraRegionDemandMultipliers;
 
         Assert.Equal(1.5, map[Region.SouthAmerica]);
-        Assert.Equal(GravityDemandModel.AustralAsiaTunedIntraRegionMultipliers[Region.AustralAsia], map[Region.AustralAsia]);
-        Assert.Equal(2, map.Count);
+        Assert.Equal(GravityDemandModel.ShippedIntraRegionMultipliers[Region.AustralAsia], map[Region.AustralAsia]);
+        Assert.Equal(GravityDemandModel.ShippedIntraRegionMultipliers[Region.Europe], map[Region.Europe]);
+        Assert.Equal(3, map.Count);
     }
 
     [Fact]
     public void IntraRegionDemandMultipliers_SouthAmericaFactorAtOne_IsANoOp()
     {
         var tuning = new ExperimentTuning { SouthAmericaIntraRegionDemandMultiplier = 1.0 };
-        Assert.Same(GravityDemandModel.AustralAsiaTunedIntraRegionMultipliers, tuning.IntraRegionDemandMultipliers);
+        Assert.Same(GravityDemandModel.ShippedIntraRegionMultipliers, tuning.IntraRegionDemandMultipliers);
     }
 
     // --- Global Q1 under-provisioning threshold (docs/OPEN_WORK.md) ---

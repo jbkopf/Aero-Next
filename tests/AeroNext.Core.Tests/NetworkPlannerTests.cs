@@ -92,13 +92,13 @@ public class NetworkPlannerTests
     }
 
     [Fact]
-    public void Plan_NonstopDemand_ClaimsItsOwnLegCapacityBeforeConnections()
+    public void Plan_AFullLeg_SharesItsSeatsWithConnectionsInProportionToDemand()
     {
+        // docs/CONNECTING_PASSENGERS_DESIGN.md: a-hub is both a local market
+        // and a leg for the a-b connection, and far too small for either.
+        // Its seats split between them by demand instead of local passengers
+        // taking them all; hub-b has room to spare, so it never binds.
         var demandModel = new GravityDemandModel();
-        // a-hub is both a local market (a-hub) and a leg for an a-b connection.
-        // Its capacity is deliberately tiny relative to the close, heavy a-hub
-        // pair's demand, so local nonstop demand alone should fully saturate
-        // it and leave nothing for the connecting a-b itinerary.
         var a = MakeCity("a", 0, 0, 100);
         var hub = MakeCity("hub", 0, 5, 100);
         var b = MakeCity("b", 0, 60, 100);
@@ -115,10 +115,47 @@ public class NetworkPlannerTests
         var aToHub = plan.Itineraries.Single(i => i.Itinerary.Origin.Id == "a" && i.Itinerary.Destination.Id == "hub");
         var aToB = plan.Itineraries.Single(i => i.Itinerary.Origin.Id == "a" && i.Itinerary.Destination.Id == "b");
         var legUsage = plan.RouteUsage.Single(u => u.Route == routes[0]);
+        var seats = routes[0].SeatsPerQuarter;
+        var share = (double)seats / (aToHub.DemandPassengers + aToB.DemandPassengers);
 
-        Assert.Equal(routes[0].SeatsPerQuarter, aToHub.PassengersCarried); // nonstop fully saturates the shared leg
-        Assert.Equal(0, aToB.PassengersCarried); // nothing left for the connection
-        Assert.Equal(aToHub.PassengersCarried, legUsage.SeatsUsed);
+        Assert.True(aToB.PassengersCarried > 0);
+        Assert.InRange(aToHub.PassengersCarried, (long)Math.Floor(aToHub.DemandPassengers * share), (long)Math.Floor(aToHub.DemandPassengers * share) + 1);
+        Assert.InRange(aToB.PassengersCarried, (long)Math.Floor(aToB.DemandPassengers * share), (long)Math.Floor(aToB.DemandPassengers * share) + 1);
+        Assert.Equal(seats, legUsage.SeatsUsed); // still full
+        Assert.Equal(aToHub.DemandPassengers + aToB.DemandPassengers - seats, legUsage.TurnedAway); // everyone it turned away
+        Assert.Equal(0, plan.RouteUsage.Single(u => u.Route == routes[1]).TurnedAway);
+    }
+
+    [Fact]
+    public void Plan_SeatsAConnectionCantUse_GoToLocalPassengers()
+    {
+        // The a-b connection's share of a-hub is larger than what tiny hub-b
+        // can carry onward, so the connection is held to hub-b's share and
+        // a-hub's unused seats go back to local a-hub passengers: a-hub ends
+        // up exactly full, and hub-b - the leg that held the connection
+        // back - is the one credited with turning it away.
+        var demandModel = new GravityDemandModel();
+        var a = MakeCity("a", 0, 0, 100);
+        var hub = MakeCity("hub", 0, 5, 100);
+        var b = MakeCity("b", 0, 10, 100);
+        var routes = new[]
+        {
+            new Route(a, hub, new AircraftType("mid", "Mid", Seats: 50), 1),
+            new Route(hub, b, new AircraftType("tiny", "Tiny", Seats: 1), 1),
+        };
+
+        var plan = NetworkPlanner.Plan(routes, new[] { a, hub, b }, demandModel);
+
+        var aToHub = plan.Itineraries.Single(i => i.Itinerary.Origin.Id == "a" && i.Itinerary.Destination.Id == "hub");
+        var aToB = plan.Itineraries.Single(i => i.Itinerary.Origin.Id == "a" && i.Itinerary.Destination.Id == "b");
+        var aHub = plan.RouteUsage.Single(u => u.Route == routes[0]);
+        var hubB = plan.RouteUsage.Single(u => u.Route == routes[1]);
+
+        Assert.Equal(routes[0].SeatsPerQuarter, aHub.SeatsUsed);
+        Assert.Equal(routes[0].SeatsPerQuarter - aToB.PassengersCarried, aToHub.PassengersCarried);
+        Assert.True(aToB.PassengersCarried > 0 && aToB.PassengersCarried <= routes[1].SeatsPerQuarter);
+        Assert.Equal(aToHub.DemandPassengers - aToHub.PassengersCarried, aHub.TurnedAway);
+        Assert.True(hubB.TurnedAway >= aToB.DemandPassengers - aToB.PassengersCarried);
     }
 
     [Fact]

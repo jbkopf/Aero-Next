@@ -130,8 +130,8 @@ public class SelectStrategyTests
         // longer MidGame-eligible at all (see its own class doc comment
         // for why - its cash signal was structurally disqualified for
         // 90.3% of real MidGame/LateGame comparisons). BalancedGrowthStrategy
-        // follow-up: a real contested route (RivalCountByServedRoute > 0)
-        // gives AiToolkit.NetworkTroubleRatio a nonzero reading, so
+        // follow-up: a route unprofitable for 2 quarters running gives
+        // AiToolkit.NetworkTroubleRatio a nonzero reading, so
         // NetworkOptimizerStrategy's own Suitability wins the
         // now-three-way MidGame/LateGame comparison regardless of cash -
         // the guaranteed partition (see NetworkOptimizerStrategy's own
@@ -140,11 +140,11 @@ public class SelectStrategyTests
         var away = MakeCity("away", Region.NorthAmerica, 1, 1, 100);
         var aircraft = new AircraftType("t", "Test", Seats: 100);
         var route = new Route(home, away, aircraft, AircraftCount: 1);
-        var rivalCount = new System.Collections.Generic.Dictionary<(string, string), int> { [QuarterEngine.NormalizedPairKey(home, away)] = 1 };
+        var history = new System.Collections.Generic.Dictionary<(string, string), AiRouteHistory> { [QuarterEngine.NormalizedPairKey(home, away)] = new AiRouteHistory(null, null, ConsecutiveUnprofitableQuarters: 2) };
 
         StrategyContext MakeTroubledContext(Money cash) =>
             new(new[] { route }, QuarterEngine.BaseActionCap, new[] { home, away }, DemandModel, Array.Empty<AircraftType>(), AirlineFleet.Empty,
-                Region.NorthAmerica, home, AvailableCash: cash, RivalCountByServedRoute: rivalCount);
+                Region.NorthAmerica, home, AvailableCash: cash, RouteHistoryByPair: history);
 
         var chosenPoor = BaselineAi.SelectStrategy(null, quarterNumber: 100, MakeTroubledContext(Money.FromDollars(2_000_000)));
         var chosenRich = BaselineAi.SelectStrategy(null, quarterNumber: 100, MakeTroubledContext(Money.FromDollars(20_000_000)));

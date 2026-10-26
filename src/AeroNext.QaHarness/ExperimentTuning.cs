@@ -38,7 +38,7 @@ public enum AustralAsiaAircraftMode
 /// AustralAsia's own factor D (intra-region demand multiplier) started here
 /// and graduated to real, unconditional gameplay behavior once the
 /// experiment confirmed it — see
-/// <see cref="GravityDemandModel.AustralAsiaTunedIntraRegionMultipliers"/>.
+/// <see cref="GravityDemandModel.ShippedIntraRegionMultipliers"/>.
 /// It no longer has a knob for AustralAsia specifically: every real
 /// per-quarter call site applies that entry directly, not gated by this
 /// record. AustralAsia's factors S (this file) and A were measured *not*
@@ -91,7 +91,7 @@ public sealed record ExperimentTuning
     /// SouthAmerica's own factor D (docs/SOUTHAMERICA_TUNING_EXPERIMENTS.md),
     /// screening the same intra-region demand multiplier mechanism M65
     /// shipped for AustralAsia. 1.0 = no change. Merges with, and never
-    /// replaces, <see cref="GravityDemandModel.AustralAsiaTunedIntraRegionMultipliers"/>,
+    /// replaces, <see cref="GravityDemandModel.ShippedIntraRegionMultipliers"/>,
     /// which stays real and unconditional regardless of this knob.
     /// Measured (3 levels, 1.25/1.5/2.0): Rio's own win rate never moved
     /// (0.0% flat) — a flat regional multiplier scales every pair together
@@ -168,8 +168,8 @@ public sealed record ExperimentTuning
     /// </summary>
     public IReadOnlyDictionary<Region, double> IntraRegionDemandMultipliers =>
         SouthAmericaIntraRegionDemandMultiplier == 1.0
-            ? GravityDemandModel.AustralAsiaTunedIntraRegionMultipliers
-            : new Dictionary<Region, double>(GravityDemandModel.AustralAsiaTunedIntraRegionMultipliers)
+            ? GravityDemandModel.ShippedIntraRegionMultipliers
+            : new Dictionary<Region, double>(GravityDemandModel.ShippedIntraRegionMultipliers)
             {
                 [Region.SouthAmerica] = SouthAmericaIntraRegionDemandMultiplier,
             };

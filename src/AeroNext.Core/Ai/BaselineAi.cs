@@ -68,7 +68,7 @@ public static class BaselineAi
     /// gets its own order rejected and keeps comfortable margin for the
     /// same quarter's salary/operating cost.
     /// </summary>
-    private const int AircraftOrderCashComfortMultiplier = 3;
+    internal const int AircraftOrderCashComfortMultiplier = 3;
 
     internal static Money ComfortableOrderCost(AircraftType type) => type.Cost * AircraftOrderCashComfortMultiplier;
 
@@ -133,119 +133,6 @@ public static class BaselineAi
         return eligible[0];
     }
 
-    /// <param name="excludePairKeys">
-    /// M55: normalized pair keys (QuarterEngine.NormalizedPairKey) to
-    /// skip entirely, regardless of load factor - null (the default)
-    /// preserves every pre-M55 call site's exact behavior (including the
-    /// now-deleted BaselineAi.DecideOrders, this method's own frozen
-    /// legacy caller until it was removed as orphaned code).
-    /// RapidExpansionStrategy passes AiToolkit.RecentlyShrunkPairKeys
-    /// here, the real fix for the oscillation M43 traced: shrinking a
-    /// route mechanically raises its own load factor, so without this a
-    /// route shrunk one quarter could rank as "best performing" again the
-    /// very next and get grown right back.
-    /// </param>
-    /// <param name="lastQuarterSeatsCarriedByRoute">
-    /// Existing-route-evaluation audit follow-up: real, competitively-
-    /// resolved carried seats from last quarter (StrategyContext's own
-    /// field of the same name, forwarded unchanged - see its own doc
-    /// comment). Null (no real figure for a given pair) falls back to
-    /// RouteEvaluator's own solo/theoretical estimate for that pair - see
-    /// RealCarriedOrSoloEstimate.
-    /// </param>
-    /// <remarks>
-    /// Existing-route-evaluation audit follow-up: real economics gate the
-    /// candidate set here unconditionally - a served route that's
-    /// genuinely losing money at its real economics (FareCalculator.
-    /// EstimatedProfit &lt; Money.Zero, using lastQuarterSeatsCarriedByRoute
-    /// when a real figure exists, the solo estimate otherwise) is excluded
-    /// from growth entirely, and survivors are ranked by their own real
-    /// load factor rather than RouteEvaluator's fare/competition-agnostic
-    /// solo estimate - the same real-data-over-solo-estimate swap
-    /// AiToolkit.ApplyManagementToolkit's own fare-raise loop already
-    /// makes, for the identical reason: a route genuinely losing a share
-    /// fight to a rival can look "full" under the solo estimate while
-    /// carrying only a fraction of that in reality. This used to be
-    /// optional (an `enableRealProfitabilityGate` parameter, off by
-    /// default) while BaselineAi.DecideOrders and RapidExpansionStrategy
-    /// still called this method without wanting the gate; both are gone
-    /// now - DecideOrders was deleted as orphaned code, and
-    /// RapidExpansionStrategy moved to its own demand-ranked
-    /// FindBestExistingRouteByDemand instead, specifically because a real
-    /// 300-game sweep found the profitability gate a genuine regression
-    /// for that strategy's rapid-growth posture (Europe bankruptcy
-    /// 12.2%→13.7%, see its own class doc comment) - so profitability-
-    /// gated ranking is what every real remaining caller
-    /// (NetworkOptimizerStrategy, BalancedGrowthStrategy) always wants,
-    /// measured as a true no-op for both via the same sweep. The floor is
-    /// deliberately never a cross-pair ranking signal (docs/BASELINE_AI_ROADMAP.md's
-    /// own M56 section found ranking growth *candidates* by profit across
-    /// different pairs always collapses into favoring the smallest
-    /// aircraft available, unbounded) - it only ever excludes a real loser
-    /// from being grown at all, the same shape
-    /// AiToolkit.ProfitabilityFloor/ApplyMarketingCampaign's own
-    /// Profit &lt; Money.Zero filter already use safely.
-    /// </remarks>
-    /// <param name="regionsNotYetLed">
-    /// Win-condition-awareness follow-up (default null, "ablation lever,
-    /// off is exactly old behavior") - a real diagnostic found the reason
-    /// some regions' own home airlines almost never win despite a real
-    /// foothold abroad: nothing in growth selection ever distinguished
-    /// "a region I'm present in" from "a region I'm actually leading," so
-    /// a foreign route gets opened once and never reinforced past a bare
-    /// toehold. When provided, a route touching a region in this set
-    /// sorts strictly ahead of one that doesn't - a new leading tier, with
-    /// the existing real-load-factor ranking staying the tie-break
-    /// *within* that tier, never overridden. Null or empty (every
-    /// existing caller) makes the tier a no-op - every route reads as
-    /// "not preferred" equally, so the ordering degenerates to exactly
-    /// today's behavior. Never influences whether this method returns a
-    /// route at all, only which one wins among real candidates already
-    /// being ranked for their own reasons - deliberately never a
-    /// Suitability signal. See StrategyContext.RegionsLedLastQuarter's
-    /// own doc comment for why that distinction matters here specifically.
-    /// </param>
-    internal static Route? FindBestPerformingRoute(
-        IReadOnlyList<Route> currentRoutes, GravityDemandModel demandModel, IReadOnlySet<(string, string)>? excludePairKeys = null,
-        IReadOnlyDictionary<(string OriginId, string DestinationId), long>? lastQuarterSeatsCarriedByRoute = null,
-        IReadOnlySet<Region>? regionsNotYetLed = null)
-    {
-        var routeLoads = RouteEvaluator.EvaluateNetwork(currentRoutes, demandModel)
-            .Where(l => excludePairKeys is null || !excludePairKeys.Contains(QuarterEngine.NormalizedPairKey(l.Route.Origin, l.Route.Destination)));
-
-        return routeLoads
-            .Select(l => (Load: l, RealCarried: RealCarriedOrSoloEstimate(l, lastQuarterSeatsCarriedByRoute)))
-            .Where(x => FareCalculator.EstimatedProfit(x.Load.Route, x.RealCarried) >= Money.Zero)
-            .OrderByDescending(x => TouchesRegionNotYetLed(x.Load.Route, regionsNotYetLed))
-            .ThenByDescending(x => x.Load.SeatsPerQuarter == 0 ? 0.0 : (double)x.RealCarried / x.Load.SeatsPerQuarter)
-            .ThenBy(x => x.Load.Route.Origin.Id, StringComparer.Ordinal)
-            .ThenBy(x => x.Load.Route.Destination.Id, StringComparer.Ordinal)
-            .Select(x => x.Load.Route)
-            .FirstOrDefault();
-    }
-
-    /// <summary>Win-condition-awareness follow-up: true when either endpoint is a region FindBestPerformingRoute's own caller flagged as not yet led - see that parameter's own doc comment.</summary>
-    private static bool TouchesRegionNotYetLed(Route route, IReadOnlySet<Region>? regionsNotYetLed) =>
-        regionsNotYetLed is not null && (regionsNotYetLed.Contains(route.Origin.Region) || regionsNotYetLed.Contains(route.Destination.Region));
-
-    /// <summary>
-    /// Existing-route-evaluation audit follow-up: a deliberate, small
-    /// duplicate of AiToolkit.BestAvailableCarried's own real-data-or-
-    /// solo-estimate fallback - not a shared call, because AiToolkit
-    /// depends on BaselineAi (not the reverse) and this method must not
-    /// introduce the opposite dependency.
-    /// </summary>
-    private static long RealCarriedOrSoloEstimate(RouteLoad load, IReadOnlyDictionary<(string OriginId, string DestinationId), long>? lastQuarterSeatsCarriedByRoute)
-    {
-        if (lastQuarterSeatsCarriedByRoute is null)
-        {
-            return load.PassengersCarried;
-        }
-
-        var key = QuarterEngine.NormalizedPairKey(load.Route.Origin, load.Route.Destination);
-        return lastQuarterSeatsCarriedByRoute.TryGetValue(key, out var real) ? real : load.PassengersCarried;
-    }
-
     /// <summary>M37: FareCalculator's own default, grossed up by FareRaiseFraction — the standard double-then-round-once cents pattern FareCalculator itself already uses.</summary>
     internal static Money RaisedFare(Route route)
     {
@@ -260,22 +147,27 @@ public static class BaselineAi
         return new Money(cents);
     }
 
-    /// <summary>M33: true when availableSlotsByCity is null (permissive), or this airline has a slot left at every gateway origin/destination touches.</summary>
-    internal static bool HasSlotAtEveryGateway(City origin, City destination, IReadOnlyDictionary<string, int>? availableSlotsByCity, Dictionary<string, int> slotsReservedByCity)
+    /// <summary>
+    /// M33: true when availableSlotsByCity is null (permissive), or this
+    /// airline has a slot left at every gateway the route lands at -
+    /// origin, destination, and any refuelling stops
+    /// (docs/MULTI_STOP_ROUTES_DESIGN.md).
+    /// </summary>
+    internal static bool HasSlotAtEveryGateway(City origin, City destination, IReadOnlyDictionary<string, int>? availableSlotsByCity, Dictionary<string, int> slotsReservedByCity, StopList stops = default)
     {
         if (availableSlotsByCity is null)
         {
             return true;
         }
 
-        return new[] { origin, destination }
+        return RoutePath.Cities(origin, stops, destination)
             .Where(c => c.GateCapacity is not null)
             .All(c => availableSlotsByCity.GetValueOrDefault(c.Id) - slotsReservedByCity.GetValueOrDefault(c.Id) > 0);
     }
 
-    internal static void ReserveSlots(City origin, City destination, Dictionary<string, int> slotsReservedByCity)
+    internal static void ReserveSlots(City origin, City destination, Dictionary<string, int> slotsReservedByCity, StopList stops = default)
     {
-        foreach (var city in new[] { origin, destination }.Where(c => c.GateCapacity is not null))
+        foreach (var city in RoutePath.Cities(origin, stops, destination).Where(c => c.GateCapacity is not null))
         {
             slotsReservedByCity[city.Id] = slotsReservedByCity.GetValueOrDefault(city.Id) + 1;
         }

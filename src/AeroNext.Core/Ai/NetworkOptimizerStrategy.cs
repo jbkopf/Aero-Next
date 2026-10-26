@@ -217,7 +217,7 @@ public sealed class NetworkOptimizerStrategy : IAiStrategy
     /// zero means BalancedGrowthStrategy wins instead) - a guaranteed
     /// non-overlapping partition, not a hoped-for one.
     /// </summary>
-    public double Suitability(StrategyContext context) => AiToolkit.NetworkTroubleRatio(context);
+    public double Suitability(StrategyContext context) => AiToolkit.IsNetworkInTrouble(context) ? AiToolkit.NetworkTroubleRatio(context) : 0.0;
 
     public IReadOnlyList<QuarterOrder> DecideOrders(StrategyContext context)
     {
@@ -233,67 +233,13 @@ public sealed class NetworkOptimizerStrategy : IAiStrategy
         // run it after growth).
         AiToolkit.ApplyMarketingCampaign(context, orders, ref spent);
 
-        // 2. Grow the best-performing existing route - a real capability
+        // 2. Grow an existing route - a real capability
         // DomesticProfitOptimizerStrategy doesn't have at all (its own
-        // new-pair search excludes already-served pairs outright).
-        // Mirrors RapidExpansionStrategy's own step 2 exactly, same M55
-        // cooldown exclusion.
-        var bestExisting = BaselineAi.FindBestPerformingRoute(
-            context.CurrentRoutes, context.DemandModel,
-            excludePairKeys: AiToolkit.RecentlyShrunkPairKeys(context, AiToolkit.GrowthCooldownQuarters),
-            lastQuarterSeatsCarriedByRoute: context.LastQuarterSeatsCarriedByRoute,
-            regionsNotYetLed: AiToolkit.RegionsNotYetLed(context));
-        if (bestExisting is not null && spent + 1 <= context.ActionCap
-            && BaselineAi.HasSlotAtEveryGateway(bestExisting.Origin, bestExisting.Destination, context.AvailableSlotsByCity, slotsReservedByCity)
-            && AiToolkit.HasRoomAtEveryCity(bestExisting.Origin, bestExisting.Destination, context.CityWideSlotsRemaining, citySpendReservedByCity))
-        {
-            // reservedUnitIds is provably still empty here - step 1
-            // (marketing) never touches fleet units, and this is the
-            // first fleet-touching step in this strategy's own order -
-            // so !reservedUnitIds.Contains(u.Id) is always true in
-            // every real call. Kept anyway (a coverage gap, not a bug)
-            // for parity with RapidExpansionStrategy's own identically-
-            // shaped step, where the same check IS reachable both ways,
-            // and as a defensive guard against a future edit that adds
-            // an earlier fleet-touching step.
-            var idleUnit = context.OwnFleet.Idle
-                .Where(u => u.Type.Id == bestExisting.Aircraft.Id && !reservedUnitIds.Contains(u.Id))
-                .OrderBy(u => u.Id)
-                .FirstOrDefault();
-
-            if (idleUnit is not null)
-            {
-                orders.Add(new RouteOrder(bestExisting.Origin, bestExisting.Destination, bestExisting.Aircraft));
-                reservedUnitIds.Add(idleUnit.Id);
-                BaselineAi.ReserveSlots(bestExisting.Origin, bestExisting.Destination, slotsReservedByCity);
-                AiToolkit.ReserveCityWideSlots(bestExisting.Origin, bestExisting.Destination, citySpendReservedByCity);
-                spent += 1;
-            }
-            else if (context.AvailableCash is not null && FinancialState.CanAfford(context.AvailableCash.Value, BaselineAi.ComfortableOrderCost(bestExisting.Aircraft))
-                && (context.PurchasableTypes is null || context.PurchasableTypes.Contains(bestExisting.Aircraft)))
-            {
-                orders.Add(new AircraftOrder(bestExisting.Aircraft, Quantity: 1));
-                spent += 1;
-            }
-            else if (context.LeasableTypes is null || context.LeasableTypes.Contains(bestExisting.Aircraft))
-            {
-                // Leasing resolves next quarter now (two-phase,
-                // docs/AIRCRAFT_ACQUISITION_ROADMAP.md) - submit it alone,
-                // 1 action, no paired RouteOrder. Once delivered it shows
-                // up idle and a later quarter's own re-evaluation picks it
-                // up via this same step's idleUnit branch above.
-                orders.Add(new LeaseAircraftOrder(bestExisting.Aircraft, Quantity: 1));
-                spent += 1;
-            }
-            // else: this route's own type is no longer legally
-            // purchasable or leasable for this home city right now
-            // (geopolitical-aircraft-restrictions follow-up,
-            // docs/AI_ACQUISITION_AWARENESS_GAPS_ROADMAP.md) - do nothing
-            // this quarter rather than submit an order QuarterEngine would
-            // reject anyway. The route keeps flying regardless; it just
-            // can't grow until something goes idle or the restriction
-            // lifts.
-        }
+        // new-pair search excludes already-served pairs outright). The
+        // shared step every growth strategy uses: idle aircraft first,
+        // buy or lease only when none has a profitable home.
+        AiToolkit.GrowExistingRoute(context, orders, ref spent, reservedUnitIds, slotsReservedByCity, citySpendReservedByCity,
+            BaselineAi.AircraftOrderCashComfortMultiplier, AiToolkit.RegionsNotYetLed(context));
 
         // 3. A new pair - last priority, only if budget remains.
         // NetworkOptimizerStrategy follow-up: reuses AiToolkit.FindMostProfitablePair/
@@ -308,13 +254,21 @@ public sealed class NetworkOptimizerStrategy : IAiStrategy
         if (spent + 1 <= context.ActionCap)
         {
             var best = AiToolkit.FindMostProfitablePair(context, reservedUnitIds, validOriginCityIds,
-                p => p.Origin.Region == context.HomeRegion && p.Destination.Region == context.HomeRegion);
+                p => p.Origin.Region == context.HomeRegion && p.Destination.Region == context.HomeRegion,
+                slotsReservedByCity, citySpendReservedByCity);
             AiToolkit.TryProposeCandidate(context, best, validOriginCityIds, orders, reservedUnitIds, slotsReservedByCity, citySpendReservedByCity, ref spent);
         }
 
         // 4. Negotiate a domestic gateway - never cross-region, same
         // contract as DomesticProfitOptimizerStrategy.
-        var bestDomesticGateway = DomesticProfitOptimizerStrategy.FindBestUnservedDomesticGateway(context) ?? DomesticProfitOptimizerStrategy.FindBestIdleContestableDomesticGateway(context);
+        // Multi-stop routes (docs/MULTI_STOP_ROUTES_DESIGN.md): a home-region
+        // refuelling stop its best profitable domestic multi-stop route
+        // still needs comes first.
+        var bestDomesticGateway = AiToolkit.FindStopNeededByBestMultiStopPlan(context, reservedUnitIds, validOriginCityIds,
+                p => p.Origin.Region == context.HomeRegion && p.Destination.Region == context.HomeRegion,
+                slotsReservedByCity, citySpendReservedByCity, stopFilter: c => c.Region == context.HomeRegion)
+            ?? DomesticProfitOptimizerStrategy.FindBestUnservedDomesticGateway(context)
+            ?? DomesticProfitOptimizerStrategy.FindBestIdleContestableDomesticGateway(context);
         AiToolkit.NegotiateOrBorrow(context, bestDomesticGateway, orders, ref spent);
 
         // 5. Shared toolkit - free, always last, same as every strategy.

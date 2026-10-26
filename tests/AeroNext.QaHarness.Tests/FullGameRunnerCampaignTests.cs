@@ -27,16 +27,14 @@ public class FullGameRunnerCampaignTests
         FullGameRunner.Run(seed, seed, seed + 500_000, quarters, seats, Cities, Fleet, Growth, tradeRestrictions: Restrictions);
 
     [Fact]
-    public void SweepConfiguredCampaign_EndsEarlyOnRealDominance_AfterABankruptcy()
+    public void SweepConfiguredCampaign_EndsEarlyOnRealDominance()
     {
-        // Seed 33 was picked by searching sweep-configured seeds for a game
-        // that exercises the path nearly every real sweep game ends on - an
-        // early dominance win breaking out of the quarter loop - with an
-        // airline going bankrupt well beforehand, so the bankrupt-airline
-        // quarters (frozen routes, sticky bankruptcy) run too. If AI tuning
-        // changes stop this seed producing that shape, re-pick a seed rather
-        // than weakening the assertions.
-        const int seed = 33;
+        // Seed 11 was picked by searching sweep-configured seeds for a game
+        // that ends the way most real sweep games do - a dominance win
+        // breaking out of the quarter loop early (here at quarter 6). If AI
+        // tuning changes stop this seed producing that shape, re-pick a seed
+        // rather than weakening the assertions.
+        const int seed = 11;
         var result = Run(SweepSeats(seed), seed, quarters: 244);
 
         Assert.True(result.Success, string.Join("; ", result.Violations.Select(v => $"Q{v.Quarter} {v.AirlineName}: {v.Description}")));
@@ -45,13 +43,34 @@ public class FullGameRunnerCampaignTests
         Assert.True(result.WinQuarter < 244, "Expected an early win, not an end-of-campaign ranking.");
         Assert.Equal(result.WinQuarter, result.QuartersRun);
         Assert.True(result.WinnerRegionsDominated >= WinConditionChecker.RequiredRegionCount);
+    }
 
+    [Fact]
+    public void SweepConfiguredCampaign_BankruptAirlineStaysOut_ForTheRestOfTheGame()
+    {
+        // Hard difficulty, seed 165: an airline goes bankrupt at quarter 6
+        // and the game runs on to quarter 114, so every later
+        // quarter exercises the bankrupt-airline path and its invariant
+        // checks (bankruptcy is sticky, routes and action cap stay frozen) -
+        // Success would be false if any of them tripped. Bankruptcies became
+        // rare enough (after the AI stopped putting oversized aircraft on thin
+        // routes) that no Normal-difficulty seed in 1-100 had one early
+        // enough to be followed by more play. Re-pick rather than weaken.
+        // Re-picked again (3 -> 165) when sustained-loss closure stopped
+        // ignoring losing streaks that began before the mid-game: Distress
+        // now closes a dead starting route, and seed 3's Papeete airline
+        // survives. Only 1 Hard seed in 41-200 qualified.
+        const int seed = 165;
+        var result = FullGameRunner.Run(seed, seed, seed + 500_000, 244, SweepSeats(seed), Cities, Fleet, Growth,
+            difficulty: GameDifficulty.Hard, tradeRestrictions: Restrictions);
+
+        Assert.True(result.Success, string.Join("; ", result.Violations.Select(v => $"Q{v.Quarter} {v.AirlineName}: {v.Description}")));
         var bankrupt = result.BankruptcyQuarter.Where(kv => kv.Value is not null).ToList();
         Assert.NotEmpty(bankrupt);
         Assert.All(bankrupt, kv =>
         {
             Assert.NotEqual(result.Winner, kv.Key);
-            Assert.True(kv.Value < result.WinQuarter, $"{kv.Key} went bankrupt at Q{kv.Value}, expected before the Q{result.WinQuarter} win.");
+            Assert.True(result.QuartersRun - kv.Value >= 20, $"{kv.Key} went bankrupt at Q{kv.Value}; expected plenty of play afterwards (game ran {result.QuartersRun} quarters).");
         });
         Assert.Equal(4 - bankrupt.Count, result.SolventAtEnd);
     }
@@ -65,12 +84,27 @@ public class FullGameRunnerCampaignTests
         // inside a real campaign. Re-picked after the marketing redesign
         // changed the previous seed's (14) game enough that it stopped
         // swapping - the test caught that, as designed. Same
-        // re-pick-don't-weaken rule as above.
-        const int seed = 18;
+        // re-pick-don't-weaken rule as above. Re-picked again (18 -> 16, 6
+        // swaps) when contested routes stopped counting as network
+        // trouble (AiToolkit.NetworkTroubleRatio), which moved most
+        // late-game airlines from NetworkOptimizerStrategy to
+        // BalancedGrowthStrategy. Re-picked again (16 -> 2, 24 swaps) when
+        // the demand model's ground-competition distance
+        // (GravityDemandModel.ShippedGroundCompetitionDistanceKm) cut
+        // short-haul demand.
+        const int seed = 2;
         var result = Run(SweepSeats(seed), seed, quarters: 244);
 
         Assert.True(result.Success, string.Join("; ", result.Violations.Select(v => $"Q{v.Quarter} {v.AirlineName}: {v.Description}")));
         Assert.True(result.TypeSwapsApplied > 0, "Expected this seed's game to apply at least one aircraft type swap.");
+
+        // The sweep summary's strategy-mix and contested-route counters are
+        // populated by the same real campaign: this game runs well into the
+        // mid-game, so both mid/late strategies' quarters and route-quarters
+        // get counted, and contested ones can't exceed the total.
+        Assert.True(result.NetworkOptimizerQuarters + result.BalancedGrowthQuarters > 0);
+        Assert.True(result.RouteQuarters > 0);
+        Assert.InRange(result.ContestedRouteQuarters, 0, result.RouteQuarters);
     }
 
     [Fact]

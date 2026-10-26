@@ -1722,6 +1722,156 @@ ranges, before and after) and wins spread more evenly. Full numbers:
      intercontinental demand are meant to force clashes; if they don't,
      that's a design question as much as an AI one.
 
+   **Progress (2026-09-27, branch `ai-contested-routes`):**
+   - *Found:* contest is limited mostly by city capacity and by small,
+     separated networks. The new-route searches also had a real bug: they
+     ranked every pair and only then checked whether it could be opened
+     (gateway slot, city capacity), so the top pick was usually
+     unopenable and the airline opened nothing (91% / 81% of the time on
+     two measurements).
+   - *Fixed:* `AiToolkit.CanOpenNow` filters every new-route search before
+     ranking, so the best *openable* pair wins. Networks grew; on Normal,
+     games were won around quarter 67 instead of 151, some as early as
+     quarter 6.
+   - *Hard (4-region win, expected to become the default) exposed early
+     bankruptcies*, which the Normal win condition had hidden by ending
+     games first. Traced to `RapidExpansionStrategy` acquiring the
+     longest-range type for every new route regardless of demand. It now
+     picks per type and acquires the type that flies the route most
+     profitably, or nothing. 2x300 Hard games: games with a bankruptcy
+     51/55 -> 15/21, bankrupt airlines 56/61 -> 20/24. AustralAsia didn't
+     move (9/8 -> 10/12); those are the weak-start early bankruptcies.
+   - *Next:* check the other strategies under Hard, then come back to
+     measuring how often routes are actually contested now.
+   - *Multi-stop routes (2026-09-30 to 10-01, branch `multi-stop-routes`,
+     `docs/MULTI_STOP_ROUTES_DESIGN.md`):* tracing early-game losses found
+     81% came from AI airlines flying lone legs into refuelling
+     chokepoints (Gander, Wake) that have almost no demand. Routes can now
+     make refuelling stops at gateways (one slot per aircraft at each),
+     contested share weighs fare plus journey time across rivals, and
+     Rapid Expansion plans multi-stop routes and bids for the stops they
+     need. 2x300 Hard: bankrupt airlines 20/24 -> 10/9, wins 7-8 quarters
+     sooner, Europe's win share down and North America's up; contested
+     route-quarters 2.21% -> 2.93%. Extended to Network Optimizer,
+     Balanced Growth and Domestic Profit Optimizer: games won ~20 quarters
+     sooner (179/181 -> 162/158), wins spread further from Europe,
+     contested route-quarters 2.93% -> 3.38%. Follow-ups:
+     - *Mid/late-game strategy selection (2026-10-03):* traced on 100
+       Hard games, Network Optimizer took 57% of yearly picks (87% after
+       quarter 200), 95% of them triggered only by contested routes that
+       were all profitable - usually one route of ~23 - and airlines
+       almost never left (99% stayed the next year). Contested routes no
+       longer count as network trouble (`AiToolkit.NetworkTroubleRatio`):
+       Network Optimizer now takes 4% of picks, mostly airlines with
+       genuinely losing routes (median cash $0.45B vs $2.77B for Balanced
+       Growth picks), and 21% of them leave each year. 2x300 Hard:
+       bankruptcies unchanged, wins 7 quarters sooner, Europe's wins
+       93/78 -> 47/44 with every other region up, multi-stop route orders
+       up ~27%. Side effect: type swaps fell 94% (32k -> 1.9k per 300
+       games) - only Network Optimizer made proactive swaps. Resolved
+       2026-10-05: Balanced Growth now makes proactive swaps, after
+       fixing two swap-evaluation bugs that caused heavy churn (see the
+       M67 follow-up in `docs/AI_AIRCRAFT_TYPE_SWAP_DESIGN.md`). Trade-off
+       to revisit: airlines 2-3x richer, but wins 8-13 quarters later and
+       Europe's wins back to ~60; network marketing campaigns tripled
+       (unverified whether they pay). Resolved 2026-10-05: losing streaks
+       that began before the mid-game now count toward closure, paced at
+       one closure per airline per quarter (see `BASELINE_AI_ROADMAP.md`,
+       M58 follow-up round 2) - games with a bankruptcy 9/8 -> 5/2.
+       Trouble is now proportional (2026-10-06): Network Optimizer takes
+       over only when at least 5% of routes are losing money in a
+       sustained way (`AiToolkit.TroubleRatioThreshold`). With proactive
+       swaps on it had climbed back to 15.6% of mid/late airline-quarters,
+       mostly rich airlines with one losing route of ~30; 5% -> 5.2%.
+       Tuned across 0/5/10/15/20% on 300 Hard games each (5% and 10%
+       confirmed on a second seed range): outcomes within noise at every
+       value, so the lowest bar that drops the one-route trigger was
+       kept. The QA harness now reports the mid/late strategy mix;
+     - *Stranded stop slots re-checked (2026-10-21):* the assumption
+       that fewer Network Optimizer airlines would leave fewer unused
+       chokepoint slots didn't hold - 622 holdings on 60 Hard games (448
+       before), now mostly with Balanced Growth. Traced: 71% of usable
+       routes through held stops were ruled out by region rules
+       (Balanced Growth reached its 4-region target before the stop bid
+       won; Network Optimizer's home-region rule), 26% legitimately
+       outranked (winners ~2x better). The stranding came from bids
+       racing for the same last region: 336 of Balanced Growth's 751
+       new-region bids went out when pending bids already covered the
+       gap. Balanced Growth now counts the regions its pending
+       negotiations aim at before bidding for a new one
+       (`AiToolkit.RegionsPursuedByPendingNegotiations`): those bids 336
+       -> 68, bids past the target 227 -> 86; 2x300 Hard outcomes within
+       noise. Still open: a "finish what you started" exception (use a
+       held stop's route despite region rules), and endpoint blocking
+       (54% of unused-slot time) - neither done;
+     - held chokepoint slots stranded by a strategy switch: an airline
+       wins a stop under Rapid Expansion or Balanced Growth, then spends
+       the mid/late game in Network Optimizer, which never opens
+       cross-region routes (37% of remaining unused-slot time after the
+       idle-contest fix, 79% of it Network Optimizer). Options: let it
+       use slots it already holds, relinquish unused slots, or leave
+       them to the idle-contest bid;
+     - *AI contested-route estimates (2026-10-08):* traced on 100 Hard
+       games, new routes almost always fill (median load factor 1.00,
+       66% of estimates simply capped at one aircraft's seats), and
+       contest at opening is rare (3.7%), so the even split among pair
+       rivals was close enough. The real error was the region term:
+       demand also divided by rival airlines anywhere in the destination
+       region, so 22% of routes with no rival on the pair carried 2x+
+       the estimate. Removing it made the estimate honest but cut
+       contested route-quarters 8.0% -> 4.4% - the wrong term had been
+       diluting the penalty for a real rival, so the AI entered
+       contested markets readily. That's now an explicit preference,
+       `AiToolkit.ContestAppetite`, applied to ranking only (never to
+       whether a route counts as profitable). Tuned 0/0.5/1/2: contested
+       4.4/8.0/11.2/14.9%, bankruptcies unchanged throughout; 1.0 chosen,
+       to revisit as other changes land. Honest estimates also cut
+       multi-stop route orders ~20% at every appetite. A full fare-and-
+       journey-time share model was judged not worth it while contest at
+       opening stays rare. The QA harness now reports contested
+       route-quarters;
+     - Pacific chokepoints (Honolulu, Wake, Anchorage) are barely used.
+6. **Some eligible starting cities are dead ends** (found 2026-09-28).
+   Any non-gateway city in a home region can be a start
+   (`HomeRegions.EligibleStartingCities`), with no viability check. AI
+   seats always take the region's highest-demand city, so this only bites
+   human starts - including the QA harness's simulated humans, which pick
+   a region and city uniformly at random and are then played by the AI.
+   2x300 Hard games (seeds 1 and 301), AustralAsia by starting city:
+   Papeete 11/11 bankrupt (avg quarter 12), Guam 6/11 (24), Saipan 5/17
+   (32); every other start 0, including Singapore's 198 AI seats. Those
+   three account for every AustralAsia bankruptcy.
+   - *Papeete:* nearest city is Nadi at 3,492 km; only the Comet, DC-6,
+     L-049 and DC-7 reach it in 1955, so the guaranteed starting route is
+     a large, expensive aircraft between two tiny cities (~$2M/quarter
+     loss from quarter 1). `StartingConditions.cs` already notes "no
+     profitable domestic pair at 1955 tech."
+   - *Guam/Saipan:* 219 km apart and ~2,300 km from anything else. The
+     starting route survives a while, but there's nowhere affordable to
+     grow.
+   - *Nouméa, Nadi, Perth*, flagged as weak in the same old comment, went
+     0/43 bankrupt - no longer a problem.
+
+   **Update 2026-10-05:** most of this was the closure rule, not the
+   cities. No dead route could be closed before quarter 41, so these
+   airlines flew their loss-making starting route into bankruptcy. With
+   that fixed, AustralAsia bankruptcies on 2x300 Hard fell 11 -> 1. The
+   starts are still weak; re-measure per city before acting on the
+   options below.
+
+   **Decision for now: keep them as deliberately hard starts.** Options
+   to come back to:
+   1. A start-viability rule (separate from `EligibleStartingCities`,
+      which also feeds destination choices and `RegionalEconomics`), e.g.
+      the city must have a profitable 1955 starting route.
+   2. A workable opening for isolated starts: a cross-region guaranteed
+      route (Papeete-Honolulu, Guam-Tokyo) or a different starting
+      aircraft.
+   3. Keep them, label them as hard starts in setup, and have the QA
+      harness report human-seat and AI-seat outcomes separately, since
+      uniformly random human starts pick dead ends far more often than
+      real players would and skew region-level bankruptcy numbers.
+
 ---
 
 ## Sequencing note: "dynamic demand" vs. Historical Dynamics

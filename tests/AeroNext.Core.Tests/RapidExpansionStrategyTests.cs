@@ -387,6 +387,42 @@ public class RapidExpansionStrategyTests
     }
 
     [Fact]
+    public void DecideOrders_NewPair_NothingIdle_AcquiresTheBestFittingType_NotTheLongestRange()
+    {
+        // "longhaul" has the longest range but 100,000 seats - wildly oversized
+        // for this short, modest route, so it would lose money (operating cost
+        // is charged on seats flown). "fit" is sized for the route. The
+        // longest-range type used to win outright; now the best fit does.
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
+        var near = MakeCity("near", Region.NorthAmerica, 1, 1, 90);
+        var cities = new[] { home, near };
+        var longhaul = new AircraftType("longhaul", "Long Haul", Seats: 100_000, RangeKm: 12_000, CruiseSpeedKmh: 900, CostPerAvailableSeatKm: 0.1);
+        var fit = new AircraftType("fit", "Fit", Seats: 140, RangeKm: 5_000);
+
+        var orders = Strategy.DecideOrders(MakeContext(Array.Empty<Route>(), cities, new[] { longhaul, fit }, Region.NorthAmerica));
+
+        var lease = Assert.Single(orders.OfType<LeaseAircraftOrder>());
+        Assert.Equal("fit", lease.Type.Id);
+    }
+
+    [Fact]
+    public void DecideOrders_NewPair_NothingIdle_NoTypeWouldBeProfitable_AcquiresNothing()
+    {
+        // ~56% load factor for a 140-seat type (36,441 passengers against
+        // 65,520 seats a quarter) - enough to pass the 40% new-pair screen,
+        // but under the ~77% a cost-plus-30% default fare needs to break even.
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
+        var far = MakeCity("far", Region.NorthAmerica, 5, 5, 30);
+        var cities = new[] { home, far };
+        var costly = new AircraftType("costly", "Costly", Seats: 140);
+
+        var orders = Strategy.DecideOrders(MakeContext(Array.Empty<Route>(), cities, new[] { costly }, Region.NorthAmerica, cash: Money.FromDollars(1_000_000_000)));
+
+        Assert.Empty(orders.OfType<LeaseAircraftOrder>());
+        Assert.Empty(orders.OfType<AircraftOrder>());
+    }
+
+    [Fact]
     public void DecideOrders_NewPair_NothingIdle_CashNotComfortable_LeasesInstead()
     {
         var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
@@ -545,7 +581,7 @@ public class RapidExpansionStrategyTests
     }
 
     [Fact]
-    public void DecideOrders_GrowExisting_PicksHigherDemandRoute_NotHigherLoadFactorOne()
+    public void DecideOrders_GrowExisting_SkipsAHalfEmptyRoute_EvenWithFarHigherDemand()
     {
         // Network-profitability follow-up: home-near is capacity-matched
         // to smallAircraft (100% load factor, real numbers verified via
@@ -554,8 +590,11 @@ public class RapidExpansionStrategyTests
         // higher-weight city with a bigger aircraft whose capacity
         // outstrips even its own much larger demand (69.21% load factor,
         // demand 971,770 - over 6x home-near's) - the old real-load-factor
-        // ranking would have picked home-near; the new demand-based one
-        // picks home-far instead. EraAvailableTypes empty and no idle
+        // ranking would have picked home-near; a demand-based one picked
+        // home-far. Growth now goes only where another aircraft pays
+        // (AiToolkit.GrowExistingRoute): home-far's seats are 31% empty, so
+        // more of them earn nothing (-$110.6M), while full home-near's
+        // extra aircraft earns $110.5k - home-near wins. EraAvailableTypes empty and no idle
         // fleet neutralize step 1 entirely (no idle unit, no fallback
         // aircraft to lease/order with), and no cash forces the lease
         // fallback - growing an existing route always leases the exact
@@ -582,7 +621,7 @@ public class RapidExpansionStrategyTests
 
         Assert.Empty(orders.OfType<RouteOrder>());
         var lease = Assert.Single(orders.OfType<LeaseAircraftOrder>());
-        Assert.Equal("big", lease.Type.Id); // home-far's own type, confirming it (not home-near) won
+        Assert.Equal("small", lease.Type.Id); // home-near's own type, confirming it (not home-far) won
     }
 
     [Fact]
@@ -904,6 +943,32 @@ public class RapidExpansionStrategyTests
         var orders = Strategy.DecideOrders(context);
 
         Assert.DoesNotContain(orders.OfType<RouteOrder>(), o => new[] { o.Origin.Id, o.Destination.Id }.Contains("far"));
+    }
+
+    [Fact]
+    public void DecideOrders_BestNewPairHasNoCityCapacity_OpensTheNextBestOneInstead()
+    {
+        // "far" (weight 90) is the better candidate but has no capacity left;
+        // "near" (weight 60, same distance) does. The search only considers
+        // routes it can open now, so it opens "near" rather than doing
+        // nothing. Control: with room at "far", "far" wins - it really was
+        // the top pick.
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
+        var far = MakeCity("far", Region.NorthAmerica, 1, 1, 90, autoCapacity: 5);
+        var near = MakeCity("near", Region.NorthAmerica, -1, -1, 60, autoCapacity: 5);
+        var cities = new[] { home, far, near };
+        var aircraft = new AircraftType("t", "Test", Seats: 140, RangeKm: 5_000);
+        var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, aircraft, quantity: 1, FleetOwnershipMode.Owned);
+
+        StrategyContext Context(int farRoom) => new(
+            Array.Empty<Route>(), 3, cities, DemandModel, new[] { aircraft }, fleet, Region.NorthAmerica, HomeCity: home,
+            CityWideSlotsRemaining: new Dictionary<string, int> { ["far"] = farRoom, ["near"] = 5 });
+
+        var blocked = Assert.Single(Strategy.DecideOrders(Context(farRoom: 0)).OfType<RouteOrder>());
+        var control = Assert.Single(Strategy.DecideOrders(Context(farRoom: 1)).OfType<RouteOrder>());
+
+        Assert.Equal("near", blocked.Destination.Id);
+        Assert.Equal("far", control.Destination.Id);
     }
 
     [Fact]

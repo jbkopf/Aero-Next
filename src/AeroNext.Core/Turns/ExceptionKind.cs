@@ -7,6 +7,7 @@ public enum ExceptionKind
     LoadFactorSurged,
     OrderRejectedOverBudget,
     OrderRejectedOutOfRange,
+    OrderRejectedInvalidStops,
     OrderRejectedAircraftNotYetAvailable,
     ActionCapIncreased,
     RouteAircraftTypeChanged,

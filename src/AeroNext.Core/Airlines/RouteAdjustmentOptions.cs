@@ -20,12 +20,16 @@ public static class RouteAdjustmentOptions
     /// know *which* types are legal, not how many idle units of each
     /// exist — unlike RouteOrder's own idle-unit-count question, which a
     /// separate, already-existing query answers for ordinary growth.
+    ///
+    /// Range is checked against the route's current stops, leg by leg
+    /// (docs/MULTI_STOP_ROUTES_DESIGN.md) - a type that could only fly the
+    /// route with a different stop list isn't offered here.
     /// </summary>
     public static IReadOnlyList<AircraftType> EligibleTypesForSwap(Route route, AirlineFleet fleet) =>
         fleet.Idle
             .Select(u => u.Type)
             .Distinct()
-            .Where(type => type.Id != route.Aircraft.Id && route.DistanceKm <= type.RangeKm)
+            .Where(type => type.Id != route.Aircraft.Id && RoutePath.IsWithinRange(route.Origin, route.Stops, route.Destination, type))
             .OrderBy(type => type.Id, StringComparer.Ordinal)
             .ToList();
 }

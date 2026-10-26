@@ -1,5 +1,7 @@
 using AeroNext.Core;
 using AeroNext.Core.Airlines;
+using AeroNext.Core.Competition;
+using AeroNext.Core.Negotiations;
 using AeroNext.Core.Setup;
 using AeroNext.Core.World;
 using AeroNext.QaHarness;
@@ -11,7 +13,7 @@ using AeroNext.QaHarness;
 // - this is the slower, broader QA tier for "does the whole system hold
 // together across the real space of games," not fast per-commit feedback.
 //
-// Usage: dotnet run --project src/AeroNext.QaHarness [--games N] [--quarters N] [--seed N] [--unconstrained-regions]
+// Usage: dotnet run --project src/AeroNext.QaHarness [--games N] [--quarters N] [--seed N] [--unconstrained-regions] [--difficulty normal|hard]
 //
 // Regions aren't exclusive in GameSetup.CreateSeats any more (a player can
 // share a home region with a rival), but its AI-fill logic still always
@@ -48,6 +50,7 @@ var games = 100;
 var quarters = 244; // the full 1955-2015 campaign, matching M13
 var baseSeed = 1;
 var unconstrainedRegions = false;
+var difficulty = GameDifficulty.Normal;
 
 for (var i = 0; i < args.Length; i++)
 {
@@ -57,6 +60,7 @@ for (var i = 0; i < args.Length; i++)
         case "--quarters": quarters = int.Parse(args[++i]); break;
         case "--seed": baseSeed = int.Parse(args[++i]); break;
         case "--unconstrained-regions": unconstrainedRegions = true; break;
+        case "--difficulty": difficulty = Enum.Parse<GameDifficulty>(args[++i], ignoreCase: true); break;
     }
 }
 
@@ -64,9 +68,10 @@ var cities = CityCatalog.LoadFile(Path.Combine(AppContext.BaseDirectory, "data",
 var fleetCatalog = AircraftCatalog.LoadFile(Path.Combine(AppContext.BaseDirectory, "data", "aircraft.json"));
 var growthSchedule = DemandGrowthCatalog.LoadCampaignSchedule(Path.Combine(AppContext.BaseDirectory, "data")); // M21: baseline curve + authored historical_events.json, merged
 var knownCityIds = cities.Select(c => c.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+var hubProfiles = HubTrafficHistoryCatalog.LoadFile(Path.Combine(AppContext.BaseDirectory, "data", "hub_traffic_history.json"), knownCityIds); // docs/HUB_CAPACITY_GROWTH_DESIGN.md
 var tradeRestrictions = TradeRestrictionCatalog.LoadFile(Path.Combine(AppContext.BaseDirectory, "data", "trade-restrictions.json"), knownCityIds); // geopolitical-aircraft-restrictions follow-up
 
-Console.WriteLine($"AeroNext QA harness: {games} games x {quarters} quarters, base seed {baseSeed}{(unconstrainedRegions ? " [unconstrained regions: duplicates allowed]" : "")}");
+Console.WriteLine($"AeroNext QA harness: {games} games x {quarters} quarters, base seed {baseSeed}, difficulty {difficulty}{(unconstrainedRegions ? " [unconstrained regions: duplicates allowed]" : "")}");
 Console.WriteLine();
 
 var results = new List<FullGameResult>();
@@ -84,7 +89,7 @@ for (var i = 0; i < games; i++)
             ? UnconstrainedSeatGenerator.Generate(configRng, cities)
             : GameSetup.CreateSeats(GameConfigGenerator.Generate(configRng, cities), cities, configRng, fillerWeightExponent: 0.0);
 
-        var result = FullGameRunner.Run(i, configSeed, campaignSeed, quarters, seats, cities, fleetCatalog, growthSchedule, tradeRestrictions: tradeRestrictions);
+        var result = FullGameRunner.Run(i, configSeed, campaignSeed, quarters, seats, cities, fleetCatalog, growthSchedule, difficulty: difficulty, tradeRestrictions: tradeRestrictions, hubProfiles: hubProfiles);
         results.Add(result);
 
         if (!result.Success)
@@ -118,7 +123,15 @@ Console.WriteLine($"  {everBankrupt} games had at least one airline go bankrupt 
 Console.WriteLine($"  {wonOutright.Count}/{cleanResults.Count} clean games had a win-condition winner before the timeline ended" +
     (wonOutright.Count > 0 ? $" (avg quarter {wonOutright.Average(r => r.WinQuarter!.Value):N1})" : ""));
 Console.WriteLine($"  AI activity: {results.Sum(r => r.TypeSwapsApplied)} type swaps, " +
-    $"{results.Sum(r => r.RouteCampaignsApplied)} route marketing campaigns, {results.Sum(r => r.NetworkCampaignsApplied)} network marketing campaigns");
+    $"{results.Sum(r => r.RouteCampaignsApplied)} route marketing campaigns, {results.Sum(r => r.NetworkCampaignsApplied)} network marketing campaigns, " +
+    $"{results.Sum(r => r.MultiStopRouteOrdersApplied)} multi-stop route orders");
+var allRouteQuarters = results.Sum(r => r.RouteQuarters);
+Console.WriteLine($"  Contested route-quarters: {results.Sum(r => r.ContestedRouteQuarters)} of {allRouteQuarters}" +
+    (allRouteQuarters > 0 ? $" ({100.0 * results.Sum(r => r.ContestedRouteQuarters) / allRouteQuarters:N2}%)" : ""));
+var midLateQuarters = results.Sum(r => r.NetworkOptimizerQuarters + r.BalancedGrowthQuarters);
+Console.WriteLine($"  Mid/late-game strategy mix: Network Optimizer {results.Sum(r => r.NetworkOptimizerQuarters)} airline-quarters, " +
+    $"Balanced Growth {results.Sum(r => r.BalancedGrowthQuarters)}" +
+    (midLateQuarters > 0 ? $" ({100.0 * results.Sum(r => r.NetworkOptimizerQuarters) / midLateQuarters:N1}% Network Optimizer)" : ""));
 
 if (hardFailures.Count > 0)
 {

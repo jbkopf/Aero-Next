@@ -62,11 +62,26 @@ public class BalancedGrowthStrategyTests
         var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
         var away = MakeCity("away", Region.NorthAmerica, 1, 1, 100);
         var route = new Route(home, away, Wide, AircraftCount: 1);
+        var history = new Dictionary<(string, string), AiRouteHistory> { [QuarterEngine.NormalizedPairKey(home, away)] = new AiRouteHistory(null, null, ConsecutiveUnprofitableQuarters: 2) };
+        var context = new StrategyContext(new[] { route }, ActionCap: 3, new[] { home, away }, DemandModel, new[] { Wide }, AirlineFleet.Empty,
+            home.Region, home, RouteHistoryByPair: history);
+
+        Assert.Equal(0.0, Strategy.Suitability(context));
+    }
+
+    [Fact]
+    public void Suitability_ContestedButProfitableNetwork_IsOne_StaysInGrowth()
+    {
+        // A rival on the same pair is competition, not trouble
+        // (AiToolkit.NetworkTroubleRatio, 2026-10-03).
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
+        var away = MakeCity("away", Region.NorthAmerica, 1, 1, 100);
+        var route = new Route(home, away, Wide, AircraftCount: 1);
         var rivalCount = new Dictionary<(string, string), int> { [QuarterEngine.NormalizedPairKey(home, away)] = 1 };
         var context = new StrategyContext(new[] { route }, ActionCap: 3, new[] { home, away }, DemandModel, new[] { Wide }, AirlineFleet.Empty,
             home.Region, home, RivalCountByServedRoute: rivalCount);
 
-        Assert.Equal(0.0, Strategy.Suitability(context));
+        Assert.Equal(1.0, Strategy.Suitability(context));
     }
 
     [Fact]
@@ -412,24 +427,24 @@ public class BalancedGrowthStrategyTests
     [Fact]
     public void DecideOrders_Phase2_NegotiatesForTouchedRegionGateway_NotUntouchedRegionOne()
     {
-        // withinEuropeGateway's own weight (1) is deliberately too weak
-        // for any candidate pair reaching it (home/europeHub/asiaHub, the
-        // only Wide-reachable candidates - Small is excluded from this
-        // fixture's own era types) to clear the profitability floor -
-        // pre-verified (Wide, all three: -$10.7M/-$1.9M/-$9.2M) - so Case
-        // 2's own new-pair search leaves it alone. Europe-EastAsia and
-        // home-auHub are already-served routes - either would otherwise
-        // be a real, profitable Case 2 candidate of its own, consuming
-        // the whole remaining budget and leaving nothing for negotiation
-        // - exactly what this test exists to isolate. auHub (AustralAsia)
-        // is the 4th touched region, matching TargetRegionCount=4, so the
-        // negotiation ternary resolves to the within-touched-region
-        // gateway search, not the reach-a-new-region one.
+        // withinEuropeGateway carries enough demand (weight 50) that a
+        // profitable nonstop route to it exists - a gateway bid that isn't
+        // for a planned refuelling stop requires one
+        // (AiToolkit.HasProfitableNonstopRouteTo); an earlier version of
+        // this test used weight 1 precisely so no route reached it, which
+        // that rule now treats as not worth bidding on. Case 2 uses one
+        // action leasing for a new route, leaving the last one for
+        // negotiation - exactly what this test exists to isolate.
+        // Europe-EastAsia and home-auHub are already-served routes. auHub
+        // (AustralAsia) is the 4th touched region, matching
+        // TargetRegionCount=4, so the negotiation ternary resolves to the
+        // within-touched-region gateway search, not the reach-a-new-region
+        // one - and the far bigger untouchedGateway is passed over.
         var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
         var europeHub = MakeCity("euhub", Region.Europe, 10, 10, 100);
         var asiaHub = MakeCity("asiahub", Region.EastAsia, 20, 20, 100);
         var auHub = MakeCity("auhub", Region.AustralAsia, -20, -20, 1);
-        var withinEuropeGateway = MakeCity("eugw", Region.Europe, 11, 11, 1, isGateway: true);
+        var withinEuropeGateway = MakeCity("eugw", Region.Europe, 11, 11, 50, isGateway: true);
         var untouchedGateway = MakeCity("elsewheregw", Region.SouthAmerica, -30, -30, 5000, isGateway: true);
         var cities = new[] { home, europeHub, asiaHub, auHub, withinEuropeGateway, untouchedGateway };
         var existing = new[]
@@ -659,5 +674,72 @@ public class BalancedGrowthStrategyTests
 
         var adjust = Assert.Single(orders.OfType<AdjustRouteOrder>());
         Assert.Equal(Small, adjust.AircraftType);
+    }
+
+    // --- Pending bids count toward the region target (2026-10-21) ---
+
+    /// <summary>
+    /// A North American home with two European gateways (the bigger one,
+    /// eu-big, plus eu-small) and one East Asian gateway, all big enough to
+    /// fly a profitable nonstop route to. Enough actions that the route
+    /// cases never crowd out the bid.
+    /// </summary>
+    private static (StrategyContext Context, City EuBig, City EuSmall, City Asia) PendingBidFixture(int target, params string[] pendingIds)
+    {
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
+        var euBig = MakeCity("eu-big", Region.Europe, 10, 10, 100, isGateway: true);
+        var euSmall = MakeCity("eu-small", Region.Europe, 11, 11, 90, isGateway: true);
+        var asia = MakeCity("asia", Region.EastAsia, 12, 12, 80, isGateway: true);
+        var context = MakeContext(new[] { home, euBig, euSmall, asia }, home, availableCash: Money.FromDollars(1_000_000_000),
+                eraTypes: new[] { Small }, actionCap: 6, targetRegionCountOverride: target)
+            with { PendingNegotiationCityIds = pendingIds.ToHashSet() };
+
+        return (context, euBig, euSmall, asia);
+    }
+
+    [Fact]
+    public void RegionsPursuedByPendingNegotiations_CountsAPendingBidsUntouchedRegion()
+    {
+        var (withPending, _, _, _) = PendingBidFixture(target: 3, "eu-small");
+        var (none, _, _, _) = PendingBidFixture(target: 3);
+
+        Assert.Equal(new[] { Region.Europe }, AiToolkit.RegionsPursuedByPendingNegotiations(withPending, new HashSet<int>(), new HashSet<string> { "home" }, new(), new()));
+        Assert.Empty(AiToolkit.RegionsPursuedByPendingNegotiations(none, new HashSet<int>(), new HashSet<string> { "home" }, new(), new()));
+    }
+
+    [Fact]
+    public void DecideOrders_PendingBidAlreadyCoversTheLastRegion_NoFurtherNewRegionBid()
+    {
+        // Target 2: home (North America) plus the region the pending
+        // European bid is aiming at already make 2 - no bid for East Asia,
+        // or for the other European gateway.
+        var (context, _, _, _) = PendingBidFixture(target: 2, "eu-small");
+
+        var orders = Strategy.DecideOrders(context);
+
+        Assert.Empty(orders.OfType<NegotiationOrder>());
+    }
+
+    [Fact]
+    public void DecideOrders_StillShortWithPendingBids_BidsForARegionNotAlreadyPursued()
+    {
+        // Target 3: home + Europe (pending) is 2, so one more region is
+        // wanted - and it has to be a new one. Without counting the pending
+        // bid, the biggest unserved gateway (eu-big, Europe) would win.
+        var (context, _, _, asia) = PendingBidFixture(target: 3, "eu-small");
+
+        var orders = Strategy.DecideOrders(context);
+
+        Assert.Equal(asia.Id, Assert.Single(orders.OfType<NegotiationOrder>()).TargetCity.Id);
+    }
+
+    [Fact]
+    public void DecideOrders_NoPendingBids_StillBidsForTheBiggestNewRegionGateway()
+    {
+        var (context, euBig, _, _) = PendingBidFixture(target: 3);
+
+        var orders = Strategy.DecideOrders(context);
+
+        Assert.Equal(euBig.Id, Assert.Single(orders.OfType<NegotiationOrder>()).TargetCity.Id);
     }
 }

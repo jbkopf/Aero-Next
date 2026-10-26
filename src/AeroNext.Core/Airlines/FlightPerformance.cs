@@ -33,9 +33,15 @@ public static class FlightPerformance
     /// flies it at least weekly, never a degenerate zero, even on a very
     /// long route near the aircraft's own range limit.
     /// </summary>
-    public static int MaxWeeklyRoundTrips(AircraftType aircraft, double distanceKm)
+    /// <param name="distanceKm">One-way distance flown, every leg added together for a multi-stop route.</param>
+    /// <param name="landingsPerDirection">
+    /// Landings on each one-way trip: 1 for a nonstop route, plus one per
+    /// intermediate stop (docs/MULTI_STOP_ROUTES_DESIGN.md) - each stop
+    /// costs a turnaround's ground time in both directions.
+    /// </param>
+    public static int MaxWeeklyRoundTrips(AircraftType aircraft, double distanceKm, int landingsPerDirection = 1)
     {
-        var roundTripHours = 2 * (distanceKm / aircraft.CruiseSpeedKmh) + 2 * TurnaroundHoursPerLanding;
+        var roundTripHours = 2 * (distanceKm / aircraft.CruiseSpeedKmh) + 2 * landingsPerDirection * TurnaroundHoursPerLanding;
         var weeklyUtilizationHours = UtilizationHoursPerDay * 7;
 
         return Math.Max(1, (int)(weeklyUtilizationHours / roundTripHours));

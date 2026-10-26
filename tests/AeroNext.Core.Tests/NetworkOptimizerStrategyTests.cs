@@ -134,7 +134,7 @@ public class NetworkOptimizerStrategyTests
     }
 
     [Fact]
-    public void Suitability_ThreeOrMoreContestedRoutes_IsOne()
+    public void Suitability_ContestedButProfitableRoutes_AreNotTrouble()
     {
         var home = MakeCity("home", Region.NorthAmerica, 0, 0, 50);
         var b = MakeCity("b", Region.NorthAmerica, 1, 1, 50);
@@ -147,10 +147,13 @@ public class NetworkOptimizerStrategyTests
             new Route(home, c, aircraft, AircraftCount: 1),
             new Route(home, d, aircraft, AircraftCount: 1),
         };
+        // Every route has a rival, none is losing money: competition, not
+        // trouble (AiToolkit.NetworkTroubleRatio, 2026-10-03). Traced, this
+        // alone used to account for 95% of this strategy's selections.
         var rivalCount = routes.ToDictionary(r => QuarterEngine.NormalizedPairKey(r.Origin, r.Destination), _ => 1);
         var context = MakeContext(routes, new[] { home, b, c, d }, new[] { aircraft }, Region.NorthAmerica, rivalCountByServedRoute: rivalCount);
 
-        Assert.Equal(1.0, Strategy.Suitability(context));
+        Assert.Equal(0.0, Strategy.Suitability(context));
     }
 
     [Fact]
@@ -351,16 +354,16 @@ public class NetworkOptimizerStrategyTests
     }
 
     [Fact]
-    public void DecideOrders_GrowExisting_AlreadyLeadsEverywhereTouched_UnchangedFromPlainLoadFactorRanking()
+    public void DecideOrders_GrowExisting_AlreadyLeadsEverywhereTouched_RanksByTheExtraAircraftsProfit()
     {
         // Win-condition-awareness follow-up, the degenerate/no-op case:
         // both regions already led means the region tier can never
-        // distinguish these two candidates, so the plain real-load-factor
-        // ranking decides - exactly today's pre-existing behavior,
-        // reproduced directly rather than only argued by inspection.
-        // Same fixture as the test above, just with EastAsia also marked
-        // led - highLf's own better load factor (100% vs. 93.34%) should
-        // now win. Distinct-but-identical types again, so the winner
+        // distinguish these two candidates, so the profit one more
+        // aircraft would add decides (AiToolkit.GrowExistingRoute). Same
+        // fixture as the test above, just with EastAsia also marked led.
+        // Both routes are full; lowLf's longer, cross-region pair carries
+        // the higher fare, so its extra aircraft earns more ($688k vs
+        // $431k a quarter) and wins. Distinct-but-identical types again, so the winner
         // stays observable via the leased type now that leasing no longer
         // produces a same-quarter RouteOrder (two-phase,
         // docs/AIRCRAFT_ACQUISITION_ROADMAP.md).
@@ -383,7 +386,7 @@ public class NetworkOptimizerStrategyTests
 
         Assert.Empty(orders.OfType<RouteOrder>());
         var lease = Assert.Single(orders.OfType<LeaseAircraftOrder>());
-        Assert.Equal("t-highlf", lease.Type.Id);
+        Assert.Equal("t-lowlf", lease.Type.Id);
     }
 
     [Fact]
@@ -396,10 +399,11 @@ public class NetworkOptimizerStrategyTests
         // under the old, solo-only ranking this is the unambiguous growth
         // winner. But its own real, competitively-resolved carried figure
         // (LastQuarterSeatsCarriedByRoute, set here to 10% of capacity)
-        // makes it a real loser (profit -$1,249,001.00). home-good has a
-        // lower solo load factor (93.34%, no real-data override - real
-        // equals solo) but is genuinely profitable (+$489,735.48) at that
-        // real figure. actionCap 2 lets the lease+route fallback (nothing
+        // makes it a real loser (profit -$1,249,001.00) with nine tenths
+        // of its seats empty, so another aircraft there earns nothing.
+        // home-good (weight 40, so its demand fills its seats - no
+        // real-data override, real equals solo) is full and profitable,
+        // so its extra aircraft pays. actionCap 2 lets the lease+route fallback (nothing
         // idle) fully claim the budget on whichever pair step 2 picks,
         // so no NegotiationOrder or step-3 new-pair order can appear
         // afterward regardless of what candidates exist elsewhere.
@@ -409,7 +413,7 @@ public class NetworkOptimizerStrategyTests
         // (two-phase, docs/AIRCRAFT_ACQUISITION_ROADMAP.md).
         var home = MakeCity("home", Region.NorthAmerica, 0, 0, 100);
         var bad = MakeCity("bad", Region.NorthAmerica, 1, 1, 200);
-        var good = MakeCity("good", Region.NorthAmerica, 2, 2, 8);
+        var good = MakeCity("good", Region.NorthAmerica, 2, 2, 40);
         var cities = new[] { home, bad, good };
         var badAircraft = new AircraftType("t-bad", "Test", Seats: 100, RangeKm: 10_000, CruiseSpeedKmh: 900, CostPerAvailableSeatKm: 0.1);
         var goodAircraft = new AircraftType("t-good", "Test", Seats: 100, RangeKm: 10_000, CruiseSpeedKmh: 900, CostPerAvailableSeatKm: 0.1);
@@ -641,5 +645,42 @@ public class NetworkOptimizerStrategyTests
         var adjust = Assert.Single(orders.OfType<AdjustRouteOrder>());
         Assert.Equal(small, adjust.AircraftType);
         Assert.Empty(orders.OfType<CloseRouteOrder>());
+    }
+
+    // --- Trouble threshold (AiToolkit.TroubleRatioThreshold) ---
+
+    private static (StrategyContext Context, int Routes) NetworkWithLosingRoutes(int losing, int total)
+    {
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 50);
+        var aircraft = new AircraftType("t", "Test", Seats: 5, RangeKm: 20_000);
+        var destinations = Enumerable.Range(1, total).Select(i => MakeCity($"d{i:00}", Region.NorthAmerica, i * 0.5, i * 0.5, 50)).ToList();
+        var routes = destinations.Select(d => new Route(home, d, aircraft, AircraftCount: 1)).ToList();
+        var history = routes.Take(losing).ToDictionary(r => QuarterEngine.NormalizedPairKey(r.Origin, r.Destination), _ => new AiRouteHistory(null, null, ConsecutiveUnprofitableQuarters: 2));
+        var context = MakeContext(routes, destinations.Prepend(home).ToList(), new[] { aircraft }, Region.NorthAmerica, routeHistoryByPair: history);
+
+        return (context, total);
+    }
+
+    [Fact]
+    public void Suitability_OneLosingRouteInThirty_IsBelowTheThreshold_BalancedGrowthKeepsIt()
+    {
+        // 1 in 30 (3.3%) is below TroubleRatioThreshold (5%): one bad route
+        // in a big, healthy network doesn't stop its growth for a year.
+        var (context, _) = NetworkWithLosingRoutes(losing: 1, total: 30);
+
+        Assert.False(AiToolkit.IsNetworkInTrouble(context));
+        Assert.Equal(0.0, Strategy.Suitability(context));
+        Assert.Equal(1.0, new BalancedGrowthStrategy().Suitability(context));
+    }
+
+    [Fact]
+    public void Suitability_TwoLosingRoutesInThirty_ClearsTheThreshold_NetworkOptimizerTakesOver()
+    {
+        // 2 in 30 (6.7%) clears it.
+        var (context, _) = NetworkWithLosingRoutes(losing: 2, total: 30);
+
+        Assert.True(AiToolkit.IsNetworkInTrouble(context));
+        Assert.Equal(2.0 / 30, Strategy.Suitability(context), precision: 9);
+        Assert.Equal(0.0, new BalancedGrowthStrategy().Suitability(context));
     }
 }

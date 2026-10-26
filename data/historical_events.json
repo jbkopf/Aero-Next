@@ -1,8 +1,8 @@
 [
-  { "year": 1955, "globalMultiplier": 0.3,  "cityId": "dxb", "name": "Dubai: minor regional trading post" },
-  { "year": 1985, "globalMultiplier": 1.5,  "cityId": "dxb", "name": "Dubai: Emirates founded, free-trade-zone/aviation-hub strategy begins" },
-  { "year": 2000, "globalMultiplier": 4.0,  "cityId": "dxb", "name": "Dubai: hub build-out through the 1990s" },
-  { "year": 2015, "globalMultiplier": 10.0, "cityId": "dxb", "name": "Dubai: DXB among the world's busiest airports" },
+  { "year": 1955, "globalMultiplier": 0.075, "cityId": "dxb", "name": "Dubai: minor regional trading post (curve damped 4x for balance, 2026-10-24 - see docs/DEMAND_WEIGHT_CALIBRATION_DESIGN.md)" },
+  { "year": 1985, "globalMultiplier": 0.375, "cityId": "dxb", "name": "Dubai: Emirates founded, free-trade-zone/aviation-hub strategy begins" },
+  { "year": 2000, "globalMultiplier": 1.0, "cityId": "dxb", "name": "Dubai: hub build-out through the 1990s" },
+  { "year": 2015, "globalMultiplier": 2.5, "cityId": "dxb", "name": "Dubai: DXB among the world's busiest airports" },
 
   { "year": 1970, "globalMultiplier": 1.15, "kind": "Event", "eventGroup": "747", "name": "Boeing 747 enters service - permanent cost/capacity step-up (no reversion)" },
 

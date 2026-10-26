@@ -119,9 +119,8 @@ namespace AeroNext.Core.Ai;
 ///
 /// M67 (docs/AI_AIRCRAFT_TYPE_SWAP_DESIGN.md): extends M66's
 /// AdjustRouteOrder awareness here, per the user's own direct follow-up
-/// request. Reactive only - enableProactiveTypeSwap stays false,
-/// deliberately, unlike NetworkOptimizerStrategy's own full reactive+
-/// proactive wiring. A real 300-game ablation traced proactive swapping
+/// request. Shipped reactive-only at first, unlike
+/// NetworkOptimizerStrategy's own full reactive+proactive wiring. A real 300-game ablation traced proactive swapping
 /// specifically to a real regression (SouthAmerica bankruptcy
 /// 4→12, total bankruptcy 16→25) once enabled here: this class is the
 /// primary MidGame/LateGame workhorse, active far more broadly than
@@ -132,6 +131,18 @@ namespace AeroNext.Core.Ai;
 /// the user's own explicit call, with proactive revisited as a real
 /// follow-up once aircraft-ordering/leasing work (the user's own stated
 /// next area) is further along.
+///
+/// Proactive swaps on (2026-10-05). Once contested routes stopped counting
+/// as network trouble, this strategy took ~96% of mid/late-game picks and
+/// type swaps fell 94%, so fleets barely modernized. Re-enabling proactive
+/// swaps here first showed heavy churn (30% of swaps were swap-backs),
+/// traced to AiToolkit.EvaluateTypeSwapCandidate itself rather than to
+/// volume: region rivals cut a flown route's estimate and a negative
+/// estimate made the +50% bar negative. Both fixed there. 2x300 Hard,
+/// against proactive off: bankruptcies 8/8 -> 9/8 (one late SouthAmerica
+/// airline, not M67's 4 -> 12), average cash 2-3x higher, wins 8-13
+/// quarters later, Europe's wins 47/44 -> 59/62. See the M67 follow-up in
+/// docs/AI_AIRCRAFT_TYPE_SWAP_DESIGN.md.
 /// </summary>
 public sealed class BalancedGrowthStrategy : IAiStrategy
 {
@@ -159,7 +170,7 @@ public sealed class BalancedGrowthStrategy : IAiStrategy
 
     public IReadOnlySet<GameEra> ApplicableEras { get; } = new HashSet<GameEra> { GameEra.MidGame, GameEra.LateGame };
 
-    public double Suitability(StrategyContext context) => AiToolkit.NetworkTroubleRatio(context) > 0.0 ? 0.0 : 1.0;
+    public double Suitability(StrategyContext context) => AiToolkit.IsNetworkInTrouble(context) ? 0.0 : 1.0;
 
     public IReadOnlyList<QuarterOrder> DecideOrders(StrategyContext context)
     {
@@ -174,66 +185,28 @@ public sealed class BalancedGrowthStrategy : IAiStrategy
 
         // Reinforce what's already there first - the same "proven demand
         // beats an open bet" priority NetworkOptimizerStrategy's own step
-        // 2 already uses, real observed load factor rather than any
-        // estimate.
-        var bestExisting = BaselineAi.FindBestPerformingRoute(
-            context.CurrentRoutes, context.DemandModel,
-            excludePairKeys: AiToolkit.RecentlyShrunkPairKeys(context, AiToolkit.GrowthCooldownQuarters),
-            lastQuarterSeatsCarriedByRoute: context.LastQuarterSeatsCarriedByRoute,
-            regionsNotYetLed: AiToolkit.RegionsNotYetLed(context));
-        if (bestExisting is not null && spent + 1 <= context.ActionCap
-            && BaselineAi.HasSlotAtEveryGateway(bestExisting.Origin, bestExisting.Destination, context.AvailableSlotsByCity, slotsReservedByCity)
-            && AiToolkit.HasRoomAtEveryCity(bestExisting.Origin, bestExisting.Destination, context.CityWideSlotsRemaining, citySpendReservedByCity))
-        {
-            var idleUnit = context.OwnFleet.Idle
-                .Where(u => u.Type.Id == bestExisting.Aircraft.Id && !reservedUnitIds.Contains(u.Id))
-                .OrderBy(u => u.Id)
-                .FirstOrDefault();
-
-            if (idleUnit is not null)
-            {
-                orders.Add(new RouteOrder(bestExisting.Origin, bestExisting.Destination, bestExisting.Aircraft));
-                reservedUnitIds.Add(idleUnit.Id);
-                BaselineAi.ReserveSlots(bestExisting.Origin, bestExisting.Destination, slotsReservedByCity);
-                AiToolkit.ReserveCityWideSlots(bestExisting.Origin, bestExisting.Destination, citySpendReservedByCity);
-                spent += 1;
-            }
-            else if (context.AvailableCash is not null && FinancialState.CanAfford(context.AvailableCash.Value, BaselineAi.ComfortableOrderCost(bestExisting.Aircraft))
-                && (context.PurchasableTypes is null || context.PurchasableTypes.Contains(bestExisting.Aircraft)))
-            {
-                orders.Add(new AircraftOrder(bestExisting.Aircraft, Quantity: 1));
-                spent += 1;
-            }
-            else if (context.LeasableTypes is null || context.LeasableTypes.Contains(bestExisting.Aircraft))
-            {
-                // Leasing resolves next quarter now (two-phase,
-                // docs/AIRCRAFT_ACQUISITION_ROADMAP.md) - submit it alone,
-                // 1 action, no paired RouteOrder. Once delivered it shows
-                // up idle and a later quarter's own re-evaluation picks it
-                // up via this same step's idleUnit branch above.
-                orders.Add(new LeaseAircraftOrder(bestExisting.Aircraft, Quantity: 1));
-                spent += 1;
-            }
-            // else: this route's own type is no longer legally
-            // purchasable or leasable for this home city right now
-            // (geopolitical-aircraft-restrictions follow-up,
-            // docs/AI_ACQUISITION_AWARENESS_GAPS_ROADMAP.md) - do nothing
-            // this quarter rather than submit an order QuarterEngine would
-            // reject anyway.
-        }
+        // 2 uses: idle aircraft onto the existing route they'd earn most
+        // on, buying or leasing only when no idle one has a profitable
+        // home (AiToolkit.GrowExistingRoute).
+        AiToolkit.GrowExistingRoute(context, orders, ref spent, reservedUnitIds, slotsReservedByCity, citySpendReservedByCity,
+            BaselineAi.AircraftOrderCashComfortMultiplier, AiToolkit.RegionsNotYetLed(context));
 
         // Case 1: reach a region not yet touched, chosen by real profit.
         if (touchedRegions.Count < targetRegionCount && spent + 1 <= context.ActionCap)
         {
-            var wonSlotPair = AiToolkit.FindBestUnservedPairTouchingWonSlot(context, reservedUnitIds);
-            var best = wonSlotPair is not null
-                ? AiToolkit.EvaluateCandidate(context, reservedUnitIds, wonSlotPair.Value.Pair, wonSlotPair.Value.Aircraft)
-                : AiToolkit.FindMostProfitablePair(context, reservedUnitIds, validOriginCityIds, p => TouchesUntouchedRegion(p, touchedRegions));
+            // A won gateway's own best pair goes first if it's profitable;
+            // otherwise the ordinary search runs. Multi-stop routes
+            // (docs/MULTI_STOP_ROUTES_DESIGN.md): a held refuelling-stop slot
+            // always offers a thin lone leg here that fails the profit check,
+            // and before this fell through to nothing at all - so the
+            // multi-stop route the slot was won for never opened.
+            var wonSlotPair = AiToolkit.FindBestUnservedPairTouchingWonSlot(context, reservedUnitIds, slotsReservedByCity, citySpendReservedByCity);
+            var best = (wonSlotPair is null ? null : AiToolkit.EvaluateCandidate(context, reservedUnitIds, wonSlotPair.Value.Pair, wonSlotPair.Value.Aircraft))
+                ?? AiToolkit.FindMostProfitablePair(context, reservedUnitIds, validOriginCityIds, p => TouchesUntouchedRegion(p, touchedRegions), slotsReservedByCity, citySpendReservedByCity);
 
             AiToolkit.TryProposeCandidate(context, best, validOriginCityIds, orders, reservedUnitIds, slotsReservedByCity, citySpendReservedByCity, ref spent);
         }
 
-        var newRegionGateway = FindBestUnservedGateway(context, c => !touchedRegions.Contains(c.Region)) ?? AiToolkit.FindBestIdleContestableGateway(context);
 
         // Case 2: within regions already touched, real profit again.
         // Win-condition-awareness follow-up: tries a touched-but-not-yet-led
@@ -251,20 +224,46 @@ public sealed class BalancedGrowthStrategy : IAiStrategy
         if (spent + 1 <= context.ActionCap)
         {
             var regionsNotYetLed = AiToolkit.RegionsNotYetLed(context);
-            var best = AiToolkit.FindMostProfitablePair(context, reservedUnitIds, validOriginCityIds, p => BothEndpointsTouchedAndAtLeastOneUnled(p, touchedRegions, regionsNotYetLed))
-                ?? AiToolkit.FindMostProfitablePair(context, reservedUnitIds, validOriginCityIds, p => BothEndpointsTouched(p, touchedRegions));
+            var best = AiToolkit.FindMostProfitablePair(context, reservedUnitIds, validOriginCityIds, p => BothEndpointsTouchedAndAtLeastOneUnled(p, touchedRegions, regionsNotYetLed), slotsReservedByCity, citySpendReservedByCity)
+                ?? AiToolkit.FindMostProfitablePair(context, reservedUnitIds, validOriginCityIds, p => BothEndpointsTouched(p, touchedRegions), slotsReservedByCity, citySpendReservedByCity);
             AiToolkit.TryProposeCandidate(context, best, validOriginCityIds, orders, reservedUnitIds, slotsReservedByCity, citySpendReservedByCity, ref spent);
         }
 
         var withinRegionGateway = FindBestUnservedGateway(context, c => touchedRegions.Contains(c.Region));
-        AiToolkit.NegotiateOrBorrow(context, touchedRegions.Count < targetRegionCount ? newRegionGateway : withinRegionGateway, orders, ref spent);
+
+        // Multi-stop routes (docs/MULTI_STOP_ROUTES_DESIGN.md): a refuelling
+        // stop this phase's best profitable multi-stop route still needs
+        // comes before any other gateway - reaching a new region while
+        // expanding, else within touched ones, the same split as the two
+        // cases above.
+        //
+        // Pending bids count (2026-10-21): a new-region bid only goes out
+        // while the regions touched plus the regions pending negotiations
+        // already aim at are still short of the target - and then for a
+        // region not already being pursued. Otherwise the bid stays within
+        // touched regions, as it does once the target is reached. Before,
+        // bids for the same last region raced in parallel, and whichever
+        // won second was stranded (see
+        // AiToolkit.RegionsPursuedByPendingNegotiations).
+        var pursuedRegions = touchedRegions.Count < targetRegionCount
+            ? AiToolkit.RegionsPursuedByPendingNegotiations(context, reservedUnitIds, validOriginCityIds, slotsReservedByCity, citySpendReservedByCity)
+            : new HashSet<Region>();
+        var bidForNewRegion = touchedRegions.Count + pursuedRegions.Count < targetRegionCount;
+        var spokenFor = touchedRegions.Union(pursuedRegions).ToHashSet();
+        var plannedStop = AiToolkit.FindStopNeededByBestMultiStopPlan(context, reservedUnitIds, validOriginCityIds,
+            bidForNewRegion ? p => TouchesUntouchedRegion(p, spokenFor) : p => BothEndpointsTouched(p, touchedRegions),
+            slotsReservedByCity, citySpendReservedByCity);
+        var newRegionGateway = bidForNewRegion
+            ? FindBestUnservedGateway(context, c => !spokenFor.Contains(c.Region)) ?? AiToolkit.FindBestIdleContestableGateway(context)
+            : null;
+        AiToolkit.NegotiateOrBorrow(context, plannedStop ?? (bidForNewRegion ? newRegionGateway : withinRegionGateway), orders, ref spent);
 
         // Low priority, same placement as RapidExpansionStrategy - this
         // is a growth-focused strategy, not a fix-what's-broken one
         // (that's NetworkOptimizerStrategy's own job).
         AiToolkit.ApplyMarketingCampaign(context, orders, ref spent);
 
-        AiToolkit.ApplyManagementToolkit(context, orders, reservedUnitIds, spent, enableSustainedSingleAircraftClosure: true, enableReactiveTypeSwap: true, enableProactiveTypeSwap: false); // proactive deliberately off - real regression traced to it, see docs/AI_AIRCRAFT_TYPE_SWAP_DESIGN.md's M67 section
+        AiToolkit.ApplyManagementToolkit(context, orders, reservedUnitIds, spent, enableSustainedSingleAircraftClosure: true, enableReactiveTypeSwap: true, enableProactiveTypeSwap: true);
 
         return orders;
     }
@@ -312,6 +311,7 @@ public sealed class BalancedGrowthStrategy : IAiStrategy
             .Where(c => c.IsGateway && !touchedCityIds.Contains(c.Id) && !alreadyPursued.Contains(c.Id))
             .Where(c => AiToolkit.DistanceFromNetworkKm(context, c) <= maxRangeKm)
             .Where(regionFilter)
+            .Where(c => AiToolkit.HasProfitableNonstopRouteTo(context, c))
             .OrderByDescending(c => c.DemandWeight)
             .ThenBy(c => c.Id, StringComparer.Ordinal)
             .FirstOrDefault();

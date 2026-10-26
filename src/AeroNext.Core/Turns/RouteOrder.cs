@@ -13,9 +13,14 @@ namespace AeroNext.Core.Turns;
 /// aircraft type rejects this order outright — use
 /// <see cref="AdjustRouteOrder"/> to change a served pair's type instead,
 /// then grow it with further RouteOrders if a bigger count is wanted.
+///
+/// Stops (docs/MULTI_STOP_ROUTES_DESIGN.md): opening a new pair, they
+/// become the route's stops; growing a served pair, they must match the
+/// route's current stops (just as the type must match), or the order is
+/// rejected. Every stop must be a gateway, and each needs a free slot.
 /// </summary>
-public sealed record RouteOrder(City Origin, City Destination, AircraftType Aircraft) : QuarterOrder
+public sealed record RouteOrder(City Origin, City Destination, AircraftType Aircraft, StopList Stops = default) : QuarterOrder
 {
-    /// <summary>Whether Aircraft can physically fly Origin-Destination nonstop — M11's range constraint, mirroring Route.IsWithinRange.</summary>
-    public bool IsWithinRange => GreatCircle.DistanceKm(Origin, Destination) <= Aircraft.RangeKm;
+    /// <summary>Whether Aircraft can physically fly every leg — M11's range constraint, mirroring Route.IsWithinRange.</summary>
+    public bool IsWithinRange => RoutePath.IsWithinRange(Origin, Stops, Destination, Aircraft);
 }
