@@ -36,6 +36,7 @@ jobs:
           else
             echo "Sweeps should NOT run."
             echo "run_sweeps=false" >> $GITHUB_OUTPUT
+            echo "No new commits since the last completed run. Skipping sweeps." >> $GITHUB_STEP_SUMMARY
           fi
 
   build:
