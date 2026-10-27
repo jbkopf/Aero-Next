@@ -77,6 +77,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # If adding or removing scenarios, please also update the EXPECTED_SHARD_COUNT variable in the combined-sweep-report job.  
           # Normal Scenario
           - id: "normal"
             seed: 100001
@@ -159,3 +160,81 @@ jobs:
           name: qa-log-${{ matrix.id }}
           path: sweep-output/
           retention-days: 5
+
+  combined-sweep-report:
+    needs: [sweeps, gate]
+    if: ${{!cancelled() && needs.gate.outputs.run_sweeps == 'true'}}
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Download All Sweep Logs
+        uses: actions/download-artifact@v8
+        continue-on-error: true
+        with:
+          pattern: qa-log-*
+          path: sweep-output/
+          merge-multiple: true
+
+      - name: Generate Master Summary Table
+        run: |
+          EXPECTED_SHARD_COUNT=9
+
+          ACTUAL_SHARD_COUNT=$(find sweep-output -type f 2>/dev/null | wc -l)
+
+          # 1. Initialize the Table Headers
+          echo "## 📊 AeroNext Sweep Matrix Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "$ACTUAL_SHARD_COUNT" -eq 0 ]; then
+            echo "### ❌ Critical Infrastructure Failure" >> $GITHUB_STEP_SUMMARY
+            echo "No sweep log artifacts were found. All matrix workers failed before uploading." >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+
+          if [ "$ACTUAL_SHARD_COUNT" -lt "$EXPECTED_SHARD_COUNT" ]; then
+            echo "> ⚠️ **Warning:** Expected **$EXPECTED_SHARD_COUNT** log shards, but only received **$ACTUAL_SHARD_COUNT**. One or more parallel runner environments crashed entirely." >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "| Status | Scenario / File | Clean Passes | Invariant Fails | Crashes |" >> $GITHUB_STEP_SUMMARY
+          echo "| :---: | :--- | :---: | :---: | :---: |" >> $GITHUB_STEP_SUMMARY
+
+          # 2. Iterate through every log file
+          for LOG_FILE in sweep-output/*; do
+            [ -f "$LOG_FILE" ] || continue
+            FILE_NAME=$(basename "$LOG_FILE")
+
+            if ! grep -q "=== Summary ===" "$LOG_FILE"; then
+              # Append explicit error message to the markdown layout and skip to next file
+              echo "| 🔴 | \`$FILE_NAME\` | **No Summary - Shard Failed** | - | - |" >> $GITHUB_STEP_SUMMARY
+              continue
+            fi
+
+            # 3. Extract the lines relative to the summary block
+            RAW_PASSED=$(grep "passed cleanly" "$LOG_FILE")
+            RAW_FAILS=$(grep "failed an invariant check" "$LOG_FILE")
+            RAW_CRASHES=$(grep "crashed with an unhandled exception" "$LOG_FILE")
+
+            # 4. Strip out everything except numbers, slashes, and periods
+            PASSED_CLEANLY=$(echo "$RAW_PASSED" | sed 's/[^0-9\/.]//g')
+            INVARIANT_FAILS=$(echo "$RAW_FAILS" | sed 's/[^0-9\/.]//g')
+            CRASHES=$(echo "$RAW_CRASHES" | sed 's/[^0-9\/.]//g')
+
+            # 5. Extract fractional parameters for dynamic comparison (e.g., 15/15 -> 15 and 15)
+            ACTUAL_PASS=$(echo "$PASSED_CLEANLY" | cut -d'/' -f1)
+            TOTAL_GAMES=$(echo "$PASSED_CLEANLY" | cut -d'/' -f2)
+
+            # 6. Evaluation Logic Gate
+            # Conditions to be healthy: Actual Pass == Total Games AND Fails == 0 AND Crashes == 0
+            if [ "$ACTUAL_PASS" -eq "$TOTAL_GAMES" ] && [ "$INVARIANT_FAILS" -eq 0 ] && [ "$CRASHES" -eq 0 ]; then
+              STATUS="🟢"
+            else
+              STATUS="🔴"
+            fi
+
+            # 7. Append clean numbers and status icon to the global table
+            echo "| $STATUS | \`$FILE_NAME\` | $PASSED_CLEANLY | $INVARIANT_FAILS | $CRASHES |" >> $GITHUB_STEP_SUMMARY
+          done
