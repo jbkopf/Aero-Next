@@ -57,13 +57,28 @@ jobs:
         path: coverage-report/Cobertura.xml
         retention-days: 5
 
-    - parallel: 
+    - name: Build Release
+      run: dotnet build src/AeroNext.QaHarness -c Release --no-restore
+
+    - name: Create output directory
+      run: mkdir -p ./sweep-output
+
+    - parallel:
       - name: Sweep 1
-        run: dotnet run --project src/AeroNext.QaHarness -c Release -- --games 4 --seed 1 --difficulty hard > coverage/deterministic-sweep-1.log
+        run: dotnet run --no-build --project src/AeroNext.QaHarness -c Release -- --games 4 --seed 1 --difficulty hard > sweep-output/deterministic-sweep-1.log
 
       - name: Sweep 2
-        run: dotnet run --project src/AeroNext.QaHarness -c Release -- --games 4 --seed 1 --difficulty hard > coverage/deterministic-sweep-2.log
+        run: dotnet run --no-build --project src/AeroNext.QaHarness -c Release -- --games 4 --seed 1 --difficulty hard > sweep-output/deterministic-sweep-2.log
 
     - name: Compare Sweeps with diff
+      id: compare-sweeps
       run: |
-        diff coverage/deterministic-sweep-1.log coverage/deterministic-sweep-2.log || echo "Differences found between the two sweeps."
+        diff sweep-output/deterministic-sweep-1.log sweep-output/deterministic-sweep-2.log
+
+    - name: Upload Sweep On Failure
+      if: failure()
+      uses: actions/upload-artifact@v7
+      with:
+        name: sweep-output
+        path: sweep-output/
+        retention-days: 5
