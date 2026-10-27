@@ -1,0 +1,240 @@
+name: Nightly sweep
+
+on:
+  schedule:
+    - cron: '27 0 * * *' # Runs at 00:27 UTC every day
+  workflow_dispatch:
+
+jobs:
+
+  gate:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      actions: read
+
+    outputs:
+      run_sweeps: ${{ steps.gate.outputs.run_sweeps }}
+
+    steps:
+      - name: Check if sweeps should run
+        id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          LAST_COMPLETED_SHA=$(gh run list --workflow nightly.yml --status completed --limit 1 --json headSha --jq '.[0].headSha')
+          echo "Last completed run: $LAST_COMPLETED_SHA"
+
+          CURRENT_SHA=${{ github.sha }}
+          echo "Current SHA: $CURRENT_SHA"
+
+          if [ "$LAST_COMPLETED_SHA" != "$CURRENT_SHA" ]; then
+            echo "Sweeps should run."
+            echo "run_sweeps=true" >> $GITHUB_OUTPUT
+          else
+            echo "Sweeps should NOT run."
+            echo "run_sweeps=false" >> $GITHUB_OUTPUT
+          fi
+
+  build:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    needs: gate
+    if: needs.gate.outputs.run_sweeps == 'true'
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Publish Release
+        run: dotnet publish src/AeroNext.QaHarness -c Release --no-restore -o dist
+
+      - name: Upload Pre-compiled Binaries
+        uses: actions/upload-artifact@v7
+        with:
+          name: precompiled-qa-harness.${{ github.sha }}
+          path: dist/
+          retention-days: 5
+
+  sweeps:
+    name: QA (${{ matrix.id }})
+    needs: [gate, build]
+    if: needs.gate.outputs.run_sweeps == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # If adding or removing scenarios, please also update the EXPECTED_SHARD_COUNT variable in the combined-sweep-report job.  
+          # Normal Scenario
+          - id: "normal"
+            seed: 100001
+            games: 200
+            difficulty: "normal"
+            flags: ""
+
+          # Hard Scenarios
+          - id: "hard-1"
+            seed: 200001
+            games: 15
+            difficulty: "hard"
+            flags: ""
+          - id: "hard-2"
+            seed: 200016
+            games: 15
+            difficulty: "hard"
+            flags: ""
+          - id: "hard-3"
+            seed: 200031
+            games: 15
+            difficulty: "hard"
+            flags: ""
+          - id: "hard-4"
+            seed: 200046
+            games: 15
+            difficulty: "hard"
+            flags: ""
+
+          # Unconstrained Regions Scenarios
+          - id: "unconstrained-1"
+            seed: 300001
+            games: 8
+            difficulty: "hard"
+            flags: "--unconstrained-regions"
+          - id: "unconstrained-2"
+            seed: 300009
+            games: 8
+            difficulty: "hard"
+            flags: "--unconstrained-regions"
+          - id: "unconstrained-3"
+            seed: 300017
+            games: 8
+            difficulty: "hard"
+            flags: "--unconstrained-regions"
+          - id: "unconstrained-4"
+            seed: 300025
+            games: 8
+            difficulty: "hard"
+            flags: "--unconstrained-regions"
+
+    steps:
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Download Pre-compiled Binaries
+        uses: actions/download-artifact@v8
+        with:
+          name: precompiled-qa-harness.${{ github.sha }}
+          path: dist/
+
+      - name: Ensure Output Directory Exists
+        run: mkdir -p sweep-output
+
+      - name: Execute QA Scenario Sweep
+        run: >
+          dotnet dist/AeroNext.QaHarness.dll
+          --seed ${{ matrix.seed }}
+          --games ${{ matrix.games }}
+          --difficulty ${{ matrix.difficulty }}
+          ${{ matrix.flags }}
+          > sweep-output/${{ matrix.id }}.log
+
+      - name: Upload Scenario Logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: qa-log-${{ matrix.id }}
+          path: sweep-output/
+          retention-days: 5
+
+  combined-sweep-report:
+    needs: [sweeps, gate]
+    if: ${{!cancelled() && needs.gate.outputs.run_sweeps == 'true'}}
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Download All Sweep Logs
+        uses: actions/download-artifact@v8
+        continue-on-error: true
+        with:
+          pattern: qa-log-*
+          path: sweep-output/
+          merge-multiple: true
+
+      - name: Generate Master Summary Table
+        run: |
+          EXPECTED_SHARD_COUNT=9
+
+          ACTUAL_SHARD_COUNT=$(find sweep-output -type f 2>/dev/null | wc -l)
+
+          # 1. Initialize the Table Headers
+          echo "## 📊 AeroNext Sweep Matrix Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "$ACTUAL_SHARD_COUNT" -eq 0 ]; then
+            echo "### ❌ Critical Infrastructure Failure" >> $GITHUB_STEP_SUMMARY
+            echo "No sweep log artifacts were found. All matrix workers failed before uploading." >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+
+          if [ "$ACTUAL_SHARD_COUNT" -lt "$EXPECTED_SHARD_COUNT" ]; then
+            echo "> ⚠️ **Warning:** Expected **$EXPECTED_SHARD_COUNT** log shards, but only received **$ACTUAL_SHARD_COUNT**. One or more parallel runner environments crashed entirely." >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "| Status | Scenario / File | Clean Passes | Invariant Fails | Crashes |" >> $GITHUB_STEP_SUMMARY
+          echo "| :---: | :--- | :---: | :---: | :---: |" >> $GITHUB_STEP_SUMMARY
+
+          # 2. Iterate through every log file
+          for LOG_FILE in sweep-output/*; do
+            [ -f "$LOG_FILE" ] || continue
+            FILE_NAME=$(basename "$LOG_FILE")
+
+            if ! grep -q "=== Summary ===" "$LOG_FILE"; then
+              # Append explicit error message to the markdown layout and skip to next file
+              echo "| 🔴 | \`$FILE_NAME\` | **No Summary - Shard Failed** | - | - |" >> $GITHUB_STEP_SUMMARY
+              continue
+            fi
+
+            # 3. Extract the lines relative to the summary block
+            RAW_PASSED=$(grep "passed cleanly" "$LOG_FILE")
+            RAW_FAILS=$(grep "failed an invariant check" "$LOG_FILE")
+            RAW_CRASHES=$(grep "crashed with an unhandled exception" "$LOG_FILE")
+
+            # 4. Strip out everything except numbers, slashes, and periods
+            PASSED_CLEANLY=$(echo "$RAW_PASSED" | sed 's/[^0-9\/.]//g')
+            INVARIANT_FAILS=$(echo "$RAW_FAILS" | sed 's/[^0-9\/.]//g')
+            CRASHES=$(echo "$RAW_CRASHES" | sed 's/[^0-9\/.]//g')
+
+            # 5. Extract fractional parameters for dynamic comparison (e.g., 15/15 -> 15 and 15)
+            ACTUAL_PASS=$(echo "$PASSED_CLEANLY" | cut -d'/' -f1)
+            TOTAL_GAMES=$(echo "$PASSED_CLEANLY" | cut -d'/' -f2)
+
+            # 6. Evaluation Logic Gate
+            # Conditions to be healthy: Actual Pass == Total Games AND Fails == 0 AND Crashes == 0
+            if [ "$ACTUAL_PASS" -eq "$TOTAL_GAMES" ] && [ "$INVARIANT_FAILS" -eq 0 ] && [ "$CRASHES" -eq 0 ]; then
+              STATUS="🟢"
+            else
+              STATUS="🔴"
+            fi
+
+            # 7. Append clean numbers and status icon to the global table
+            echo "| $STATUS | \`$FILE_NAME\` | $PASSED_CLEANLY | $INVARIANT_FAILS | $CRASHES |" >> $GITHUB_STEP_SUMMARY
+          done
