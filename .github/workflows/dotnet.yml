@@ -68,7 +68,7 @@ jobs:
         run: dotnet run --no-build --project src/AeroNext.QaHarness -c Release -- --games 4 --seed 1 --difficulty hard > sweep-output/deterministic-sweep-1.log
 
       - name: Sweep 2
-        run: dotnet run --no-build --project src/AeroNext.QaHarness -c Release -- --games 4 --seed 1 --difficulty hard > sweep-output/deterministic-sweep-2.log
+        run: dotnet run --no-build --project src/AeroNext.QaHarness -c Release -- --games 4 --seed 2 --difficulty hard > sweep-output/deterministic-sweep-2.log
 
     - name: Compare Sweeps with diff
       id: compare-sweeps
