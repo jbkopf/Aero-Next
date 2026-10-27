@@ -1,0 +1,162 @@
+name: Nightly sweep
+
+on:
+  schedule:
+    - cron: '27 0 * * *' # Runs at 00:27 UTC every day
+  workflow_dispatch:
+  push:
+
+jobs:
+
+  gate:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      actions: read
+
+    outputs:
+      run_sweeps: ${{ steps.gate.outputs.run_sweeps }}
+
+    steps:
+      - name: Check if sweeps should run
+        id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          LAST_COMPLETED_SHA=$(gh run list --workflow nightly.yml --status completed --limit 1 --json headSha --jq '.[0].headSha')
+          echo "Last completed run: $LAST_COMPLETED_SHA"
+
+          CURRENT_SHA=${{ github.sha }}
+          echo "Current SHA: $CURRENT_SHA"
+
+          if [ "$LAST_COMPLETED_SHA" != "$CURRENT_SHA" ]; then
+            echo "Sweeps should run."
+            echo "run_sweeps=true" >> $GITHUB_OUTPUT
+          else
+            echo "Sweeps should NOT run."
+            echo "run_sweeps=false" >> $GITHUB_OUTPUT
+          fi
+
+  build:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    needs: gate
+    if: needs.gate.outputs.run_sweeps == 'true'
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Publish Release
+        run: dotnet publish src/AeroNext.QaHarness -c Release --no-restore -o dist
+
+      - name: Upload Pre-compiled Binaries
+        uses: actions/upload-artifact@v7
+        with:
+          name: precompiled-qa-harness.${{ github.sha }}
+          path: dist/
+          retention-days: 5
+
+  sweeps:
+    name: QA (${{ matrix.id }})
+    needs: [gate, build]
+    if: needs.gate.outputs.run_sweeps == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Normal Scenario
+          - id: "normal"
+            seed: 100001
+            games: 200
+            difficulty: "normal"
+            flags: ""
+
+          # Hard Scenarios
+          - id: "hard-1"
+            seed: 200001
+            games: 15
+            difficulty: "hard"
+            flags: ""
+          - id: "hard-2"
+            seed: 200016
+            games: 15
+            difficulty: "hard"
+            flags: ""
+          - id: "hard-3"
+            seed: 200031
+            games: 15
+            difficulty: "hard"
+            flags: ""
+          - id: "hard-4"
+            seed: 200046
+            games: 15
+            difficulty: "hard"
+            flags: ""
+
+          # Unconstrained Regions Scenarios
+          - id: "unconstrained-1"
+            seed: 300001
+            games: 8
+            difficulty: "hard"
+            flags: "--unconstrained-regions"
+          - id: "unconstrained-2"
+            seed: 300009
+            games: 8
+            difficulty: "hard"
+            flags: "--unconstrained-regions"
+          - id: "unconstrained-3"
+            seed: 300017
+            games: 8
+            difficulty: "hard"
+            flags: "--unconstrained-regions"
+          - id: "unconstrained-4"
+            seed: 300025
+            games: 8
+            difficulty: "hard"
+            flags: "--unconstrained-regions"
+
+    steps:
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Download Pre-compiled Binaries
+        uses: actions/download-artifact@v8
+        with:
+          name: precompiled-qa-harness.${{ github.sha }}
+          path: dist/
+
+      - name: Ensure Output Directory Exists
+        run: mkdir -p sweep-output
+
+      - name: Execute QA Scenario Sweep
+        run: >
+          dotnet dist/AeroNext.QaHarness.dll
+          --seed ${{ matrix.seed }}
+          --games ${{ matrix.games }}
+          --difficulty ${{ matrix.difficulty }}
+          ${{ matrix.flags }}
+          > sweep-output/${{ matrix.id }}.log
+
+      - name: Upload Scenario Logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: qa-log-${{ matrix.id }}
+          path: sweep-output/
+          retention-days: 5
