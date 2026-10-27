@@ -64,6 +64,6 @@ jobs:
       - name: Sweep 2
         run: dotnet run --project src/AeroNext.QaHarness -c Release -- --games 4 --seed 1 --difficulty hard > coverage/deterministic-sweep-2.log
 
-    - name: Compare content with diff
+    - name: Compare Sweeps with diff
       run: |
         diff coverage/deterministic-sweep-1.log coverage/deterministic-sweep-2.log || echo "Differences found between the two sweeps."
