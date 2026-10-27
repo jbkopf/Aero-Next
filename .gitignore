@@ -12,3 +12,9 @@ TestResults/
 ## OS
 .DS_Store
 Thumbs.db
+
+## Test output
+coverage/
+coverage-report/
+sweep-output/
+dist/
