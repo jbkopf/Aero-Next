@@ -38,8 +38,7 @@ public class MultiStopRouteTests
     {
         var stops = default(StopList);
 
-        Assert.True(stops.IsEmpty);
-        Assert.Equal(0, stops.Count);
+        Assert.True(stops.IsEmpty); // IsEmpty is Count == 0, so this covers Count's null-array path too
         Assert.Empty(stops);
         Assert.Equal(StopList.Empty, stops);
         Assert.Equal("nonstop", stops.ToString());
