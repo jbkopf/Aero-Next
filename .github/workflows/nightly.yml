@@ -90,7 +90,7 @@ jobs:
           - id: "hard-1"
             seed: 200001
             games: 15
-            difficulty: "hard"
+            difficulty: "bogus"
             flags: ""
           - id: "hard-2"
             seed: 200016
