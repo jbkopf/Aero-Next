@@ -432,6 +432,159 @@ public class AiToolkitTests
         Assert.Single(orders.OfType<HireExecutiveOrder>());
     }
 
+    // --- LongIdleUnitsToShed (idle-fleet cleanup) ---
+
+    // 1955 + (41 - 1) / 4 = 1965 - past ObsoleteType's 1960 end of production.
+    private const int Quarter1965 = 41;
+    private static readonly AircraftType ObsoleteType = Aircraft with { Id = "old", EndOfManufactureYear = 1960 };
+
+    private static StrategyContext MakeIdleContext(AirlineFleet fleet, System.Collections.Generic.IReadOnlyDictionary<int, int>? idleQuarters, int quarterNumber = Quarter1965)
+    {
+        // Two cities, so an unserved pair with real demand exists - keeps the
+        // older stranded-unit rule from retiring these units on its own.
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 50);
+        var dest = MakeCity("dest", Region.NorthAmerica, 1, 1, 50);
+        return MakeContext(new[] { home, dest }, home, fleet: fleet, quarterNumber: quarterNumber) with { IdleQuartersByUnitId = idleQuarters };
+    }
+
+    private static System.Collections.Generic.Dictionary<int, int> Streak(int unitId, int quarters) => new() { [unitId] = quarters };
+
+    private static System.Collections.Generic.List<int> Shed(StrategyContext context, System.Collections.Generic.HashSet<int>? reserved = null) =>
+        AiToolkit.LongIdleUnitsToShed(context, reserved ?? new System.Collections.Generic.HashSet<int>(), Array.Empty<QuarterOrder>()).Select(u => u.Id).ToList();
+
+    [Fact]
+    public void LongIdleUnitsToShed_LeasedUnitAtThreshold_IsReturned()
+    {
+        var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, Aircraft, quantity: 1, FleetOwnershipMode.Leased);
+
+        Assert.Equal(new[] { 1 }, Shed(MakeIdleContext(fleet, Streak(1, AiToolkit.LeasedIdleReturnQuarters))));
+    }
+
+    [Fact]
+    public void LongIdleUnitsToShed_LeasedUnitJustBelowThreshold_IsKept()
+    {
+        var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, Aircraft, quantity: 1, FleetOwnershipMode.Leased);
+
+        Assert.Empty(Shed(MakeIdleContext(fleet, Streak(1, AiToolkit.LeasedIdleReturnQuarters - 1))));
+    }
+
+    [Fact]
+    public void LongIdleUnitsToShed_OwnedObsoleteUnitAtThreshold_IsRetired()
+    {
+        var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, ObsoleteType, quantity: 1, FleetOwnershipMode.Owned);
+
+        Assert.Equal(new[] { 1 }, Shed(MakeIdleContext(fleet, Streak(1, AiToolkit.OwnedObsoleteIdleRetireQuarters))));
+    }
+
+    [Fact]
+    public void LongIdleUnitsToShed_OwnedObsoleteUnitJustBelowThreshold_IsKept()
+    {
+        var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, ObsoleteType, quantity: 1, FleetOwnershipMode.Owned);
+
+        Assert.Empty(Shed(MakeIdleContext(fleet, Streak(1, AiToolkit.OwnedObsoleteIdleRetireQuarters - 1))));
+    }
+
+    [Fact]
+    public void LongIdleUnitsToShed_OwnedTypeStillInProduction_IsKeptHoweverLongIdle()
+    {
+        var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, Aircraft, quantity: 1, FleetOwnershipMode.Owned);
+
+        Assert.Empty(Shed(MakeIdleContext(fleet, Streak(1, 200))));
+    }
+
+    [Fact]
+    public void LongIdleUnitsToShed_OwnedTypeInItsFinalProductionYear_IsKept()
+    {
+        // 1955 + (25 - 1) / 4 = 1961; a type whose run ends in 1961 is still purchasable that year.
+        var lastYearType = Aircraft with { Id = "last", EndOfManufactureYear = 1961 };
+        var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, lastYearType, quantity: 1, FleetOwnershipMode.Owned);
+
+        Assert.Empty(Shed(MakeIdleContext(fleet, Streak(1, 50), quarterNumber: 25)));
+    }
+
+    [Fact]
+    public void LongIdleUnitsToShed_ReservedUnit_IsKept()
+    {
+        var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, Aircraft, quantity: 1, FleetOwnershipMode.Leased);
+
+        Assert.Empty(Shed(MakeIdleContext(fleet, Streak(1, 10)), reserved: new System.Collections.Generic.HashSet<int> { 1 }));
+    }
+
+    [Fact]
+    public void LongIdleUnitsToShed_AssignedUnit_IsKept()
+    {
+        // A stale streak entry can't retire a unit that's flying now.
+        var fleet = FleetLedger.Assign(FleetLedger.ApplyDelivery(AirlineFleet.Empty, Aircraft, quantity: 1, FleetOwnershipMode.Leased), 1, "home-dest");
+
+        Assert.Empty(Shed(MakeIdleContext(fleet, Streak(1, 10))));
+    }
+
+    [Fact]
+    public void LongIdleUnitsToShed_NoIdleTracking_ShedsNothing()
+    {
+        var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, Aircraft, quantity: 1, FleetOwnershipMode.Leased);
+
+        Assert.Empty(Shed(MakeIdleContext(fleet, idleQuarters: null)));
+    }
+
+    [Fact]
+    public void LongIdleUnitsToShed_UnitMissingFromTracking_ReadsAsZeroQuarters()
+    {
+        var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, Aircraft, quantity: 1, FleetOwnershipMode.Leased);
+
+        Assert.Empty(Shed(MakeIdleContext(fleet, IdleStreaks.Empty)));
+    }
+
+    [Fact]
+    public void LongIdleUnitsToShed_MixedFleet_ReturnsOnlyQualifyingUnitsInIdOrder()
+    {
+        var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, ObsoleteType, quantity: 1, FleetOwnershipMode.Owned); // 1: obsolete, long idle
+        fleet = FleetLedger.ApplyDelivery(fleet, Aircraft, quantity: 1, FleetOwnershipMode.Owned);                     // 2: current type, long idle
+        fleet = FleetLedger.ApplyDelivery(fleet, Aircraft, quantity: 1, FleetOwnershipMode.Leased);                    // 3: leased, long idle
+        fleet = FleetLedger.ApplyDelivery(fleet, Aircraft, quantity: 1, FleetOwnershipMode.Leased);                    // 4: leased, short idle
+        var idle = new System.Collections.Generic.Dictionary<int, int> { [3] = 9, [1] = 9, [2] = 9, [4] = 1 };
+
+        Assert.Equal(new[] { 1, 3 }, Shed(MakeIdleContext(fleet, idle)));
+    }
+
+    [Fact]
+    public void LongIdleUnitsToShed_AlreadyRetiredThisQuarter_IsNotRetiredTwice()
+    {
+        var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, Aircraft, quantity: 1, FleetOwnershipMode.Leased);
+        var context = MakeIdleContext(fleet, Streak(1, 10));
+
+        Assert.Empty(AiToolkit.LongIdleUnitsToShed(context, new System.Collections.Generic.HashSet<int>(), new QuarterOrder[] { new RetireAircraftOrder(1) }));
+    }
+
+    [Fact]
+    public void ApplyManagementToolkit_LongIdleLeasedUnitAlsoStranded_GetsExactlyOneRetireOrder()
+    {
+        // Single city: the older stranded-unit rule also wants this unit gone
+        // (no route uses its type, no unserved pair exists) - still one order.
+        var home = MakeCity("home", Region.NorthAmerica, 0, 0, 50);
+        var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, Aircraft, quantity: 1, FleetOwnershipMode.Leased);
+        var context = MakeContext(new[] { home }, home, fleet: fleet, quarterNumber: Quarter1965) with { IdleQuartersByUnitId = Streak(1, 10) };
+        var orders = new System.Collections.Generic.List<QuarterOrder>();
+
+        AiToolkit.ApplyManagementToolkit(context, orders, new System.Collections.Generic.HashSet<int>(), spentBeforeToolkit: 0);
+
+        Assert.Equal(1, Assert.Single(orders.OfType<RetireAircraftOrder>()).UnitId);
+    }
+
+    [Fact]
+    public void ApplyManagementToolkit_LongIdleObsoleteOwnedUnit_RetiredWhereStrandedRuleAloneKeepsIt()
+    {
+        var fleet = FleetLedger.ApplyDelivery(AirlineFleet.Empty, ObsoleteType, quantity: 1, FleetOwnershipMode.Owned);
+        var before = new System.Collections.Generic.List<QuarterOrder>();
+        var after = new System.Collections.Generic.List<QuarterOrder>();
+
+        AiToolkit.ApplyManagementToolkit(MakeIdleContext(fleet, idleQuarters: null), before, new System.Collections.Generic.HashSet<int>(), spentBeforeToolkit: 0);
+        AiToolkit.ApplyManagementToolkit(MakeIdleContext(fleet, Streak(1, AiToolkit.OwnedObsoleteIdleRetireQuarters)), after, new System.Collections.Generic.HashSet<int>(), spentBeforeToolkit: 0);
+
+        Assert.Empty(before.OfType<RetireAircraftOrder>());
+        Assert.Equal(1, Assert.Single(after.OfType<RetireAircraftOrder>()).UnitId);
+    }
+
     // --- RecentlyShrunkPairKeys / RecentlyClosedPairKeys (M55) ---
 
     [Fact]

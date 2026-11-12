@@ -166,6 +166,11 @@ public static class FullGameRunner
         // every other real field here already has falls out naturally,
         // with no extra bookkeeping needed.
         var routeHistoryByAirlineName = names.ToDictionary(n => n, n => new Dictionary<(string, string), AiRouteHistory>());
+
+        // Idle-fleet cleanup: consecutive idle quarter-ends per unit (see
+        // IdleStreaks), advanced from each quarter's post-orders fleet and
+        // read by next quarter's StrategyContext.
+        var idleQuartersByAirlineName = names.ToDictionary(n => n, n => IdleStreaks.Empty);
         var humanCount = seats.Count(s => s.IsHuman);
 
         // M18's AircraftQuantity (2), real data never consumed until now —
@@ -395,6 +400,7 @@ public static class FullGameRunner
                         LastQuarterRivalOffersByPair: lastQuarterRivalOffersByName[name],
                         QuarterNumber: q,
                         RouteHistoryByPair: routeHistoryByAirlineName[name],
+                        IdleQuartersByUnitId: idleQuartersByAirlineName[name],
                         InDistress: finances[name].InDistress,
                         RivalPresenceByPairKey: rivalPresenceByPairKey,
                         RivalPresenceByRegion: rivalPresenceByRegion,
@@ -500,6 +506,7 @@ public static class FullGameRunner
                 routes[name] = result.Routes;
                 caps[name] = result.ActionCap;
                 fleets[name] = result.UpdatedFleet!;
+                idleQuartersByAirlineName[name] = IdleStreaks.Advance(idleQuartersByAirlineName[name], fleets[name]);
                 appliedOrdersByName[name] = result.AppliedOrders;
                 routeCampaignsApplied += result.AppliedOrders.OfType<RouteMarketingOrder>().Count();
                 networkCampaignsApplied += result.AppliedOrders.OfType<NetworkMarketingOrder>().Count();

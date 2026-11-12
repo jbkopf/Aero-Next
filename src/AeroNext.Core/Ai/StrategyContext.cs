@@ -169,6 +169,13 @@ namespace AeroNext.Core.Ai;
 /// caller that never computed a real restriction list) falls back to
 /// EraAvailableTypes at each read site - byte-identical to before this
 /// field existed, not a silent "nothing is purchasable" reading.
+///
+/// Idle-fleet cleanup: IdleQuartersByUnitId - how many consecutive
+/// quarter-ends each of this airline's own units has sat idle (see
+/// Fleet.IdleStreaks), maintained by the real loop. Null (no tracking)
+/// means the long-idle return/retire rule in
+/// AiToolkit.ApplyManagementToolkit never fires - the same permissive
+/// default every field here uses.
 /// </summary>
 public sealed record StrategyContext(
     IReadOnlyList<Route> CurrentRoutes,
@@ -197,7 +204,8 @@ public sealed record StrategyContext(
     IReadOnlyList<AircraftType>? PurchasableTypes = null,
     IReadOnlyList<AircraftType>? LeasableTypes = null,
     IReadOnlyDictionary<(string OriginId, string DestinationId), long>? LastQuarterTurnedAwayByRoute = null,
-    IReadOnlyDictionary<(string OriginId, string DestinationId), IReadOnlyList<Competition.PairOffer>>? LastQuarterRivalOffersByPair = null)
+    IReadOnlyDictionary<(string OriginId, string DestinationId), IReadOnlyList<Competition.PairOffer>>? LastQuarterRivalOffersByPair = null,
+    IReadOnlyDictionary<int, int>? IdleQuartersByUnitId = null)
 {
     /// <summary>Aircraft types this airline could newly purchase right now - PurchasableTypes when a real restricted list was computed, EraAvailableTypes otherwise.</summary>
     public IReadOnlyList<AircraftType> PurchasableOrEraTypes => PurchasableTypes ?? EraAvailableTypes;

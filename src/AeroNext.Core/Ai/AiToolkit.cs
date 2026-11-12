@@ -1,6 +1,7 @@
 using AeroNext.Core.Airlines;
 using AeroNext.Core.Competition;
 using AeroNext.Core.Finance;
+using AeroNext.Core.Fleet;
 using AeroNext.Core.Turns;
 using AeroNext.Core.World;
 
@@ -1726,6 +1727,60 @@ public static class AiToolkit
     private const int SustainedSingleAircraftClosureThreshold = 8;
 
     /// <summary>
+    /// Idle-fleet cleanup: a leased unit idle this many consecutive
+    /// quarter-ends is handed back (RetireAircraftOrder on a leased unit
+    /// returns it, ending its LeaseFeeRatePerQuarter charge). A 300-game
+    /// Hard sweep found about two-thirds of all idle aircraft-time came
+    /// from spells of 21+ quarters, with single-quarter waits (a lease
+    /// delivered a quarter ahead of its route) only 3-4% - 4 quarters
+    /// sits well clear of the short waits while catching the chronic
+    /// ones, including leased 1950s piston types still paying fees in
+    /// the 2000s.
+    /// </summary>
+    public const int LeasedIdleReturnQuarters = 4;
+
+    /// <summary>
+    /// Idle-fleet cleanup: an owned unit idle this many consecutive
+    /// quarter-ends is sold (RetirementResaleFraction) - but only once its
+    /// type is out of production. Deliberately narrower than "retire
+    /// anything idle": a current type parked for a while is still a
+    /// plausible next route's aircraft, while an obsolete one is only ever
+    /// a museum piece the AI forgot about (the same sweep's most-idle
+    /// late-game types were Comet, DC-7, Trident and IL-18).
+    /// </summary>
+    public const int OwnedObsoleteIdleRetireQuarters = 8;
+
+    /// <summary>
+    /// Idle-fleet cleanup: idle units this airline should hand back or sell
+    /// this quarter (see LeasedIdleReturnQuarters/
+    /// OwnedObsoleteIdleRetireQuarters). Skips units already reserved for
+    /// this quarter's own orders and units an earlier rule already retired.
+    /// Empty when IdleQuartersByUnitId isn't tracked. Ordered by unit id.
+    /// </summary>
+    public static IReadOnlyList<FleetUnit> LongIdleUnitsToShed(StrategyContext context, IReadOnlySet<int> reservedUnitIds, IReadOnlyList<QuarterOrder> ordersSoFar)
+    {
+        if (context.IdleQuartersByUnitId is null)
+        {
+            return Array.Empty<FleetUnit>();
+        }
+
+        var alreadyRetired = ordersSoFar.OfType<RetireAircraftOrder>().Select(o => o.UnitId).ToHashSet();
+        var year = Timeline.YearForQuarter(context.QuarterNumber);
+
+        return context.OwnFleet.Idle
+            .Where(u => !reservedUnitIds.Contains(u.Id) && !alreadyRetired.Contains(u.Id))
+            .Where(u =>
+            {
+                var idleQuarters = context.IdleQuartersByUnitId.GetValueOrDefault(u.Id);
+                return u.Mode == FleetOwnershipMode.Leased
+                    ? idleQuarters >= LeasedIdleReturnQuarters
+                    : idleQuarters >= OwnedObsoleteIdleRetireQuarters && !Timeline.IsAvailableForPurchase(u.Type, year);
+            })
+            .OrderBy(u => u.Id)
+            .ToList();
+    }
+
+    /// <summary>
     /// A single-aircraft, uncontested route unprofitable for at least
     /// SustainedSingleAircraftClosureThreshold quarters in a row - its
     /// full streak, including quarters before the mid-game.
@@ -2093,6 +2148,11 @@ public static class AiToolkit
             .OrderBy(u => u.Id))
         {
             orders.Add(new RetireAircraftOrder(stranded.Id));
+        }
+
+        foreach (var longIdle in LongIdleUnitsToShed(context, reservedUnitIds, orders))
+        {
+            orders.Add(new RetireAircraftOrder(longIdle.Id));
         }
 
         if (context.AvailableCash is not null && context.CurrentDebtBalance is not null

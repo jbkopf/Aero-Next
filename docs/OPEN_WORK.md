@@ -907,6 +907,16 @@ ranges, before and after) and wins spread more evenly. Full numbers:
     fee, and re-leasing later costs 1.5% upfront plus a quarter's wait -
     so a leased-only return rule is a different, untested proposition.
     Measure before shipping.
+    **Done for every strategy (2026-11-12),** via the shared toolkit:
+    `AiToolkit.LongIdleUnitsToShed` returns a leased unit idle 4+
+    consecutive quarters and sells an owned one idle 8+ only once its type
+    is out of production (never a current type, so not the removed
+    "retire every idle unit" rule). Over the same 300 Hard games, seeds
+    1-300: idle share of fleet 10.0%→4.3% (2010s: 14.5%→4.8%), idle lease
+    fees per airline-quarter $0.84M→$0.22M, bankruptcies unchanged
+    (5 seats in 3 games, both runs). Side effect: wins land earlier (mean
+    win quarter ~121→~113). Regional wins moved within noise except
+    SouthWestAsia 33→45 (about 2 standard deviations); SouthAmerica 12→10.
 
   **Replacement only pays off if the aircraft will be kept long enough.**
   A lease costs 4% of the price per quarter (`FinancialResolver.LeaseFeeRatePerQuarter`);
